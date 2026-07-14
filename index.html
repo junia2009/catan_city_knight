@@ -58,7 +58,9 @@
   #main { flex: 1; display: flex; min-height: 0; }
   #board-wrap { flex: 1; min-width: 0; position: relative; }
   #board { width: 100%; height: 100%; display: block; cursor: pointer; }
-  #fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  #board3d { position: absolute; inset: 0; display: none; }
+  #board3d canvas { display: block; cursor: pointer; }
+  #fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
 
   /* ---------- サイドパネル ---------- */
   #side {
@@ -295,6 +297,12 @@
 <body>
   <div id="topbar">
     <h1><span class="hexmark">⬡</span> カタン</h1>
+    <label>表示
+      <select id="view">
+        <option value="3d" selected>3D</option>
+        <option value="2d">2D</option>
+      </select>
+    </label>
     <label>モード
       <select id="mode">
         <option value="base">基本</option>
@@ -313,6 +321,7 @@
   <div id="main">
     <div id="board-wrap">
       <canvas id="board"></canvas>
+      <div id="board3d"></div>
       <div id="fx"></div>
     </div>
     <div id="side">
@@ -330,6 +339,14 @@
     </div>
   </div>
   <div id="dialog-root"></div>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.min.js",
+      "three/addons/": "./vendor/addons/"
+    }
+  }
+  </script>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

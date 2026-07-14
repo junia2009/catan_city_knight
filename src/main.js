@@ -22,11 +22,15 @@ import { pickEdge, pickHex, pickVertex } from './input.js';
 const HUMAN = 0;
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
+const board3dWrap = document.getElementById('board3d');
 
 let state = null;
 let ui = null;
 let view = null;
 let cpuTimer = null;
+let viewMode = '3d'; // '2d' | '3d'
+let renderer3d = null;
+let renderer3dFailed = false;
 
 function freshUi() {
   return {
@@ -158,6 +162,7 @@ function hasPulse() {
 }
 
 function renderBoard(time = performance.now()) {
+  if (canvas.clientWidth === 0 || canvas.clientHeight === 0) return; // 非表示中は描かない
   resizeCanvas();
   view = drawBoard(ctx, canvas.clientWidth, canvas.clientHeight, state, ui, time);
 }
@@ -167,18 +172,55 @@ function animLoop(time) {
   animId = hasPulse() ? requestAnimationFrame(animLoop) : null;
 }
 
+// 3D レンダラーは必要になったときに読み込む(WebGL 不可なら 2D にフォールバック)
+async function ensureRenderer3d() {
+  if (renderer3d || renderer3dFailed) return renderer3d;
+  try {
+    const { Board3D } = await import('./render3d/board3d.js');
+    renderer3d = new Board3D(board3dWrap);
+    attach3dInput();
+  } catch (e) {
+    console.error('3D初期化に失敗:', e);
+    renderer3dFailed = true;
+    viewMode = '2d';
+    const sel = document.getElementById('view');
+    if (sel) sel.value = '2d';
+    if (ui) {
+      ui.toast = '3D表示を初期化できないため2D表示にします';
+      refresh();
+    }
+  }
+  return renderer3d;
+}
+
+function applyViewMode() {
+  const is3d = viewMode === '3d' && renderer3d && !renderer3dFailed;
+  canvas.style.display = is3d ? 'none' : 'block';
+  board3dWrap.style.display = is3d ? 'block' : 'none';
+  if (is3d) renderer3d.onResize();
+}
+
 function refresh() {
   syncUi();
   ui.highlights = computeHighlights();
   ui.selected = ui.pending ?? (ui.pendingVertex ? { vertexId: ui.pendingVertex } : null);
-  renderBoard();
-  renderHUD(state, ui);
-  if (hasPulse()) {
-    if (animId == null) animId = requestAnimationFrame(animLoop);
-  } else if (animId != null) {
-    cancelAnimationFrame(animId);
-    animId = null;
+  applyViewMode();
+  if (viewMode === '3d' && renderer3d) {
+    if (animId != null) {
+      cancelAnimationFrame(animId);
+      animId = null;
+    }
+    renderer3d.update(state, ui);
+  } else {
+    renderBoard();
+    if (hasPulse()) {
+      if (animId == null) animId = requestAnimationFrame(animLoop);
+    } else if (animId != null) {
+      cancelAnimationFrame(animId);
+      animId = null;
+    }
   }
+  renderHUD(state, ui);
 }
 
 // 資源獲得のフローティング表示(ロール後)
@@ -278,31 +320,27 @@ function scheduleCpu() {
 
 // ---- 盤面クリック ----
 
-canvas.addEventListener('click', (e) => {
-  if (!state || !view) return;
-  const rect = canvas.getBoundingClientRect();
-  const px = e.clientX - rect.left;
-  const py = e.clientY - rect.top;
+// 盤面クリックの共通処理。pick(kind, candidates) → id | null
+// (2D は最近傍探索、3D はレイキャストで実装が差し替わる)
+function boardClick(pick) {
+  if (!state) return;
   const m = ui.mode;
   ui.toast = null;
 
   if (m === 'setup-settlement') {
-    const vid = pickVertex(view, px, py, ui.highlights.vertices ?? []);
+    const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid) {
       ui.pendingVertex = vid;
       ui.mode = 'setup-road';
     }
-  } else if (m === 'setup-road') {
-    const eid = pickEdge(view, px, py, ui.highlights.edges ?? []);
-    if (eid) ui.pending = { edgeId: eid };
-  } else if (m === 'build-road') {
-    const eid = pickEdge(view, px, py, ui.highlights.edges ?? []);
+  } else if (m === 'setup-road' || m === 'build-road') {
+    const eid = pick('edge', ui.highlights.edges ?? []);
     if (eid) ui.pending = { edgeId: eid };
   } else if (m === 'build-settlement' || m === 'build-city') {
-    const vid = pickVertex(view, px, py, ui.highlights.vertices ?? []);
+    const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid) ui.pending = { vertexId: vid };
   } else if (m === 'move-robber') {
-    const hid = pickHex(view, px, py, ui.highlights.hexes ?? []);
+    const hid = pick('hex', ui.highlights.hexes ?? []);
     if (hid) {
       const targets = stealableTargets(state, hid, HUMAN);
       if (targets.length > 0) {
@@ -313,26 +351,52 @@ canvas.addEventListener('click', (e) => {
       }
     }
   } else if (m === 'play-road-building') {
-    const eid = pickEdge(view, px, py, ui.highlights.edges ?? []);
+    const eid = pick('edge', ui.highlights.edges ?? []);
     if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
   } else if (['build-knight', 'build-wall', 'move-knight', 'raze-city'].includes(m)) {
-    const vid = pickVertex(view, px, py, ui.highlights.vertices ?? []);
+    const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid) ui.pending = { vertexId: vid };
   } else if (m === 'play-bishop') {
-    const hid = pickHex(view, px, py, ui.highlights.hexes ?? []);
+    const hid = pick('hex', ui.highlights.hexes ?? []);
     if (hid) ui.pending = { hexId: hid };
   } else if (m === 'idle' && state.mode === 'cak') {
     // 自分の騎士をクリック → 行動メニュー
     const myKnights = Object.keys(state.knights).filter(
       (v) => state.knights[v].player === HUMAN,
     );
-    const vid = pickVertex(view, px, py, myKnights);
+    const vid = pick('vertex', myKnights);
     if (vid && state.currentPlayer === HUMAN && !state.awaiting && state.turnFlags.rolled) {
       ui.dialog = { type: 'knight', vertexId: vid };
     }
   }
   refresh();
+}
+
+canvas.addEventListener('click', (e) => {
+  if (!view) return;
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  boardClick((kind, cands) => {
+    if (kind === 'vertex') return pickVertex(view, px, py, cands);
+    if (kind === 'edge') return pickEdge(view, px, py, cands);
+    return pickHex(view, px, py, cands);
+  });
 });
+
+// 3D: OrbitControls のドラッグとクリックを区別する
+function attach3dInput() {
+  const el = renderer3d.renderer.domElement;
+  let downX = 0, downY = 0;
+  el.addEventListener('pointerdown', (e) => {
+    downX = e.clientX;
+    downY = e.clientY;
+  });
+  el.addEventListener('click', (e) => {
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return; // ドラッグは無視
+    boardClick((kind, cands) => renderer3d.pick(kind, e.clientX, e.clientY, cands));
+  });
+}
 
 // ---- 確定/キャンセル ----
 
@@ -551,6 +615,12 @@ document.addEventListener('click', (e) => {
 
 window.addEventListener('resize', () => state && refresh());
 
+document.getElementById('view').addEventListener('change', async (e) => {
+  viewMode = e.target.value;
+  if (viewMode === '3d') await ensureRenderer3d();
+  refresh();
+});
+
 // デバッグ・テスト用フック(シード制御と合わせて再現検証に使う)
 window.catanDebug = {
   getState: () => state,
@@ -559,3 +629,4 @@ window.catanDebug = {
 };
 
 newGame();
+if (viewMode === '3d') ensureRenderer3d().then(() => state && refresh());
