@@ -652,6 +652,8 @@ export class Board3D {
     // 誤操作で真俯瞰や水平近くまで倒れると盤面が分からなくなるため範囲を絞る
     this.controls.minPolarAngle = Math.PI * 0.17;
     this.controls.maxPolarAngle = Math.PI * 0.36;
+    this.controls.minAzimuthAngle = -Math.PI / 3;
+    this.controls.maxAzimuthAngle = Math.PI / 3;
     this.controls.rotateSpeed = 0.65;
     this.controls.enablePan = false;
 
@@ -696,6 +698,9 @@ export class Board3D {
 
     this.diceAnims = [];
     this.prevPieceKeys = null;
+    this.boardYaw = 0; // 盤面構図の方位角(縦持ちでは 90°)
+    this.tokenRot = 0; // トークンの数字が構図から正立して見える回転角(実測値)
+    this.tokens = []; // 数字トークン(構図に合わせて向きを変える)
 
     this.raycaster = new THREE.Raycaster();
     this.pulseMats = [];
@@ -892,17 +897,41 @@ export class Board3D {
     this._fitCamera(w, h);
   }
 
-  // アスペクト比に合わせて島全体が収まるよう FOV とカメラ距離を調整
-  // (縦持ちスマホでは島が横にはみ出すため)
+  // 既定のカメラ方向(boardYaw = 盤面の見せ方の方位角)
+  _defaultDir() {
+    return new THREE.Vector3(
+      Math.sin(this.boardYaw) * 0.69, 0.72, Math.cos(this.boardYaw) * 0.69,
+    ).normalize();
+  }
+
+  // アスペクト比に合わせて構図を調整する。
+  // カタンの島は横長の六角形なので、縦持ちでは 90° 回した構図にして
+  // 長軸を縦に向ける(横長のまま幅に収めると小さく「横向き」に見える)。
   _fitCamera(w, h) {
     const aspect = w / h;
+    const portrait = aspect < 0.8;
     this.camera.aspect = aspect;
-    this.camera.fov = aspect < 0.8 ? 58 : 45;
-    const R = 5.8; // 島 + 余白の半径
+    this.camera.fov = portrait ? 55 : 45;
+
+    const yaw = portrait ? Math.PI / 2 : 0;
+    if (yaw !== this.boardYaw) {
+      this.boardYaw = yaw;
+      this.tokenRot = portrait ? Math.PI : 0;
+      // 構図の切り替え: 既定方位へ移動し、数字トークンも読める向きに回す
+      this.camera.position.copy(this.controls.target).addScaledVector(this._defaultDir(), 12);
+      for (const t of this.tokens) t.rotation.y = this.tokenRot;
+      // 方位角は構図中心 ±60° に制限(「横向き」への迷子を防ぐ)
+      this.controls.minAzimuthAngle = yaw - Math.PI / 3;
+      this.controls.maxAzimuthAngle = yaw + Math.PI / 3;
+    }
+
+    // 画面横方向に収めるべき半径: 縦構図では島の短軸(≈4.5)、横構図では長軸(≈5.8)
+    const Rh = portrait ? 4.6 : 5.8;
+    const Rv = portrait ? 5.6 : 5.0;
     const halfV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
-    const dist = Math.max(R / halfV, R / (halfV * aspect));
+    const dist = Math.max(Rv / halfV, Rh / (halfV * aspect));
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
-    if (dir.lengthSq() < 0.5) dir.set(0, 0.72, 0.69);
+    if (dir.lengthSq() < 0.5) dir.copy(this._defaultDir());
     this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
     this.controls.maxDistance = Math.max(24, dist * 1.3);
     this.scene.fog.near = dist + 14;
@@ -919,6 +948,7 @@ export class Board3D {
     this.staticGroup.clear();
     this.pickGroup.clear();
     this.diceGroup.clear();
+    this.tokens = [];
     this.diceAnims = [];
     this.prevPieceKeys = null;
     this.robberHex = null;
@@ -963,8 +993,10 @@ export class Board3D {
           mat(0xe8ddbe),
         ]);
         token.position.set(c.x, TILE_TOP + 0.025, c.y);
+        token.rotation.y = this.tokenRot; // 構図に合わせて数字を読める向きに
         token.castShadow = true;
         this.staticGroup.add(token);
+        this.tokens.push(token);
       }
     }
 
@@ -1205,7 +1237,7 @@ export class Board3D {
   // 視点を初期アングルに戻す
   resetView() {
     this.controls.target.set(0, 0, 0.4);
-    this.camera.position.set(0, 8.6, 8.2);
+    this.camera.position.copy(this.controls.target).addScaledVector(this._defaultDir(), 12);
     this._w = this._h = 0; // 距離の再フィットを強制
     this.onResize();
   }

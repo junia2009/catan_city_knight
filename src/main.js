@@ -689,6 +689,7 @@ window.catanDebug = {
   newGameWith: (patch) => { Object.assign(settings, patch); newGame(); },
   getUi: () => ui,
   screenPos: (kind, id) => (renderer3d ? renderer3d.screenPos(kind, id) : null),
+  getRenderer: () => renderer3d,
 };
 
 newGame();
