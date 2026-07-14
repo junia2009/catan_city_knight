@@ -13,7 +13,7 @@ import {
   legalSetupEdges,
 } from './ai/legal-moves.js';
 import { drawBoard } from './render/board-render.js';
-import { renderHUD } from './render/hud-render.js';
+import { renderHUD, RES_ICON } from './render/hud-render.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 
 const HUMAN = 0;
@@ -109,13 +109,58 @@ function computeHighlights() {
   return {};
 }
 
+// ハイライト表示中はパルスアニメーションのため毎フレーム再描画する
+let animId = null;
+
+function hasPulse() {
+  const h = ui.highlights;
+  return (
+    !!(h && (h.vertices?.length || h.edges?.length || h.hexes?.length)) || !!ui.selected
+  );
+}
+
+function renderBoard(time = performance.now()) {
+  resizeCanvas();
+  view = drawBoard(ctx, canvas.clientWidth, canvas.clientHeight, state, ui, time);
+}
+
+function animLoop(time) {
+  renderBoard(time);
+  animId = hasPulse() ? requestAnimationFrame(animLoop) : null;
+}
+
 function refresh() {
   syncUi();
   ui.highlights = computeHighlights();
   ui.selected = ui.pending ?? (ui.pendingVertex ? { vertexId: ui.pendingVertex } : null);
-  resizeCanvas();
-  view = drawBoard(ctx, canvas.clientWidth, canvas.clientHeight, state, ui);
+  renderBoard();
   renderHUD(state, ui);
+  if (hasPulse()) {
+    if (animId == null) animId = requestAnimationFrame(animLoop);
+  } else if (animId != null) {
+    cancelAnimationFrame(animId);
+    animId = null;
+  }
+}
+
+// 資源獲得のフローティング表示(ロール後)
+function showGainFx(before) {
+  const fxEl = document.getElementById('fx');
+  let row = 0;
+  for (const p of state.players) {
+    const gains = RESOURCES.filter((r) => p.resources[r] > before[p.id][r]).map(
+      (r) => `${RES_ICON[r]}+${p.resources[r] - before[p.id][r]}`,
+    );
+    if (!gains.length) continue;
+    const div = document.createElement('div');
+    div.className = 'gain';
+    div.textContent = `${p.name} ${gains.join(' ')}`;
+    div.style.left = 'calc(50% - 80px)';
+    div.style.top = `${34 + row * 36}px`;
+    fxEl.appendChild(div);
+    setTimeout(() => div.remove(), 1700);
+    row++;
+  }
 }
 
 function resizeCanvas() {
@@ -133,6 +178,8 @@ function resizeCanvas() {
 
 function doAction(action) {
   ui.toast = null;
+  const before =
+    action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
   try {
     state = dispatch(state, action);
   } catch (e) {
@@ -140,6 +187,7 @@ function doAction(action) {
     refresh();
     return false;
   }
+  if (before) showGainFx(before);
   ui.mode = 'idle';
   ui.pending = null;
   ui.pendingVertex = null;
@@ -169,8 +217,11 @@ function scheduleCpu() {
   cpuTimer = setTimeout(() => {
     const action = chooseAction(state, pid);
     if (!action) return;
+    const before =
+      action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
     try {
       state = dispatch(state, action);
+      if (before) showGainFx(before);
     } catch (e) {
       // CPU の手が通らない場合は安全側でターン終了を試みる
       console.error('CPU action failed:', e.message, action);
