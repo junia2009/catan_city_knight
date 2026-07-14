@@ -7,8 +7,9 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { LAYOUT, PIPS, TERRAIN_RESOURCE } from '../rules/board.js';
+import { LAYOUT, PIPS } from '../rules/board.js';
 import { RES_JP_SHORT } from '../state.js';
+import { BARBARIAN_TRACK_LENGTH as BARB_TRACK } from '../rules/cak/barbarians.js';
 
 export const PLAYER_COLORS_3D = [0xf04343, 0x3f8ef7, 0xffa02e, 0xb06ef0];
 const PLAYER_COLORS_DARK_3D = [0xa32020, 0x2358a8, 0xc06f14, 0x7a42b8];
@@ -574,6 +575,54 @@ function easeOutBack(k) {
   return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2);
 }
 
+// ---- 蛮族船(+X 方向を進行方向として組む)----
+
+function makeBarbarianShip() {
+  const g = new THREE.Group();
+  const hullMat = mat(0x4a3423, { roughness: 0.9 });
+
+  const hull = new THREE.Mesh(GEO.box, hullMat);
+  hull.scale.set(0.85, 0.2, 0.34);
+  hull.position.y = 0.12;
+  const prow = new THREE.Mesh(GEO.cone, hullMat);
+  prow.scale.set(0.17, 0.3, 0.17);
+  prow.rotation.z = -Math.PI / 2;
+  prow.position.set(0.56, 0.12, 0);
+  const stern = new THREE.Mesh(GEO.cone, hullMat);
+  stern.scale.set(0.17, 0.22, 0.17);
+  stern.rotation.z = Math.PI / 2;
+  stern.position.set(-0.52, 0.12, 0);
+
+  const mast = new THREE.Mesh(GEO.pole, mat(0x3a2a1a));
+  mast.scale.set(1.2, 1.7, 1.2);
+  mast.position.y = 0.6;
+
+  const sailShape = new THREE.Shape();
+  sailShape.moveTo(0, 0);
+  sailShape.lineTo(0, 0.62);
+  sailShape.quadraticCurveTo(0.42, 0.34, 0.34, 0);
+  sailShape.closePath();
+  const sail = new THREE.Mesh(
+    new THREE.ShapeGeometry(sailShape),
+    new THREE.MeshStandardMaterial({
+      color: 0xa03030, roughness: 0.8, side: THREE.DoubleSide, flatShading: true,
+    }),
+  );
+  sail.position.set(0.02, 0.32, 0);
+  const flag = new THREE.Mesh(
+    new THREE.ShapeGeometry(sailShape),
+    new THREE.MeshStandardMaterial({
+      color: 0x24212b, roughness: 0.8, side: THREE.DoubleSide, flatShading: true,
+    }),
+  );
+  flag.scale.setScalar(0.25);
+  flag.position.set(0.02, 1.0, 0);
+
+  g.add(hull, prow, stern, mast, sail, flag);
+  g.traverse((o) => { o.castShadow = true; });
+  return g;
+}
+
 // ---- 本体 ----
 
 export class Board3D {
@@ -633,6 +682,16 @@ export class Board3D {
     this.robberHex = null;
     this.robberAnim = null;
 
+    // 蛮族船(cak): トラックの前進とともに島へ近づく
+    this.ship = makeBarbarianShip();
+    this.ship.scale.setScalar(1.3);
+    this.ship.visible = false;
+    this.scene.add(this.ship);
+    this.shipBase = new THREE.Vector3();
+    this.shipAnim = null;
+    this.barbPos = null;
+    this.attackFxList = [];
+
     this.diceAnims = [];
     this.prevPieceKeys = null;
 
@@ -653,6 +712,7 @@ export class Board3D {
       this._tickDice(t);
       this._tickRobber(t);
       this._tickSpawns(t);
+      this._tickShip(t);
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(loop);
     };
@@ -766,6 +826,60 @@ export class Board3D {
     }
   }
 
+  // 襲来トラック position(0..7) → 海上の位置。進むほど島に近づく
+  _shipSpot(pos) {
+    const t = Math.min(pos / BARB_TRACK, 1);
+    const angle = Math.PI * (0.4 - 0.12 * t);
+    const r = 8.4 - 3.4 * t;
+    return new THREE.Vector3(Math.cos(angle) * r, SEA_Y, Math.sin(angle) * r);
+  }
+
+  _spawnAttackFx(pos) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.45, 0.7, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xff4030, transparent: true, opacity: 0.9,
+        side: THREE.DoubleSide, depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(pos.x, SEA_Y + 0.06, pos.z);
+    this.scene.add(ring);
+    this.attackFxList.push({ mesh: ring, t0: performance.now() });
+  }
+
+  _tickShip(now) {
+    if (this.ship.visible) {
+      if (this.shipAnim) {
+        const { from, to, t0, dur } = this.shipAnim;
+        const k = Math.max(0, Math.min((now - t0) / dur, 1));
+        const e = k * k * (3 - 2 * k);
+        this.shipBase.lerpVectors(from, to, e);
+        if (k >= 1) this.shipAnim = null;
+      }
+      // 波の上下 + 島の方角を向く
+      this.ship.position.copy(this.shipBase);
+      this.ship.position.y = SEA_Y + 0.03 + Math.sin(now / 620) * 0.035;
+      this.ship.rotation.z = Math.sin(now / 900) * 0.05;
+      const dx = -this.shipBase.x;
+      const dz = -this.shipBase.z;
+      this.ship.rotation.y = -Math.atan2(dz, dx);
+    }
+    for (let i = this.attackFxList.length - 1; i >= 0; i--) {
+      const fx = this.attackFxList[i];
+      const k = (now - fx.t0) / 950;
+      if (k >= 1) {
+        this.scene.remove(fx.mesh);
+        fx.mesh.geometry.dispose();
+        fx.mesh.material.dispose();
+        this.attackFxList.splice(i, 1);
+      } else {
+        fx.mesh.scale.setScalar(1 + k * 5.5);
+        fx.mesh.material.opacity = 0.9 * (1 - k);
+      }
+    }
+  }
+
   onResize() {
     const w = this.container.clientWidth || 1;
     const h = this.container.clientHeight || 1;
@@ -787,6 +901,8 @@ export class Board3D {
     this.prevPieceKeys = null;
     this.robberHex = null;
     this.robberAnim = null;
+    this.barbPos = null;
+    this.shipAnim = null;
 
     // 海
     const sea = new THREE.Mesh(
@@ -945,6 +1061,28 @@ export class Board3D {
       }
     }
     this.prevPieceKeys = keys;
+
+    // 蛮族船: トラック前進で島へ接近、襲来(リセット)で衝撃波を出して引き返す
+    if (state.mode === 'cak') {
+      this.ship.visible = true;
+      const pos = state.barbarians.position;
+      if (this.barbPos == null) {
+        this.shipBase.copy(this._shipSpot(pos));
+        this.barbPos = pos;
+      } else if (pos !== this.barbPos) {
+        const from = this.shipBase.clone();
+        const to = this._shipSpot(pos);
+        if (pos < this.barbPos) {
+          this._spawnAttackFx(from); // 襲来!
+          this.shipAnim = { from, to, t0: performance.now() + 500, dur: 1800 };
+        } else {
+          this.shipAnim = { from, to, t0: performance.now(), dur: 1000 };
+        }
+        this.barbPos = pos;
+      }
+    } else {
+      this.ship.visible = false;
+    }
 
     // 盗賊: ヘックスが変わったらジャンプ移動
     if (this.robberHex !== state.board.robber) {
