@@ -165,9 +165,11 @@ function renderHand(state, ui) {
   }
   const handEl = el('hand');
   handEl.className = ui.handOpen ? 'open' : 'closed';
+  // main行(資源+商品)は枚数固定なのでモバイルでは均等幅1行に収める。
+  // extra行(進歩/発展カード)は枚数可変なので別行。
   handEl.innerHTML =
-    res + (coms ? `<div class="sep"></div>${coms}` : '') +
-    (extra ? `<div class="sep"></div>${extra}` : '');
+    `<div class="hrow main">${res}${coms ? `<div class="sep"></div>${coms}` : ''}</div>` +
+    (extra ? `<div class="hrow extra">${extra}</div>` : '');
 }
 
 function renderControls(state, ui) {
