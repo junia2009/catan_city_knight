@@ -382,12 +382,16 @@
   body.mobile .card .label { font-size: 8.5px; }
   body.mobile .card .cnt { font-size: 14px; }
   body.mobile #controls {
-    margin-left: 0; flex-wrap: nowrap; overflow-x: auto;
-    padding-bottom: 2px; scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    margin-left: 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
   }
-  body.mobile #controls::-webkit-scrollbar { display: none; }
-  body.mobile #controls button { flex: none; padding: 10px 13px; font-size: 12.5px; }
+  body.mobile #controls button {
+    padding: 11px 2px; font-size: 12px;
+    white-space: nowrap; overflow: hidden;
+    min-width: 0;
+  }
 
   /* ダイアログ → ボトムシート */
   body.mobile .overlay { align-items: flex-end; }

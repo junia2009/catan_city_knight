@@ -175,31 +175,47 @@ function renderControls(state, ui) {
   const myTurn = state.phase === 'main' && state.currentPlayer === HUMAN && !state.awaiting;
   const rolled = state.turnFlags.rolled;
   const cak = state.mode === 'cak';
+  const mobile = document.body.classList.contains('mobile');
   const btn = (act, label, enabled, title = '') =>
     `<button data-act="${act}" ${enabled ? '' : 'disabled'} title="${title}">${label}</button>`;
 
-  const common = [
-    `<button class="mobile-only ${ui.handOpen ? 'primary' : ''}" data-act="hand-toggle">🂠 手札 ${totalCards(p)}</button>`,
-    btn('roll', '🎲 ロール', myTurn && !rolled),
-    btn('mode:road', '🛤️ 道', myTurn && rolled && canAfford(p, COSTS.road), '🪵1 🧱1'),
-    btn('mode:settlement', '🏠 開拓地', myTurn && rolled && canAfford(p, COSTS.settlement), '🪵1 🧱1 🐑1 🌾1'),
-    btn('mode:city', '🏰 都市', myTurn && rolled && canAfford(p, COSTS.city), '🌾2 🪨3'),
+  const buildBtns = (road, settlement, city) => [
+    btn('mode:road', road, myTurn && rolled && canAfford(p, COSTS.road), '🪵1 🧱1'),
+    btn('mode:settlement', settlement, myTurn && rolled && canAfford(p, COSTS.settlement), '🪵1 🧱1 🐑1 🌾1'),
+    btn('mode:city', city, myTurn && rolled && canAfford(p, COSTS.city), '🌾2 🪨3'),
   ];
-  const tail = [
-    btn('trade-open', '⚖️ 交易', myTurn && rolled),
-    btn('end-turn', '⏭ ターン終了', myTurn && rolled),
+  const cakBtns = (knight, wall, improve) => [
+    btn('mode:knight', knight, myTurn && rolled && canAfford(p, KNIGHT_COSTS.build), '🐑1 🪨1(不活性で配置)'),
+    btn('mode:wall', wall, myTurn && rolled && canAfford(p, WALL_COST), '🧱2(手札上限+2)'),
+    btn('improve-open', improve, myTurn && rolled, '商品で都市を改良'),
   ];
-  const middle = cak
-    ? [
-        btn('mode:knight', '⚔️ 騎士', myTurn && rolled && canAfford(p, KNIGHT_COSTS.build), '🐑1 🪨1(不活性で配置)'),
-        btn('mode:wall', '🧱 城壁', myTurn && rolled && canAfford(p, WALL_COST), '🧱2(手札上限+2)'),
-        btn('improve-open', '🏙 改良', myTurn && rolled, '商品で都市を改良'),
-      ]
-    : [
-        btn('buy-dev', '📜 カード', myTurn && rolled && canAfford(p, COSTS.devCard) && state.bank.devDeck.length > 0, '🐑1 🌾1 🪨1'),
-      ];
+  const devBtn = (label) =>
+    btn('buy-dev', label, myTurn && rolled && canAfford(p, COSTS.devCard) && state.bank.devDeck.length > 0, '🐑1 🌾1 🪨1');
 
-  el('controls').innerHTML = [...common, ...middle, ...tail].join('');
+  let list;
+  if (mobile) {
+    // モバイル: 最大2段のグリッド。ロール/終了は同時に使わないので1ボタンに統合
+    const flow = myTurn && rolled
+      ? btn('end-turn', '⏭終了', true)
+      : btn('roll', '🎲ロール', myTurn && !rolled);
+    list = [
+      `<button class="${ui.handOpen ? 'primary' : ''}" data-act="hand-toggle">🂠 ${totalCards(p)}</button>`,
+      flow,
+      ...buildBtns('🛤道', '🏠開拓', '🏰都市'),
+      ...(cak ? cakBtns('⚔️騎士', '🧱城壁', '🏙改良') : [devBtn('📜カード')]),
+      btn('trade-open', '⚖️交易', myTurn && rolled),
+    ];
+  } else {
+    list = [
+      btn('roll', '🎲 ロール', myTurn && !rolled),
+      ...buildBtns('🛤️ 道', '🏠 開拓地', '🏰 都市'),
+      ...(cak ? cakBtns('⚔️ 騎士', '🧱 城壁', '🏙 改良') : [devBtn('📜 カード')]),
+      btn('trade-open', '⚖️ 交易', myTurn && rolled),
+      btn('end-turn', '⏭ ターン終了', myTurn && rolled),
+    ];
+  }
+
+  el('controls').innerHTML = list.join('');
 }
 
 function statusText(state, ui) {
