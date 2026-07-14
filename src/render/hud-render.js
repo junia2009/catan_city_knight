@@ -164,7 +164,6 @@ function renderHand(state, ui) {
       .join('');
   }
   const handEl = el('hand');
-  handEl.className = ui.handOpen ? 'open' : 'closed';
   // main行(資源+商品)は枚数固定なのでモバイルでは均等幅1行に収める。
   // extra行(進歩/発展カード)は枚数可変なので別行。
   handEl.innerHTML =
@@ -196,12 +195,11 @@ function renderControls(state, ui) {
 
   let list;
   if (mobile) {
-    // モバイル: 最大2段のグリッド。ロール/終了は同時に使わないので1ボタンに統合
+    // モバイル: 4列×2段のグリッド。ロール/終了は同時に使わないので1ボタンに統合
     const flow = myTurn && rolled
       ? btn('end-turn', '⏭終了', true)
       : btn('roll', '🎲ロール', myTurn && !rolled);
     list = [
-      `<button class="${ui.handOpen ? 'primary' : ''}" data-act="hand-toggle">🂠 ${totalCards(p)}</button>`,
       flow,
       ...buildBtns('🛤道', '🏠開拓', '🏰都市'),
       ...(cak ? cakBtns('⚔️騎士', '🧱城壁', '🏙改良') : [devBtn('📜カード')]),

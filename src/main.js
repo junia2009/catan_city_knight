@@ -62,7 +62,6 @@ function freshUi() {
     toast: null,
     highlights: {},
     selected: null,
-    handOpen: false, // モバイルの手札シート
     expandedPlayer: null, // モバイルのプレイヤーチップ展開
   };
 }
@@ -524,10 +523,6 @@ document.addEventListener('click', (e) => {
     case 'set-mode': settings.mode = arg; refresh(); return;
     case 'set-cpu': settings.cpuCount = Number(arg); refresh(); return;
 
-    case 'hand-toggle':
-      ui.handOpen = !ui.handOpen;
-      refresh();
-      return;
     case 'pexpand':
       ui.expandedPlayer = ui.expandedPlayer === Number(arg) ? null : Number(arg);
       refresh();
