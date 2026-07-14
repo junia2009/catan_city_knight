@@ -267,7 +267,12 @@ function doAction(action) {
     refresh();
     return false;
   }
-  if (before) showGainFx(before);
+  if (before) {
+    showGainFx(before);
+    if (viewMode === '3d' && renderer3d && state.dice) {
+      renderer3d.rollDice(state.dice, state.mode === 'cak' ? state.eventDie : null);
+    }
+  }
   ui.mode = 'idle';
   ui.pending = null;
   ui.pendingVertex = null;
@@ -303,7 +308,12 @@ function scheduleCpu() {
       action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
     try {
       state = dispatch(state, action);
-      if (before) showGainFx(before);
+      if (before) {
+        showGainFx(before);
+        if (viewMode === '3d' && renderer3d && state.dice) {
+          renderer3d.rollDice(state.dice, state.mode === 'cak' ? state.eventDie : null);
+        }
+      }
     } catch (e) {
       // CPU の手が通らない場合は安全側でターン終了を試みる
       console.error('CPU action failed:', e.message, action);

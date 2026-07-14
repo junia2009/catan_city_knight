@@ -10,8 +10,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { LAYOUT, PIPS, TERRAIN_RESOURCE } from '../rules/board.js';
 import { RES_JP_SHORT } from '../state.js';
 
-export const PLAYER_COLORS_3D = [0xe04848, 0x3d7dd8, 0xf0973c, 0x9d5fd8];
-const PLAYER_COLORS_DARK_3D = [0x9c2626, 0x22508f, 0xb3651a, 0x6a3a99];
+export const PLAYER_COLORS_3D = [0xf04343, 0x3f8ef7, 0xffa02e, 0xb06ef0];
+const PLAYER_COLORS_DARK_3D = [0xa32020, 0x2358a8, 0xc06f14, 0x7a42b8];
 
 const TERRAIN_COLORS = {
   forest: 0x3a7a4c,
@@ -138,6 +138,11 @@ function mat(color, opts = {}) {
     }));
   }
   return MAT_CACHE.get(key);
+}
+
+// コマ用: 少し発色を強く(視認性優先)
+function pieceMat(color) {
+  return mat(color, { roughness: 0.55, emissive: color, emissiveIntensity: 0.12 });
 }
 
 const PICK_MAT = new THREE.MeshBasicMaterial({
@@ -350,6 +355,16 @@ function decorateHex(group, hid, terrain) {
 
 // ---- ピース ----
 
+// 建物の足元に敷くプレイヤー色の台座(視認性のため色面積を増やす)
+function basePlate(pid, r = 0.2) {
+  const m = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r * 1.1, 0.035, 16),
+    pieceMat(PLAYER_COLORS_DARK_3D[pid]),
+  );
+  m.position.y = 0.018;
+  return m;
+}
+
 function makeRoad(eid, pid, opacity = 1) {
   const [v1, v2] = LAYOUT.edges[eid].v.map(vpos);
   const dir = v2.clone().sub(v1);
@@ -360,11 +375,11 @@ function makeRoad(eid, pid, opacity = 1) {
       ? new THREE.MeshStandardMaterial({
           color: PLAYER_COLORS_3D[pid], transparent: true, opacity, flatShading: true,
         })
-      : mat(PLAYER_COLORS_3D[pid]),
+      : pieceMat(PLAYER_COLORS_3D[pid]),
   );
-  m.scale.set(len * 0.6, 0.075, 0.08);
+  m.scale.set(len * 0.62, 0.11, 0.11);
   m.position.copy(v1).add(v2).multiplyScalar(0.5);
-  m.position.y = TILE_TOP + 0.038;
+  m.position.y = TILE_TOP + 0.055;
   m.rotation.y = -Math.atan2(dir.z, dir.x);
   m.castShadow = true;
   return m;
@@ -372,13 +387,14 @@ function makeRoad(eid, pid, opacity = 1) {
 
 function makeSettlement(pid) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(GEO.box, mat(PLAYER_COLORS_3D[pid]));
-  body.scale.set(0.2, 0.13, 0.16);
-  body.position.y = 0.065;
-  const roof = new THREE.Mesh(GEO.cone, mat(PLAYER_COLORS_DARK_3D[pid]));
-  roof.scale.set(0.15, 0.11, 0.13);
+  g.add(basePlate(pid, 0.2));
+  const body = new THREE.Mesh(GEO.box, pieceMat(PLAYER_COLORS_3D[pid]));
+  body.scale.set(0.28, 0.19, 0.23);
+  body.position.y = 0.125;
+  const roof = new THREE.Mesh(GEO.cone, mat(PLAYER_COLORS_DARK_3D[pid], { roughness: 0.55 }));
+  roof.scale.set(0.22, 0.16, 0.19);
   roof.rotation.y = Math.PI / 4;
-  roof.position.y = 0.185;
+  roof.position.y = 0.3;
   g.add(body, roof);
   g.traverse((o) => { o.castShadow = true; });
   return g;
@@ -386,20 +402,21 @@ function makeSettlement(pid) {
 
 function makeCity(pid) {
   const g = new THREE.Group();
-  const base = new THREE.Mesh(GEO.box, mat(PLAYER_COLORS_3D[pid]));
-  base.scale.set(0.3, 0.13, 0.18);
-  base.position.y = 0.065;
-  const tower = new THREE.Mesh(GEO.box, mat(PLAYER_COLORS_3D[pid]));
-  tower.scale.set(0.13, 0.3, 0.16);
-  tower.position.set(-0.085, 0.15, 0);
-  const roof = new THREE.Mesh(GEO.cone, mat(PLAYER_COLORS_DARK_3D[pid]));
-  roof.scale.set(0.11, 0.1, 0.12);
+  g.add(basePlate(pid, 0.25));
+  const base = new THREE.Mesh(GEO.box, pieceMat(PLAYER_COLORS_3D[pid]));
+  base.scale.set(0.42, 0.19, 0.26);
+  base.position.y = 0.125;
+  const tower = new THREE.Mesh(GEO.box, pieceMat(PLAYER_COLORS_3D[pid]));
+  tower.scale.set(0.19, 0.44, 0.23);
+  tower.position.set(-0.12, 0.22, 0);
+  const roof = new THREE.Mesh(GEO.cone, mat(PLAYER_COLORS_DARK_3D[pid], { roughness: 0.55 }));
+  roof.scale.set(0.16, 0.15, 0.17);
   roof.rotation.y = Math.PI / 4;
-  roof.position.set(-0.085, 0.35, 0);
-  const roof2 = new THREE.Mesh(GEO.cone, mat(PLAYER_COLORS_DARK_3D[pid]));
-  roof2.scale.set(0.1, 0.08, 0.11);
+  roof.position.set(-0.12, 0.51, 0);
+  const roof2 = new THREE.Mesh(GEO.cone, mat(PLAYER_COLORS_DARK_3D[pid], { roughness: 0.55 }));
+  roof2.scale.set(0.15, 0.11, 0.16);
   roof2.rotation.y = Math.PI / 4;
-  roof2.position.set(0.075, 0.17, 0);
+  roof2.position.set(0.1, 0.27, 0);
   g.add(base, tower, roof, roof2);
   g.traverse((o) => { o.castShadow = true; });
   return g;
@@ -407,17 +424,21 @@ function makeCity(pid) {
 
 function makeKnight(k) {
   const g = new THREE.Group();
-  const color = k.active ? PLAYER_COLORS_3D[k.player] : 0x8a8f96;
-  const body = new THREE.Mesh(GEO.pawnBody, mat(color));
-  body.position.y = 0.1;
-  const head = new THREE.Mesh(GEO.pawnHead, mat(color));
-  head.position.y = 0.23;
+  g.add(basePlate(k.player, 0.17));
+  const color = k.active ? PLAYER_COLORS_3D[k.player] : 0x9aa0a8;
+  const bodyMat = k.active ? pieceMat(color) : mat(color);
+  const body = new THREE.Mesh(GEO.pawnBody, bodyMat);
+  body.scale.setScalar(1.45);
+  body.position.y = 0.17;
+  const head = new THREE.Mesh(GEO.pawnHead, bodyMat);
+  head.scale.setScalar(1.45);
+  head.position.y = 0.36;
   g.add(body, head);
   for (let i = 0; i < k.level; i++) {
-    const ring = new THREE.Mesh(GEO.ring, mat(0xf5f2e8, { roughness: 0.5 }));
+    const ring = new THREE.Mesh(GEO.ring, mat(0xffffff, { roughness: 0.4 }));
     ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.055 + i * 0.045;
-    ring.scale.setScalar(1 - i * 0.18);
+    ring.scale.setScalar(1.5 - i * 0.25);
+    ring.position.y = 0.09 + i * 0.065;
     g.add(ring);
   }
   g.traverse((o) => { o.castShadow = true; });
@@ -426,16 +447,131 @@ function makeKnight(k) {
 
 function makeRobber() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.07, 0.11, 0.24, 10),
-    mat(0x2b2830),
+  // 足元の赤リングで目立たせる
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.24, 0.03, 8, 24),
+    new THREE.MeshBasicMaterial({ color: 0xd93030, transparent: true, opacity: 0.85 }),
   );
-  body.position.y = 0.12;
-  const head = new THREE.Mesh(GEO.pawnHead, mat(0x2b2830));
-  head.position.y = 0.27;
-  g.add(body, head);
-  g.traverse((o) => { o.castShadow = true; });
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.03;
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.16, 0.36, 10),
+    mat(0x24212b, { roughness: 0.5 }),
+  );
+  body.position.y = 0.18;
+  const head = new THREE.Mesh(GEO.pawnHead, mat(0x24212b, { roughness: 0.5 }));
+  head.scale.setScalar(1.5);
+  head.position.y = 0.42;
+  g.add(ring, body, head);
+  body.castShadow = true;
+  head.castShadow = true;
   return g;
+}
+
+// ---- 3D ダイス ----
+
+function diePipTexture(n, bg = '#f5f2e8', fg = '#22242a') {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const g = cv.getContext('2d');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 128, 128);
+  g.fillStyle = fg;
+  const P = { 1: [[64, 64]], 2: [[36, 36], [92, 92]], 3: [[32, 32], [64, 64], [96, 96]],
+    4: [[38, 38], [90, 38], [38, 90], [90, 90]],
+    5: [[36, 36], [92, 36], [64, 64], [36, 92], [92, 92]],
+    6: [[38, 32], [90, 32], [38, 64], [90, 64], [38, 96], [90, 96]] };
+  for (const [x, y] of P[n]) {
+    g.beginPath();
+    g.arc(x, y, 11, 0, Math.PI * 2);
+    g.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function eventFaceTexture(face) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const g = cv.getContext('2d');
+  if (face === 'ship') {
+    g.fillStyle = '#3a3540';
+    g.fillRect(0, 0, 128, 128);
+    // 船体と帆
+    g.fillStyle = '#e8e2d2';
+    g.beginPath();
+    g.moveTo(64, 22); g.lineTo(64, 78); g.lineTo(30, 78); g.closePath();
+    g.fill();
+    g.beginPath();
+    g.moveTo(70, 34); g.lineTo(70, 78); g.lineTo(98, 78); g.closePath();
+    g.fill();
+    g.fillStyle = '#b6543a';
+    g.beginPath();
+    g.moveTo(22, 86); g.lineTo(106, 86); g.lineTo(88, 106); g.lineTo(40, 106);
+    g.closePath();
+    g.fill();
+  } else {
+    const conf = {
+      trade: ['#d8b12c', '交'],
+      politics: ['#3f8f5f', '政'],
+      science: ['#3f6fd8', '科'],
+    }[face];
+    g.fillStyle = conf[0];
+    g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#fff';
+    g.font = '800 72px "Hiragino Sans", "Noto Sans JP", sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(conf[1], 64, 68);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function dieMaterials(faceTextures) {
+  return faceTextures.map(
+    (tex) => new THREE.MeshStandardMaterial({ map: tex, roughness: 0.35 }),
+  );
+}
+
+// 各面を上(+Y)に向けるための基準クォータニオン
+const AXIS_UP_QUAT = {
+  px: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, Math.PI / 2)),
+  nx: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -Math.PI / 2)),
+  py: new THREE.Quaternion(),
+  ny: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI, 0, 0)),
+  pz: new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)),
+  nz: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)),
+};
+// BoxGeometry の面順 [+x, -x, +y, -y, +z, -z] への値の割り当て(1-6標準ダイス)
+const VALUE_AXIS = { 3: 'px', 4: 'nx', 1: 'py', 6: 'ny', 2: 'pz', 5: 'nz' };
+const EVENT_AXES = { ship: 'py', trade: 'ny', politics: 'pz', science: 'nz' };
+
+const DIE_SIZE = 0.52;
+const DIE_GEO = new THREE.BoxGeometry(DIE_SIZE, DIE_SIZE, DIE_SIZE);
+let DIE_MATS = null;
+function getDieMats() {
+  if (!DIE_MATS) {
+    const order = [3, 4, 1, 6, 2, 5];
+    DIE_MATS = {
+      plain: dieMaterials(order.map((n) => diePipTexture(n))),
+      red: dieMaterials(order.map((n) => diePipTexture(n, '#c8403c', '#ffffff'))),
+      yellow: dieMaterials(order.map((n) => diePipTexture(n, '#e8c34a', '#2a2416'))),
+      event: dieMaterials([
+        eventFaceTexture('ship'), eventFaceTexture('ship'), eventFaceTexture('ship'),
+        eventFaceTexture('trade'), eventFaceTexture('politics'), eventFaceTexture('science'),
+      ]),
+    };
+  }
+  return DIE_MATS;
+}
+
+function easeOutBack(k) {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2);
 }
 
 // ---- 本体 ----
@@ -469,8 +605,8 @@ export class Board3D {
     this.controls.enablePan = false;
 
     // ライティング
-    this.scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x3a5068, 0.85));
-    const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
+    this.scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x46617a, 1.05));
+    const sun = new THREE.DirectionalLight(0xfff2dd, 2.4);
     sun.position.set(7, 12, 5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -485,7 +621,20 @@ export class Board3D {
     this.dynamicGroup = new THREE.Group();
     this.highlightGroup = new THREE.Group();
     this.pickGroup = new THREE.Group();
-    this.scene.add(this.staticGroup, this.dynamicGroup, this.highlightGroup, this.pickGroup);
+    this.diceGroup = new THREE.Group();
+    this.scene.add(
+      this.staticGroup, this.dynamicGroup, this.highlightGroup,
+      this.pickGroup, this.diceGroup,
+    );
+
+    // 盗賊は永続メッシュ(移動をアニメーションさせるため)
+    this.robber = makeRobber();
+    this.scene.add(this.robber);
+    this.robberHex = null;
+    this.robberAnim = null;
+
+    this.diceAnims = [];
+    this.prevPieceKeys = null;
 
     this.raycaster = new THREE.Raycaster();
     this.pulseMats = [];
@@ -501,10 +650,120 @@ export class Board3D {
       this.controls.update();
       const a = 0.35 + 0.25 * Math.sin(t / 260);
       for (const m of this.pulseMats) m.opacity = a;
+      this._tickDice(t);
+      this._tickRobber(t);
+      this._tickSpawns(t);
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
+  }
+
+  _robberPos(hid) {
+    const c = hexCenterOf(hid);
+    return new THREE.Vector3(c.x, TILE_TOP, c.y - 0.42);
+  }
+
+  // ---- アニメーション ----
+
+  // ロール演出: カメラ手前の海にダイスが転がり落ちる
+  rollDice(values, eventFace = null) {
+    const mats = getDieMats();
+    this.diceGroup.clear();
+    this.diceAnims = [];
+
+    const dir = this.camera.position.clone().sub(this.controls.target);
+    dir.y = 0;
+    if (dir.lengthSq() < 0.01) dir.set(0, 0, 1);
+    dir.normalize();
+    const side = new THREE.Vector3(-dir.z, 0, dir.x);
+    // 島の右手前の海上に着地させる(画面内に収まる位置)
+    const center = this.controls.target.clone()
+      .addScaledVector(dir, 4.2)
+      .addScaledVector(side, 2.6);
+    center.y = SEA_Y;
+
+    const dice = values.map((v, i) => ({
+      value: v,
+      mats: eventFace ? (i === 0 ? mats.red : mats.yellow) : mats.plain,
+      axis: VALUE_AXIS[v],
+    }));
+    if (eventFace) dice.push({ value: eventFace, mats: mats.event, axis: EVENT_AXES[eventFace] });
+
+    const now = performance.now();
+    dice.forEach((d, i) => {
+      const mesh = new THREE.Mesh(DIE_GEO, d.mats);
+      mesh.castShadow = true;
+      const land = center.clone().addScaledVector(side, (i - (dice.length - 1) / 2) * 0.9);
+      const start = land.clone()
+        .addScaledVector(dir, -2.2)
+        .addScaledVector(side, (Math.random() - 0.5) * 0.6);
+      start.y = SEA_Y + 2.4;
+      mesh.position.copy(start);
+      const target = new THREE.Quaternion()
+        .setFromEuler(new THREE.Euler(0, Math.random() * Math.PI * 2, 0))
+        .multiply(AXIS_UP_QUAT[d.axis]);
+      this.diceGroup.add(mesh);
+      this.diceAnims.push({
+        mesh, start, land, target,
+        t0: now + i * 90,
+        dur: 1150,
+        h0: 1.5 + Math.random() * 0.6,
+        spin: new THREE.Vector3(
+          (Math.random() - 0.5) * 22, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 22,
+        ),
+      });
+    });
+  }
+
+  _tickDice(now) {
+    if (!this.diceAnims.length) return;
+    let allDone = true;
+    for (const d of this.diceAnims) {
+      const k = Math.max(0, Math.min((now - d.t0) / d.dur, 1));
+      if (k < 1) allDone = false;
+      const he = 1 - Math.pow(1 - k, 2);
+      d.mesh.position.lerpVectors(d.start, d.land, he);
+      const bounce = Math.abs(Math.cos(k * Math.PI * 2.4)) * Math.pow(1 - k, 2) * d.h0;
+      d.mesh.position.y = d.land.y + DIE_SIZE / 2 + 0.01 + bounce;
+      if (k < 0.7) {
+        const damp = (1 - k) * 0.016;
+        d.mesh.rotation.x += d.spin.x * damp;
+        d.mesh.rotation.y += d.spin.y * damp;
+        d.mesh.rotation.z += d.spin.z * damp;
+      } else {
+        d.mesh.quaternion.slerp(d.target, 0.22);
+      }
+    }
+    if (allDone) {
+      for (const d of this.diceAnims) d.mesh.quaternion.copy(d.target);
+      this.diceAnims = [];
+    }
+  }
+
+  _tickRobber(now) {
+    if (!this.robberAnim) return;
+    const { from, to, t0 } = this.robberAnim;
+    const k = Math.min((now - t0) / 650, 1);
+    const e = k * k * (3 - 2 * k); // smoothstep
+    this.robber.position.lerpVectors(from, to, e);
+    this.robber.position.y = from.y + Math.sin(e * Math.PI) * 1.3;
+    if (k >= 1) {
+      this.robber.position.copy(to);
+      this.robberAnim = null;
+    }
+  }
+
+  _tickSpawns(now) {
+    for (const child of this.dynamicGroup.children) {
+      const t0 = child.userData.spawnAt;
+      if (t0 == null) continue;
+      const k = Math.min((now - t0) / 380, 1);
+      const s = k >= 1 ? 1 : Math.max(0.05, easeOutBack(k));
+      const base = child.userData.baseScale;
+      child.scale.set(base.x * s, base.y * s, base.z * s);
+      if (k >= 1) delete child.userData.spawnAt;
+    }
   }
 
   onResize() {
@@ -523,6 +782,11 @@ export class Board3D {
     this.gameKey = key;
     this.staticGroup.clear();
     this.pickGroup.clear();
+    this.diceGroup.clear();
+    this.diceAnims = [];
+    this.prevPieceKeys = null;
+    this.robberHex = null;
+    this.robberAnim = null;
 
     // 海
     const sea = new THREE.Mesh(
@@ -619,11 +883,18 @@ export class Board3D {
     this.setGame(state);
     this.dynamicGroup.clear();
 
+    // key を持たせて「新しく置かれたコマ」を検出し、出現ポップさせる
+    const addPiece = (key, obj) => {
+      obj.userData.key = key;
+      obj.userData.baseScale = obj.scale.clone();
+      this.dynamicGroup.add(obj);
+    };
+
     for (const [eid, road] of Object.entries(state.roads)) {
-      this.dynamicGroup.add(makeRoad(eid, road.player));
+      addPiece(`road:${eid}:${road.player}`, makeRoad(eid, road.player));
     }
     for (const eid of ui.pendingEdges ?? []) {
-      this.dynamicGroup.add(makeRoad(eid, 0, 0.5));
+      addPiece(`pending:${eid}`, makeRoad(eid, 0, 0.5));
     }
 
     for (const vid of Object.keys(state.walls ?? {})) {
@@ -632,15 +903,16 @@ export class Board3D {
       w.rotation.z = Math.PI * 0.65;
       w.position.copy(vpos(vid));
       w.position.y += 0.03;
+      w.scale.setScalar(1.4);
       w.castShadow = true;
-      this.dynamicGroup.add(w);
+      addPiece(`wall:${vid}`, w);
     }
 
     for (const [vid, b] of Object.entries(state.buildings)) {
       const piece = b.type === 'city' ? makeCity(b.player) : makeSettlement(b.player);
       piece.position.copy(vpos(vid));
       piece.rotation.y = (hashStr(vid) % 628) / 100;
-      this.dynamicGroup.add(piece);
+      addPiece(`bld:${vid}:${b.type}:${b.player}`, piece);
     }
 
     for (const vid of Object.values(state.metropolis ?? {})) {
@@ -650,20 +922,44 @@ export class Board3D {
         mat(0xffd24a, { metalness: 0.6, roughness: 0.35, emissive: 0x9c7a10, emissiveIntensity: 0.35 }),
       );
       crown.position.copy(vpos(vid));
-      crown.position.y += 0.52;
-      this.dynamicGroup.add(crown);
+      crown.position.y += 0.72;
+      crown.scale.setScalar(1.3);
+      addPiece(`metro:${vid}`, crown);
     }
 
     for (const [vid, k] of Object.entries(state.knights ?? {})) {
       const piece = makeKnight(k);
       piece.position.copy(vpos(vid));
-      this.dynamicGroup.add(piece);
+      addPiece(`knight:${vid}:${k.level}:${k.active}`, piece);
     }
 
-    const robber = makeRobber();
-    const rc = hexCenterOf(state.board.robber);
-    robber.position.set(rc.x, TILE_TOP, rc.y - 0.42);
-    this.dynamicGroup.add(robber);
+    // 出現ポップ(初回構築時は除く)
+    const keys = new Set(this.dynamicGroup.children.map((c) => c.userData.key));
+    if (this.prevPieceKeys) {
+      const now = performance.now();
+      for (const child of this.dynamicGroup.children) {
+        if (!this.prevPieceKeys.has(child.userData.key)) {
+          child.userData.spawnAt = now;
+          child.scale.setScalar(0.05);
+        }
+      }
+    }
+    this.prevPieceKeys = keys;
+
+    // 盗賊: ヘックスが変わったらジャンプ移動
+    if (this.robberHex !== state.board.robber) {
+      const to = this._robberPos(state.board.robber);
+      if (this.robberHex == null) {
+        this.robber.position.copy(to);
+      } else {
+        this.robberAnim = {
+          from: this._robberPos(this.robberHex),
+          to,
+          t0: performance.now(),
+        };
+      }
+      this.robberHex = state.board.robber;
+    }
 
     this._updateHighlights(state, ui);
   }
