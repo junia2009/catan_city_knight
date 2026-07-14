@@ -17,6 +17,33 @@ export function totalResources(player) {
   return RESOURCES.reduce((s, r) => s + player.resources[r], 0);
 }
 
+// 手札総数(資源 + 商品)。7 の捨て札判定に使う。
+export function totalCards(player) {
+  const com = player.commodities
+    ? Object.values(player.commodities).reduce((a, b) => a + b, 0)
+    : 0;
+  return totalResources(player) + com;
+}
+
+// 手札上限(基本 7、城壁1枚につき +2。設計書 §9.6)
+export function handLimit(state, pid) {
+  if (state.mode !== 'cak') return 7;
+  const walls = Object.values(state.walls).filter((p) => p === pid).length;
+  return 7 + walls * 2;
+}
+
+export const WALL_LIMIT = 3;
+export const WALL_COST = { brick: 2 };
+
+export function canBuildWall(state, pid, vid) {
+  const b = state.buildings[vid];
+  if (!b || b.player !== pid || b.type !== 'city') return '自分の都市の下にのみ建てられます';
+  if (state.walls[vid] != null) return 'すでに城壁があります';
+  const count = Object.values(state.walls).filter((p) => p === pid).length;
+  if (count >= WALL_LIMIT) return '城壁は3枚までです';
+  return null;
+}
+
 export function canAfford(player, cost) {
   return Object.entries(cost).every(([r, n]) => player.resources[r] >= n);
 }
@@ -48,6 +75,7 @@ export function countPieces(state, pid, type) {
 export function canPlaceSettlement(state, pid, vertexId, { needRoad = true } = {}) {
   if (!LAYOUT.vertices[vertexId]) return '不正な頂点です';
   if (state.buildings[vertexId]) return 'その頂点には建物があります';
+  if (state.knights?.[vertexId]) return 'その頂点には騎士がいます';
   for (const adj of LAYOUT.vertexAdj[vertexId]) {
     if (state.buildings[adj]) return '距離ルール: 隣接頂点に建物があります';
   }
@@ -81,8 +109,10 @@ export function canPlaceRoad(state, pid, edgeId, { requireVertex = null, extraRo
   const ownRoad = (eid) => state.roads[eid]?.player === pid || extraRoads?.[eid];
   for (const v of edge.v) {
     const b = state.buildings[v];
+    const k = state.knights?.[v];
     if (b && b.player === pid) return null; // 自分の建物に接続
     if (b && b.player !== pid) continue; // 敵の建物は通れない
+    if (k && k.player !== pid) continue; // 敵の騎士も通れない(都市と騎士)
     if (LAYOUT.vertexEdges[v].some((eid) => eid !== edgeId && ownRoad(eid))) return null;
   }
   return '自分の道・建物に接続していません';

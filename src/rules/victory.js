@@ -4,6 +4,11 @@ import { LAYOUT } from './board.js';
 import { addLog } from '../state.js';
 
 export const VICTORY_POINTS_TO_WIN = 10;
+export const VICTORY_POINTS_TO_WIN_CAK = 13;
+
+export function pointsToWin(state) {
+  return state.mode === 'cak' ? VICTORY_POINTS_TO_WIN_CAK : VICTORY_POINTS_TO_WIN;
+}
 
 // pid の最長交易路(辺の本数)。敵の建物がある頂点は通り抜けられない。
 export function longestRoadLength(state, pid) {
@@ -90,9 +95,19 @@ export function computePoints(state, pid, { includeHidden = false } = {}) {
     pts += b.type === 'city' ? 2 : 1;
   }
   if (state.longestRoad.player === pid) pts += 2;
-  if (state.largestArmy.player === pid) pts += 2;
-  if (includeHidden) {
-    pts += state.players[pid].devCards.filter((c) => c.type === 'vp').length;
+
+  if (state.mode === 'cak') {
+    // 最大騎士力は廃止。メトロポリス+2、守護者、進歩カード勝利点(公開済み)
+    for (const vid of Object.values(state.metropolis)) {
+      if (vid != null && state.buildings[vid]?.player === pid) pts += 2;
+    }
+    const p = state.players[pid];
+    pts += p.defenderPoints + p.progressVP;
+  } else {
+    if (state.largestArmy.player === pid) pts += 2;
+    if (includeHidden) {
+      pts += state.players[pid].devCards.filter((c) => c.type === 'vp').length;
+    }
   }
   return pts;
 }

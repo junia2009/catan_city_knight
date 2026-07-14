@@ -4,10 +4,16 @@
 
 import { validateAction } from '../actions.js';
 import { LAYOUT } from '../rules/board.js';
-import { COSTS, canAfford, countPieces, PIECE_LIMITS, totalResources } from '../rules/build.js';
+import {
+  COSTS, WALL_COST, canAfford, countPieces, PIECE_LIMITS, totalResources, totalCards,
+} from '../rules/build.js';
 import { stealableTargets } from '../rules/robber.js';
 import { tradeRate } from '../rules/trade.js';
 import { RESOURCES } from '../state.js';
+import { KNIGHT_COSTS, canPlaceKnight } from '../rules/cak/knights.js';
+import { knightContribution, razableCities } from '../rules/cak/barbarians.js';
+import { TRACKS, TRACK_COMMODITY, canBuyImprovement } from '../rules/cak/improvements.js';
+import { COMMODITIES, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
 import {
   legalCityVertices,
   legalRoadEdges,
@@ -40,7 +46,6 @@ function chooseInitialPlacement(state, pid) {
   const vids = legalSettlementVertices(state, pid, { needRoad: false });
   const vid = best(vids, (v) => vertexValue(state, pid, v));
   const edges = legalSetupEdges(state, vid);
-  // 道は「先の頂点の価値が高い」方向へ伸ばす
   const eid = best(edges, (e) => {
     const other = LAYOUT.edges[e].v.find((v) => v !== vid);
     return vertexValue(state, pid, other);
@@ -53,16 +58,20 @@ function chooseDiscard(state, pid) {
   const need = state.awaiting.context.required[pid];
   const goal = nextGoal(state, pid);
   const keep = { ...(goal?.cost ?? {}) };
-  const counts = { ...p.resources };
-  const discard = { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 };
+  const counts = {};
+  for (const r of RESOURCES) counts[r] = p.resources[r];
+  for (const c of COMMODITIES) counts[c] = p.commodities[c];
+  const discard = {};
+  const keys = [...RESOURCES, ...COMMODITIES];
   for (let i = 0; i < need; i++) {
-    // 目標コストを超えた余剰が最も多い資源から捨てる
-    const r = best(RESOURCES.filter((x) => counts[x] > 0), (x) => {
+    // 目標コストを超えた余剰が多い資源から。商品は価値が高いので温存する
+    const r = best(keys.filter((x) => counts[x] > 0), (x) => {
       const surplus = counts[x] - (keep[x] ?? 0);
-      return surplus * 10 + counts[x];
+      const commodityPenalty = COMMODITIES.includes(x) ? -8 : 0;
+      return surplus * 10 + counts[x] + commodityPenalty;
     });
     counts[r] -= 1;
-    discard[r] += 1;
+    discard[r] = (discard[r] ?? 0) + 1;
   }
   return { type: 'DISCARD', player: pid, resources: discard };
 }
@@ -72,9 +81,16 @@ function chooseRobberMove(state, pid) {
   const hid = best(hexes, (h) => robberHexValue(state, pid, h));
   const targets = stealableTargets(state, hid, pid);
   const target = targets.length
-    ? best(targets, (t) => totalResources(state.players[t]))
+    ? best(targets, (t) => totalCards(state.players[t]))
     : null;
   return { type: 'MOVE_ROBBER', player: pid, hexId: hid, targetPlayer: target };
+}
+
+function chooseRaze(state, pid) {
+  const cities = razableCities(state, pid);
+  // 最も価値の低い都市を差し出す
+  const vid = best(cities, (v) => -vertexValue(state, pid, v));
+  return { type: 'RAZE_CITY', player: pid, vertexId: vid };
 }
 
 // ---- メインターンの目標決定 ----
@@ -92,6 +108,9 @@ export function nextGoal(state, pid) {
   }
   if (countPieces(state, pid, 'road') < PIECE_LIMITS.road && legalRoadEdges(state, pid).length > 0) {
     return { kind: 'road', cost: COSTS.road };
+  }
+  if (state.mode === 'cak') {
+    return { kind: 'knight', cost: KNIGHT_COSTS.build };
   }
   if (state.bank.devDeck.length > 0) {
     return { kind: 'devCard', cost: COSTS.devCard };
@@ -117,9 +136,13 @@ function tryTradeTowardGoal(state, pid, goal) {
   const missing = missingFor(p, goal.cost);
   const missingRes = Object.keys(missing);
   if (missingRes.length === 0) return null;
-  for (const give of RESOURCES) {
+  const giveKeys = state.mode === 'cak' ? [...RESOURCES, ...COMMODITIES] : RESOURCES;
+  for (const give of giveKeys) {
     const rate = tradeRate(state, pid, give);
-    const surplus = p.resources[give] - (goal.cost[give] ?? 0);
+    const have = RESOURCES.includes(give) ? p.resources[give] : p.commodities[give];
+    const surplus = have - (goal.cost[give] ?? 0);
+    // 商品は改良に使うので、2:1 レートのときだけ手放す
+    if (COMMODITIES.includes(give) && rate > 2) continue;
     if (surplus >= rate) {
       const receive = best(missingRes, (r) => missing[r]);
       const action = { type: 'TRADE_BANK', player: pid, give, receive };
@@ -129,20 +152,21 @@ function tryTradeTowardGoal(state, pid, goal) {
   return null;
 }
 
+// ---- 基本カタン: 発展カード ----
+
 function tryPlayDevCard(state, pid) {
+  if (state.mode === 'cak') return null;
   const p = state.players[pid];
   const playable = (type) =>
     p.devCards.some((c) => c.type === type && c.boughtTurn < state.turn) &&
     !state.turnFlags.playedDev;
 
-  // 騎士: 盗賊が自分の産出ヘックスにいるなら追い払う(ロール前でも可)
   if (playable('knight')) {
     const robberHex = state.board.robber;
     const blocksMe = LAYOUT.hexVertices[robberHex].some(
       (vid) => state.buildings[vid]?.player === pid,
     );
-    const armyRace =
-      p.knightsPlayed >= 2 && state.largestArmy.player !== pid;
+    const armyRace = p.knightsPlayed >= 2 && state.largestArmy.player !== pid;
     if (blocksMe || armyRace) {
       return valid(state, { type: 'PLAY_DEV_CARD', player: pid, card: 'knight' });
     }
@@ -158,10 +182,7 @@ function tryPlayDevCard(state, pid) {
       );
       const edges = e2 ? [e1, e2] : [e1];
       const a = valid(state, {
-        type: 'PLAY_DEV_CARD',
-        player: pid,
-        card: 'roadBuilding',
-        params: { edges },
+        type: 'PLAY_DEV_CARD', player: pid, card: 'roadBuilding', params: { edges },
       });
       if (a) return a;
     }
@@ -177,9 +198,7 @@ function tryPlayDevCard(state, pid) {
       }
       if (list.length === 2) {
         const a = valid(state, {
-          type: 'PLAY_DEV_CARD',
-          player: pid,
-          card: 'yearOfPlenty',
+          type: 'PLAY_DEV_CARD', player: pid, card: 'yearOfPlenty',
           params: { resources: list },
         });
         if (a) return a;
@@ -188,7 +207,6 @@ function tryPlayDevCard(state, pid) {
   }
 
   if (playable('monopoly')) {
-    // 他プレイヤーの持ち枚数が最大の資源。5枚以上見込めるときだけ使う
     const totals = RESOURCES.map((r) => [
       r,
       state.players.reduce((s, o) => (o.id === pid ? s : s + o.resources[r]), 0),
@@ -196,13 +214,129 @@ function tryPlayDevCard(state, pid) {
     const [res, n] = best(totals, ([, cnt]) => cnt);
     if (n >= 5) {
       const a = valid(state, {
-        type: 'PLAY_DEV_CARD',
-        player: pid,
-        card: 'monopoly',
-        params: { resource: res },
+        type: 'PLAY_DEV_CARD', player: pid, card: 'monopoly', params: { resource: res },
       });
       if (a) return a;
     }
+  }
+  return null;
+}
+
+// ---- 都市と騎士: 防衛・改良・進歩カード ----
+
+function myCityCount(state, pid) {
+  return Object.values(state.buildings).filter(
+    (b) => b.player === pid && b.type === 'city',
+  ).length;
+}
+
+// 蛮族が近いときの防衛行動(活性化 > 建設 > 昇格)
+function tryDefense(state, pid) {
+  const cities = myCityCount(state, pid);
+  if (cities === 0) return null; // 都市がなければ降格リスクなし
+  const urgency = state.barbarians.position;
+  const myContribution = knightContribution(state, pid);
+  const wanted = Math.min(cities + 1, 3); // 貢献目標
+
+  if (urgency >= 3 && myContribution < wanted) {
+    // 1. 不活性騎士の活性化
+    const inactive = Object.entries(state.knights).find(
+      ([, k]) => k.player === pid && !k.active,
+    );
+    if (inactive) {
+      const a = valid(state, { type: 'ACTIVATE_KNIGHT', player: pid, vertexId: inactive[0] });
+      if (a) return a;
+    }
+  }
+
+  // 2. 騎士の建設(都市を持ったら早めに1体は構える)
+  const myKnights = Object.values(state.knights).filter((k) => k.player === pid).length;
+  if (myKnights < Math.min(cities, 2) && canAfford(state.players[pid], KNIGHT_COSTS.build)) {
+    const spots = Object.keys(LAYOUT.vertices).filter(
+      (v) => canPlaceKnight(state, pid, v) === null,
+    );
+    const vid = best(spots, (v) => vertexValue(state, pid, v) * 0.1 + 1);
+    const a = vid && valid(state, { type: 'BUILD_KNIGHT', player: pid, vertexId: vid });
+    if (a) return a;
+  }
+
+  // 3. 昇格(防衛が足りず余裕があるとき)
+  if (urgency >= 4 && myContribution < wanted) {
+    const promotable = Object.keys(state.knights).find(
+      (v) =>
+        state.knights[v].player === pid &&
+        valid(state, { type: 'PROMOTE_KNIGHT', player: pid, vertexId: v }),
+    );
+    if (promotable) {
+      return { type: 'PROMOTE_KNIGHT', player: pid, vertexId: promotable };
+    }
+  }
+  return null;
+}
+
+function tryImprovement(state, pid) {
+  const p = state.players[pid];
+  const order = [...TRACKS].sort(
+    (a, b) => p.commodities[TRACK_COMMODITY[b]] - p.commodities[TRACK_COMMODITY[a]],
+  );
+  for (const track of order) {
+    if (canBuyImprovement(state, pid, track) === null) {
+      return { type: 'BUY_IMPROVEMENT', player: pid, track };
+    }
+  }
+  return null;
+}
+
+function tryPlayProgressCard(state, pid) {
+  const p = state.players[pid];
+  for (let i = 0; i < p.progressCards.length; i++) {
+    const card = p.progressCards[i];
+    if (card.boughtTurn >= state.turn) continue;
+    const def = PROGRESS_CARDS[card.id];
+    let params = null;
+    if (card.id === 'harvest') {
+      const goal = nextGoal(state, pid);
+      const missing = goal ? missingFor(p, goal.cost) : {};
+      const list = [];
+      for (const [r, n] of Object.entries(missing)) {
+        for (let k = 0; k < n && list.length < 2; k++) list.push(r);
+      }
+      while (list.length < 2) list.push('wheat');
+      params = { resources: list };
+    } else if (card.id === 'commodityCache') {
+      const track = best(TRACKS, (t) => p.improvements[t]);
+      params = { commodity: TRACK_COMMODITY[track] };
+    } else if (card.id === 'bishop') {
+      const hid = best(legalRobberHexes(state), (h) => robberHexValue(state, pid, h));
+      params = { hexId: hid };
+    } else if (card.id === 'irrigation' || card.id === 'mining') {
+      // 対象地形に隣接していなければ温存
+      const terrain = card.id === 'irrigation' ? 'field' : 'mountain';
+      const touches = LAYOUT.hexIds.some(
+        (h) =>
+          state.board.hexes[h].terrain === terrain &&
+          LAYOUT.hexVertices[h].some((v) => state.buildings[v]?.player === pid),
+      );
+      if (!touches) continue;
+    }
+    const a = valid(state, {
+      type: 'PLAY_PROGRESS_CARD', player: pid, index: i, params,
+    });
+    if (a) return a;
+  }
+  return null;
+}
+
+function tryChaseRobber(state, pid) {
+  const robberHex = state.board.robber;
+  const blocksMe = LAYOUT.hexVertices[robberHex]?.some(
+    (vid) => state.buildings[vid]?.player === pid,
+  );
+  if (!blocksMe) return null;
+  for (const [vid, k] of Object.entries(state.knights)) {
+    if (k.player !== pid) continue;
+    const a = valid(state, { type: 'CHASE_ROBBER', player: pid, vertexId: vid });
+    if (a) return a;
   }
   return null;
 }
@@ -218,14 +352,22 @@ export function chooseAction(state, pid) {
     if (aw.type === 'setupPlacement') return chooseInitialPlacement(state, pid);
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
+    if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
     return null;
   }
 
   if (state.phase !== 'main' || state.currentPlayer !== pid) return null;
   const p = state.players[pid];
+  const cak = state.mode === 'cak';
 
   if (!state.turnFlags.rolled) {
     return tryPlayDevCard(state, pid) ?? { type: 'ROLL_DICE', player: pid };
+  }
+
+  // 0. cak: 蛮族への防衛(降格は都市2点の損失なので最優先)
+  if (cak) {
+    const d = tryDefense(state, pid);
+    if (d) return d;
   }
 
   // 1. 都市(最良の開拓地を昇格)
@@ -244,7 +386,17 @@ export function chooseAction(state, pid) {
     if (a) return a;
   }
 
-  // 3. 発展カード使用
+  // 3. cak: 都市改良(商品が貯まったら)・進歩カード・盗賊追い払い
+  if (cak) {
+    const imp = tryImprovement(state, pid);
+    if (imp) return imp;
+    const pc = tryPlayProgressCard(state, pid);
+    if (pc) return pc;
+    const chase = tryChaseRobber(state, pid);
+    if (chase) return chase;
+  }
+
+  // 3'. 基本: 発展カード使用
   const dev = tryPlayDevCard(state, pid);
   if (dev) return dev;
 
@@ -264,8 +416,15 @@ export function chooseAction(state, pid) {
   const trade = tryTradeTowardGoal(state, pid, goal);
   if (trade) return trade;
 
-  // 6. 発展カード購入(余裕があるとき)
-  if (canAfford(p, COSTS.devCard) && state.bank.devDeck.length > 0) {
+  // 6. cak: 城壁(レンガ余剰時)/ 基本: 発展カード購入
+  if (cak) {
+    if (p.resources.brick >= 4 && canAfford(p, WALL_COST)) {
+      const cityVid = Object.keys(state.buildings).find(
+        (v) => valid(state, { type: 'BUILD_WALL', player: pid, vertexId: v }),
+      );
+      if (cityVid) return { type: 'BUILD_WALL', player: pid, vertexId: cityVid };
+    }
+  } else if (canAfford(p, COSTS.devCard) && state.bank.devDeck.length > 0) {
     const wantSettlement = goal?.kind === 'settlement' || goal?.kind === 'city';
     if (!wantSettlement || totalResources(p) > 8) {
       const a = valid(state, { type: 'BUY_DEV_CARD', player: pid });

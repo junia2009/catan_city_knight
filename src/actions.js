@@ -9,27 +9,57 @@
 import { LAYOUT, TERRAIN_RESOURCE } from './rules/board.js';
 import {
   COSTS,
+  WALL_COST,
   canAfford,
+  canBuildWall,
   canPlaceCity,
   canPlaceRoad,
   canPlaceSettlement,
   grantResource,
+  handLimit,
   payCost,
+  totalCards,
   totalResources,
 } from './rules/build.js';
-import { rollTwoDice, distributeForRoll } from './rules/dice.js';
+import { rollTwoDice, rollEventDie, distributeForRoll } from './rules/dice.js';
 import { stealableTargets, applyRobberMove } from './rules/robber.js';
 import { tradeRate } from './rules/trade.js';
 import {
   computePoints,
+  pointsToWin,
   updateLargestArmy,
   updateLongestRoad,
-  VICTORY_POINTS_TO_WIN,
 } from './rules/victory.js';
 import { RESOURCES, RES_JP, DEV_JP, addLog } from './state.js';
+import {
+  KNIGHT_COSTS,
+  applyKnightMove,
+  canChaseRobber,
+  canMoveKnight,
+  canPlaceKnight,
+  canPromoteKnight,
+} from './rules/cak/knights.js';
+import {
+  BARBARIAN_TRACK_LENGTH,
+  razableCities,
+  razeCity,
+  resolveBarbarianAttack,
+} from './rules/cak/barbarians.js';
+import { applyImprovement, canBuyImprovement } from './rules/cak/improvements.js';
+import {
+  COMMODITIES,
+  PROGRESS_CARDS,
+  distributeProgressCards,
+} from './rules/cak/progress-cards.js';
+
+const ALL_CARD_KEYS = [...RESOURCES, ...COMMODITIES];
 
 function sumRes(obj) {
-  return RESOURCES.reduce((s, r) => s + (obj?.[r] ?? 0), 0);
+  return ALL_CARD_KEYS.reduce((s, r) => s + (obj?.[r] ?? 0), 0);
+}
+
+function cardCount(player, key) {
+  return RESOURCES.includes(key) ? player.resources[key] : player.commodities[key];
 }
 
 // 割り込み(awaiting)中に許可されるアクション種別
@@ -37,6 +67,7 @@ const AWAITING_ACTIONS = {
   setupPlacement: 'PLACE_INITIAL',
   discard: 'DISCARD',
   moveRobber: 'MOVE_ROBBER',
+  barbarianDefense: 'RAZE_CITY',
 };
 
 export function validateAction(state, action) {
@@ -69,9 +100,10 @@ export function validateAction(state, action) {
       const need = aw.context.required[pid];
       if (need == null) return '捨て札は不要です';
       if (sumRes(action.resources) !== need) return `ちょうど${need}枚捨ててください`;
-      for (const r of RESOURCES) {
-        if ((action.resources[r] ?? 0) < 0) return '不正な枚数です';
-        if ((action.resources[r] ?? 0) > p.resources[r]) return `${RES_JP[r]}が足りません`;
+      for (const r of ALL_CARD_KEYS) {
+        const n = action.resources[r] ?? 0;
+        if (n < 0) return '不正な枚数です';
+        if (n > cardCount(p, r)) return '手札が足りません';
       }
       return null;
     }
@@ -112,6 +144,7 @@ export function validateAction(state, action) {
     }
 
     case 'BUY_DEV_CARD': {
+      if (state.mode === 'cak') return '都市と騎士では発展カードは使いません';
       if (!state.turnFlags.rolled) return '先にダイスを振ってください';
       if (!canAfford(p, COSTS.devCard)) return '資源が足りません(羊毛・小麦・鉱石 各1)';
       if (state.bank.devDeck.length === 0) return '発展カードの山札がありません';
@@ -121,15 +154,90 @@ export function validateAction(state, action) {
     case 'TRADE_BANK': {
       if (!state.turnFlags.rolled) return '先にダイスを振ってください';
       const { give, receive } = action;
-      if (!RESOURCES.includes(give) || !RESOURCES.includes(receive)) return '不正な資源です';
-      if (give === receive) return '同じ資源とは交換できません';
+      const valid = (k) =>
+        RESOURCES.includes(k) || (state.mode === 'cak' && COMMODITIES.includes(k));
+      if (!valid(give) || !valid(receive)) return '不正な資源です';
+      if (give === receive) return '同じものとは交換できません';
       const rate = tradeRate(state, pid, give);
-      if (p.resources[give] < rate) return `${RES_JP[give]}が${rate}枚必要です`;
-      if (state.bank.resources[receive] < 1) return `銀行に${RES_JP[receive]}がありません`;
+      if (cardCount(p, give) < rate) return `${rate}枚必要です`;
+      const stock = RESOURCES.includes(receive)
+        ? state.bank.resources[receive]
+        : state.bank.commodities[receive];
+      if (stock < 1) return '銀行に在庫がありません';
+      return null;
+    }
+
+    // ---- 都市と騎士(設計書 §9)----
+
+    case 'BUILD_KNIGHT': {
+      if (state.mode !== 'cak') return '都市と騎士モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      if (!canAfford(p, KNIGHT_COSTS.build)) return '資源が足りません(羊毛1・鉱石1)';
+      return canPlaceKnight(state, pid, action.vertexId);
+    }
+
+    case 'ACTIVATE_KNIGHT': {
+      if (state.mode !== 'cak') return '都市と騎士モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      const k = state.knights[action.vertexId];
+      if (!k || k.player !== pid) return '自分の騎士ではありません';
+      if (k.active) return 'すでに活性です';
+      if (!canAfford(p, KNIGHT_COSTS.activate)) return '資源が足りません(小麦1)';
+      return null;
+    }
+
+    case 'PROMOTE_KNIGHT': {
+      if (state.mode !== 'cak') return '都市と騎士モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      if (!canAfford(p, KNIGHT_COSTS.promote)) return '資源が足りません(羊毛1・鉱石1)';
+      return canPromoteKnight(state, pid, action.vertexId);
+    }
+
+    case 'MOVE_KNIGHT': {
+      if (state.mode !== 'cak') return '都市と騎士モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      return canMoveKnight(state, pid, action.fromVertexId, action.toVertexId);
+    }
+
+    case 'CHASE_ROBBER': {
+      if (state.mode !== 'cak') return '都市と騎士モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      return canChaseRobber(state, pid, action.vertexId);
+    }
+
+    case 'BUILD_WALL': {
+      if (state.mode !== 'cak') return '都市と騎士モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      if (!canAfford(p, WALL_COST)) return '資源が足りません(レンガ2)';
+      return canBuildWall(state, pid, action.vertexId);
+    }
+
+    case 'BUY_IMPROVEMENT': {
+      if (state.mode !== 'cak') return '都市と騎士モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      return canBuyImprovement(state, pid, action.track);
+    }
+
+    case 'PLAY_PROGRESS_CARD': {
+      if (state.mode !== 'cak') return '都市と騎士モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      const card = p.progressCards[action.index];
+      if (!card) return 'そのカードを持っていません';
+      if (card.boughtTurn >= state.turn) return '獲得したターンには使えません';
+      const def = PROGRESS_CARDS[card.id];
+      if (!def) return '不明なカードです';
+      return def.validate(state, pid, action.params);
+    }
+
+    case 'RAZE_CITY': {
+      if (!razableCities(state, pid).includes(action.vertexId)) {
+        return 'その都市は降格対象にできません';
+      }
       return null;
     }
 
     case 'PLAY_DEV_CARD': {
+      if (state.mode === 'cak') return '都市と騎士では発展カードは使いません';
       if (state.turnFlags.playedDev) return 'このターンはすでに発展カードを使いました';
       const card = p.devCards.find(
         (c) => c.type === action.card && c.boughtTurn < state.turn,
@@ -191,10 +299,32 @@ export function validateAction(state, action) {
 function checkVictoryFor(state, pid) {
   if (state.phase !== 'main' || state.winner != null) return;
   const pts = computePoints(state, pid, { includeHidden: true });
-  if (pts >= VICTORY_POINTS_TO_WIN) {
+  if (pts >= pointsToWin(state)) {
     state.phase = 'ended';
     state.winner = pid;
     addLog(state, `🏆 ${state.players[pid].name}が${pts}点で勝利!`);
+  }
+}
+
+// 出目合計の処理(7 → 捨て札/盗賊、それ以外 → 資源分配)。
+// cak ではイベントダイス(蛮族)解決後に呼ばれる。
+function processRollTotal(state, pid, total) {
+  if (total === 7) {
+    const required = {};
+    for (const pl of state.players) {
+      const n = totalCards(pl);
+      const limit = handLimit(state, pl.id);
+      if (n > limit) required[pl.id] = Math.floor(n / 2);
+    }
+    const waiting = Object.keys(required).map(Number);
+    if (waiting.length > 0) {
+      state.awaiting = { type: 'discard', players: waiting, context: { required } };
+      addLog(state, `7! ${waiting.map((i) => state.players[i].name).join('・')}は手札の半分を捨てます`);
+    } else {
+      state.awaiting = { type: 'moveRobber', players: [pid], context: { cause: 'seven' } };
+    }
+  } else {
+    distributeForRoll(state, total);
   }
 }
 
@@ -205,7 +335,9 @@ function applyAction(state, action) {
   switch (action.type) {
     case 'PLACE_INITIAL': {
       const round = state.awaiting.context.round;
-      state.buildings[action.vertexId] = { player: pid, type: 'settlement' };
+      // 都市と騎士: 開拓地×1 + 都市×1(2巡目が都市。設計書 §9.1)
+      const type = state.mode === 'cak' && round === 2 ? 'city' : 'settlement';
+      state.buildings[action.vertexId] = { player: pid, type };
       state.roads[action.edgeId] = { player: pid };
       addLog(state, `${p.name}が初期配置(${round}巡目)を行いました`);
 
@@ -242,23 +374,37 @@ function applyAction(state, action) {
       const total = a + b;
       state.dice = [a, b];
       state.turnFlags.rolled = true;
-      addLog(state, `${p.name}のロール: ${a} + ${b} = ${total}`);
-      if (total === 7) {
-        const required = {};
-        for (const pl of state.players) {
-          const n = totalResources(pl);
-          if (n > 7) required[pl.id] = Math.floor(n / 2);
-        }
-        const waiting = Object.keys(required).map(Number);
-        if (waiting.length > 0) {
-          state.awaiting = { type: 'discard', players: waiting, context: { required } };
-          addLog(state, `7! ${waiting.map((i) => state.players[i].name).join('・')}は手札の半分を捨てます`);
+
+      if (state.mode === 'cak') {
+        // 赤+黄+イベントダイス(設計書 §6, §9.3)。onDiceRolled フック相当。
+        const ev = rollEventDie(state);
+        state.eventDie = ev;
+        const EV_JP = { ship: '⛵船', trade: '交易', politics: '政治', science: '科学' };
+        addLog(state, `${p.name}のロール: ${a} + ${b} = ${total}(イベント: ${EV_JP[ev]})`);
+
+        if (ev === 'ship') {
+          state.barbarians.position += 1;
+          addLog(state, `⛵ 蛮族船が前進(${state.barbarians.position}/${BARBARIAN_TRACK_LENGTH})`);
+          if (state.barbarians.position >= BARBARIAN_TRACK_LENGTH) {
+            const needChoice = resolveBarbarianAttack(state);
+            if (needChoice.length > 0) {
+              // 降格する都市の選択待ち。出目の処理は選択後に行う。
+              state.awaiting = {
+                type: 'barbarianDefense',
+                players: needChoice,
+                context: { pendingTotal: total, roller: pid },
+              };
+              break;
+            }
+          }
         } else {
-          state.awaiting = { type: 'moveRobber', players: [pid], context: { cause: 'seven' } };
+          distributeProgressCards(state, ev, a); // a = 赤ダイス
         }
       } else {
-        distributeForRoll(state, total);
+        addLog(state, `${p.name}のロール: ${a} + ${b} = ${total}`);
       }
+
+      processRollTotal(state, pid, total);
       break;
     }
 
@@ -268,6 +414,11 @@ function applyAction(state, action) {
         p.resources[r] -= n;
         state.bank.resources[r] += n;
       }
+      for (const c of COMMODITIES) {
+        const n = action.resources[c] ?? 0;
+        p.commodities[c] -= n;
+        state.bank.commodities[c] += n;
+      }
       addLog(state, `${p.name}が${sumRes(action.resources)}枚捨てました`);
       state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
       if (state.awaiting.players.length === 0) {
@@ -276,6 +427,17 @@ function applyAction(state, action) {
           players: [state.currentPlayer],
           context: { cause: 'seven' },
         };
+      }
+      break;
+    }
+
+    case 'RAZE_CITY': {
+      razeCity(state, action.vertexId);
+      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+      if (state.awaiting.players.length === 0) {
+        const { pendingTotal, roller } = state.awaiting.context;
+        state.awaiting = null;
+        processRollTotal(state, roller, pendingTotal);
       }
       break;
     }
@@ -354,11 +516,75 @@ function applyAction(state, action) {
 
     case 'TRADE_BANK': {
       const rate = tradeRate(state, pid, action.give);
-      p.resources[action.give] -= rate;
-      state.bank.resources[action.give] += rate;
-      state.bank.resources[action.receive] -= 1;
-      p.resources[action.receive] += 1;
-      addLog(state, `${p.name}が${RES_JP[action.give]}×${rate} → ${RES_JP[action.receive]}×1 を交易`);
+      const move = (key, delta) => {
+        if (RESOURCES.includes(key)) {
+          p.resources[key] += delta;
+          state.bank.resources[key] -= delta;
+        } else {
+          p.commodities[key] += delta;
+          state.bank.commodities[key] -= delta;
+        }
+      };
+      move(action.give, -rate);
+      move(action.receive, 1);
+      addLog(state, `${p.name}が${rate}:1 交易(${action.give} → ${action.receive})`);
+      break;
+    }
+
+    // ---- 都市と騎士 ----
+
+    case 'BUILD_KNIGHT':
+      payCost(state, pid, KNIGHT_COSTS.build);
+      state.knights[action.vertexId] = {
+        player: pid, level: 1, active: false, activatedTurn: -1,
+      };
+      addLog(state, `${p.name}が騎士を配置しました(不活性)`);
+      break;
+
+    case 'ACTIVATE_KNIGHT': {
+      payCost(state, pid, KNIGHT_COSTS.activate);
+      const k = state.knights[action.vertexId];
+      k.active = true;
+      k.activatedTurn = state.turn;
+      addLog(state, `${p.name}が騎士を活性化しました`);
+      break;
+    }
+
+    case 'PROMOTE_KNIGHT': {
+      payCost(state, pid, KNIGHT_COSTS.promote);
+      const k = state.knights[action.vertexId];
+      k.level += 1;
+      addLog(state, `${p.name}が騎士をLv${k.level}に昇格させました`);
+      break;
+    }
+
+    case 'MOVE_KNIGHT':
+      applyKnightMove(state, pid, action.fromVertexId, action.toVertexId);
+      addLog(state, `${p.name}が騎士を移動しました`);
+      break;
+
+    case 'CHASE_ROBBER':
+      state.knights[action.vertexId].active = false;
+      addLog(state, `${p.name}の騎士が盗賊を追い払います`);
+      state.awaiting = { type: 'moveRobber', players: [pid], context: { cause: 'knight' } };
+      break;
+
+    case 'BUILD_WALL':
+      payCost(state, pid, WALL_COST);
+      state.walls[action.vertexId] = pid;
+      addLog(state, `${p.name}が城壁を建設しました(手札上限+2)`);
+      break;
+
+    case 'BUY_IMPROVEMENT':
+      applyImprovement(state, pid, action.track);
+      break;
+
+    case 'PLAY_PROGRESS_CARD': {
+      const card = p.progressCards.splice(action.index, 1)[0];
+      const def = PROGRESS_CARDS[card.id];
+      addLog(state, `${p.name}が進歩カード「${def.name}」を使用`);
+      def.play(state, pid, action.params);
+      state.bank.progressDecks[card.deck].unshift(card.id); // 使用済みは山札の底へ
       break;
     }
 

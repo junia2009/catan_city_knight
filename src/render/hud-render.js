@@ -2,46 +2,88 @@
 // 手札・ボタン・ダイアログは DOM で作る。クリックは data-act 属性で main.js に委譲。
 
 import { RESOURCES, RES_JP, DEV_JP } from '../state.js';
-import { COSTS, canAfford, totalResources } from '../rules/build.js';
-import { computePoints, VICTORY_POINTS_TO_WIN } from '../rules/victory.js';
+import { COSTS, WALL_COST, canAfford, totalCards } from '../rules/build.js';
+import { computePoints, pointsToWin } from '../rules/victory.js';
 import { tradeRate } from '../rules/trade.js';
+import { KNIGHT_COSTS } from '../rules/cak/knights.js';
+import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
+import {
+  TRACKS, TRACK_JP, TRACK_COMMODITY, MAX_IMPROVEMENT,
+  improvementCost, canBuyImprovement,
+} from '../rules/cak/improvements.js';
+import { COMMODITIES, COM_JP, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
 import { PLAYER_COLORS } from './board-render.js';
 
 const HUMAN = 0;
 
 export const RES_ICON = { wood: '🪵', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '🪨' };
+export const COM_ICON = { cloth: '🧵', coin: '🪙', paper: '📜' };
 export const DEV_ICON = { knight: '⚔️', roadBuilding: '🛤️', yearOfPlenty: '🧺', monopoly: '🎩', vp: '⭐' };
+const EV_ICON = { ship: '⛵', trade: '🧵', politics: '🪙', science: '📜' };
+const TRACK_ICON = { trade: '🧵', politics: '🪙', science: '📜' };
 
 function el(id) {
   return document.getElementById(id);
 }
 
 function renderPlayers(state) {
+  const cak = state.mode === 'cak';
+  const goal = pointsToWin(state);
   el('players').innerHTML = state.players
     .map((p) => {
       const pts = computePoints(state, p.id, { includeHidden: p.id === HUMAN });
       const active =
         state.awaiting ? state.awaiting.players.includes(p.id) : state.currentPlayer === p.id;
+      const metro = cak
+        ? Object.values(state.metropolis).filter(
+            (v) => v != null && state.buildings[v]?.player === p.id,
+          ).length
+        : 0;
       const badges = [
         state.longestRoad.player === p.id ? '<span class="badge">🛤 最長交易路</span>' : '',
-        state.largestArmy.player === p.id ? '<span class="badge">⚔ 最大騎士力</span>' : '',
+        !cak && state.largestArmy.player === p.id ? '<span class="badge">⚔ 最大騎士力</span>' : '',
+        metro > 0 ? `<span class="badge">🏙 メトロポリス×${metro}</span>` : '',
+        cak && p.defenderPoints > 0 ? `<span class="badge">🛡×${p.defenderPoints}</span>` : '',
       ].join('');
+      const info = cak
+        ? `<span title="手札">🂠 ${totalCards(p)}</span>
+           <span title="進歩カード">📜 ${p.progressCards.length}</span>
+           <span title="防衛力">⚔️ ${knightContribution(state, p.id)}</span>
+           <span title="都市改良(交易/政治/科学)" class="imp">${TRACKS.map(
+             (t) => `${TRACK_ICON[t]}${p.improvements[t]}`,
+           ).join(' ')}</span>`
+        : `<span title="手札">🂠 ${totalCards(p)}</span>
+           <span title="発展カード">📜 ${p.devCards.length}</span>
+           <span title="使用済み騎士">⚔️ ${p.knightsPlayed}</span>`;
       return `
       <div class="player ${active ? 'active' : ''}" style="--pc:${PLAYER_COLORS[p.id]}">
         <div class="prow">
           <span class="chip"></span>
           <span class="pname">${p.name}</span>
-          <span class="ppts">${pts}<small>/${VICTORY_POINTS_TO_WIN}</small></span>
+          <span class="ppts">${pts}<small>/${goal}</small></span>
         </div>
-        <div class="prow pinfo">
-          <span title="手札">🂠 ${totalResources(p)}</span>
-          <span title="発展カード">📜 ${p.devCards.length}</span>
-          <span title="使用済み騎士">⚔️ ${p.knightsPlayed}</span>
-          ${badges}
-        </div>
+        <div class="prow pinfo">${info}${badges}</div>
       </div>`;
     })
     .join('');
+}
+
+// 蛮族トラック(cak)
+function renderBarbarians(state) {
+  const elB = el('barb');
+  if (state.mode !== 'cak') {
+    elB.innerHTML = '';
+    return;
+  }
+  const pos = state.barbarians.position;
+  const cells = Array.from({ length: BARBARIAN_TRACK_LENGTH }, (_, i) =>
+    `<span class="bcell ${i < pos ? 'past' : ''} ${i === pos ? 'here' : ''}">${i === pos ? '⛵' : ''}</span>`,
+  ).join('');
+  elB.innerHTML = `
+    <span class="blabel">蛮族</span>${cells}<span class="bgoal">🏝</span>
+    <span class="bdef" title="蛮族の強さ(都市数) vs 防衛力(活性騎士Lv合計)">
+      ⚔${barbarianStrength(state)} vs 🛡${state.players.reduce((s, p) => s + knightContribution(state, p.id), 0)}
+    </span>`;
 }
 
 const PIP_LAYOUT = {
@@ -57,13 +99,19 @@ function dieHtml(n) {
 
 function renderDice(state) {
   const d = state.dice;
+  const ev = state.mode === 'cak' && state.eventDie && d
+    ? `<span class="evdie" title="イベントダイス">${EV_ICON[state.eventDie]}</span>`
+    : state.mode === 'cak'
+      ? '<span class="evdie empty"></span>'
+      : '';
   el('dice').innerHTML = d
-    ? `${dieHtml(d[0])}${dieHtml(d[1])}<span class="dsum">${d[0] + d[1]}</span>`
-    : `<span class="die empty"></span><span class="die empty"></span><span class="dsum">–</span>`;
+    ? `${dieHtml(d[0])}${dieHtml(d[1])}${ev}<span class="dsum">${d[0] + d[1]}</span>`
+    : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`;
 }
 
 function renderHand(state) {
   const p = state.players[HUMAN];
+  const cak = state.mode === 'cak';
   const res = RESOURCES.map(
     (r) => `<div class="card card-${r} ${p.resources[r] === 0 ? 'zero' : ''}">
       <div class="icon">${RES_ICON[r]}</div>
@@ -72,41 +120,81 @@ function renderHand(state) {
     </div>`,
   ).join('');
 
+  const coms = cak
+    ? COMMODITIES.map(
+        (c) => `<div class="card card-com ${p.commodities[c] === 0 ? 'zero' : ''}">
+        <div class="icon">${COM_ICON[c]}</div>
+        <div class="label">${COM_JP[c]}</div>
+        <div class="cnt">${p.commodities[c]}</div>
+      </div>`,
+      ).join('')
+    : '';
+
   const isMyTurn =
     state.phase === 'main' && state.currentPlayer === HUMAN && !state.awaiting;
-  const devs = p.devCards
-    .map((c) => {
-      const playable =
-        isMyTurn &&
-        !state.turnFlags.playedDev &&
-        c.type !== 'vp' &&
-        c.boughtTurn < state.turn &&
-        (c.type === 'knight' || state.turnFlags.rolled);
-      return `<button class="card dev ${playable ? '' : 'dim'}" data-act="play-dev:${c.type}"
-        ${playable ? '' : 'disabled'}>
-        <div class="icon">${DEV_ICON[c.type]}</div>
-        <div class="label">${DEV_JP[c.type]}</div></button>`;
-    })
-    .join('');
-  el('hand').innerHTML = res + (devs ? `<div class="sep"></div>${devs}` : '');
+
+  let extra = '';
+  if (cak) {
+    extra = p.progressCards
+      .map((c, i) => {
+        const def = PROGRESS_CARDS[c.id];
+        const playable = isMyTurn && state.turnFlags.rolled && c.boughtTurn < state.turn;
+        return `<button class="card dev ${playable ? '' : 'dim'}" data-act="play-prog:${i}"
+          ${playable ? '' : 'disabled'} title="進歩カード">
+          <div class="icon">${def.icon}</div>
+          <div class="label">${def.name}</div></button>`;
+      })
+      .join('');
+  } else {
+    extra = p.devCards
+      .map((c) => {
+        const playable =
+          isMyTurn &&
+          !state.turnFlags.playedDev &&
+          c.type !== 'vp' &&
+          c.boughtTurn < state.turn &&
+          (c.type === 'knight' || state.turnFlags.rolled);
+        return `<button class="card dev ${playable ? '' : 'dim'}" data-act="play-dev:${c.type}"
+          ${playable ? '' : 'disabled'}>
+          <div class="icon">${DEV_ICON[c.type]}</div>
+          <div class="label">${DEV_JP[c.type]}</div></button>`;
+      })
+      .join('');
+  }
+  el('hand').innerHTML =
+    res + (coms ? `<div class="sep"></div>${coms}` : '') +
+    (extra ? `<div class="sep"></div>${extra}` : '');
 }
 
 function renderControls(state, ui) {
   const p = state.players[HUMAN];
   const myTurn = state.phase === 'main' && state.currentPlayer === HUMAN && !state.awaiting;
   const rolled = state.turnFlags.rolled;
+  const cak = state.mode === 'cak';
   const btn = (act, label, enabled, title = '') =>
     `<button data-act="${act}" ${enabled ? '' : 'disabled'} title="${title}">${label}</button>`;
 
-  el('controls').innerHTML = [
+  const common = [
     btn('roll', '🎲 ロール', myTurn && !rolled),
     btn('mode:road', '🛤️ 道', myTurn && rolled && canAfford(p, COSTS.road), '🪵1 🧱1'),
     btn('mode:settlement', '🏠 開拓地', myTurn && rolled && canAfford(p, COSTS.settlement), '🪵1 🧱1 🐑1 🌾1'),
     btn('mode:city', '🏰 都市', myTurn && rolled && canAfford(p, COSTS.city), '🌾2 🪨3'),
-    btn('buy-dev', '📜 カード', myTurn && rolled && canAfford(p, COSTS.devCard) && state.bank.devDeck.length > 0, '🐑1 🌾1 🪨1'),
+  ];
+  const tail = [
     btn('trade-open', '⚖️ 交易', myTurn && rolled),
     btn('end-turn', '⏭ ターン終了', myTurn && rolled),
-  ].join('');
+  ];
+  const middle = cak
+    ? [
+        btn('mode:knight', '⚔️ 騎士', myTurn && rolled && canAfford(p, KNIGHT_COSTS.build), '🐑1 🪨1(不活性で配置)'),
+        btn('mode:wall', '🧱 城壁', myTurn && rolled && canAfford(p, WALL_COST), '🧱2(手札上限+2)'),
+        btn('improve-open', '🏙 改良', myTurn && rolled, '商品で都市を改良'),
+      ]
+    : [
+        btn('buy-dev', '📜 カード', myTurn && rolled && canAfford(p, COSTS.devCard) && state.bank.devDeck.length > 0, '🐑1 🌾1 🪨1'),
+      ];
+
+  el('controls').innerHTML = [...common, ...middle, ...tail].join('');
 }
 
 function statusText(state, ui) {
@@ -123,6 +211,7 @@ function statusText(state, ui) {
     }
     if (aw.type === 'discard') return `🂠 手札を${aw.context.required[HUMAN]}枚捨ててください`;
     if (aw.type === 'moveRobber') return '🥷 盗賊の移動先ヘックスを選んでください';
+    if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
   } else if (aw) {
     return `⏳ ${aw.players.map((i) => state.players[i].name).join('・')}の応答待ち...`;
   }
@@ -130,6 +219,10 @@ function statusText(state, ui) {
     case 'build-road': return '🛤️ 道を建てる辺を選んでください';
     case 'build-settlement': return '🏠 開拓地を建てる頂点を選んでください';
     case 'build-city': return '🏰 都市に昇格する開拓地を選んでください';
+    case 'build-knight': return '⚔️ 騎士を配置する頂点を選んでください(自分の道に接続)';
+    case 'build-wall': return '🧱 城壁を建てる都市を選んでください';
+    case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
+    case 'play-bishop': return '⛪ 司教: 盗賊の移動先ヘックスを選んでください';
     case 'play-road-building': return `🛤️ 街道建設: 道をあと${2 - ui.pendingEdges.length}本選べます`;
     default:
       if (state.phase === 'main') {
@@ -142,8 +235,10 @@ function statusText(state, ui) {
 }
 
 function renderStatus(state, ui) {
-  const cancellable = ['build-road', 'build-settlement', 'build-city', 'play-road-building'].includes(ui.mode)
-    || (ui.mode === 'setup-road');
+  const cancellable = [
+    'build-road', 'build-settlement', 'build-city', 'play-road-building',
+    'build-knight', 'build-wall', 'move-knight', 'play-bishop',
+  ].includes(ui.mode) || (ui.mode === 'setup-road');
   const confirmable =
     (ui.pending != null) ||
     (ui.mode === 'play-road-building' && ui.pendingEdges.length >= 1);
@@ -168,24 +263,100 @@ function dialogHtml(state, ui) {
   const p = state.players[HUMAN];
 
   if (d.type === 'trade') {
-    const giveBtns = RESOURCES.map((r) => {
+    const cak = state.mode === 'cak';
+    const keys = cak ? [...RESOURCES, ...COMMODITIES] : RESOURCES;
+    const icon = (k) => RES_ICON[k] ?? COM_ICON[k];
+    const jp = (k) => RES_JP[k] ?? COM_JP[k];
+    const have = (k) => (RES_ICON[k] ? p.resources[k] : p.commodities[k]);
+    const stock = (k) =>
+      RES_ICON[k] ? state.bank.resources[k] : state.bank.commodities[k];
+    const giveBtns = keys.map((r) => {
       const rate = tradeRate(state, HUMAN, r);
-      const ok = p.resources[r] >= rate;
+      const ok = have(r) >= rate;
       return `<button class="pick ${d.give === r ? 'sel' : ''}" data-act="trade-give:${r}" ${ok ? '' : 'disabled'}>
-        <span class="picon">${RES_ICON[r]}</span>${RES_JP[r]}<small>${rate}:1</small></button>`;
+        <span class="picon">${icon(r)}</span>${jp(r)}<small>${rate}:1</small></button>`;
     }).join('');
-    const recvBtns = RESOURCES.map((r) => {
-      const ok = state.bank.resources[r] > 0 && r !== d.give;
+    const recvBtns = keys.map((r) => {
+      const ok = stock(r) > 0 && r !== d.give;
       return `<button class="pick ${d.receive === r ? 'sel' : ''}" data-act="trade-receive:${r}" ${ok ? '' : 'disabled'}>
-        <span class="picon">${RES_ICON[r]}</span>${RES_JP[r]}</button>`;
+        <span class="picon">${icon(r)}</span>${jp(r)}</button>`;
     }).join('');
     return `<h3>⚖️ 銀行/港と交易</h3>
-      <p>渡す資源</p><div class="row">${giveBtns}</div>
-      <p>もらう資源</p><div class="row">${recvBtns}</div>
+      <p>渡すもの</p><div class="row">${giveBtns}</div>
+      <p>もらうもの</p><div class="row">${recvBtns}</div>
       <div class="row end">
         <button class="primary" data-act="trade-confirm" ${d.give && d.receive ? '' : 'disabled'}>交易する</button>
         <button data-act="dialog-cancel">閉じる</button>
       </div>`;
+  }
+
+  if (d.type === 'improve') {
+    const rows = TRACKS.map((t) => {
+      const lv = p.improvements[t];
+      const next = lv + 1;
+      const com = TRACK_COMMODITY[t];
+      const cost = lv >= MAX_IMPROVEMENT ? null : improvementCost(next);
+      const err = canBuyImprovement(state, HUMAN, t);
+      const cells = Array.from({ length: MAX_IMPROVEMENT }, (_, i) =>
+        `<span class="lvcell ${i < lv ? 'on' : ''}"></span>`,
+      ).join('');
+      const metroVid = state.metropolis[t];
+      const metroMark =
+        metroVid != null
+          ? `<small>🏙 ${state.players[state.buildings[metroVid]?.player]?.name ?? ''}</small>`
+          : '';
+      return `<div class="drow">
+        <span>${TRACK_ICON[t]} ${TRACK_JP[t]} <b>Lv${lv}</b> ${cells} ${metroMark}</span>
+        ${cost != null
+          ? `<button data-act="improve-buy:${t}" ${err ? 'disabled' : ''}
+              title="${err ?? ''}">${COM_ICON[com]}×${cost}で改良</button>`
+          : '<small>MAX</small>'}
+      </div>`;
+    }).join('');
+    return `<h3>🏙 都市改良</h3>
+      <p>Lv3で商品の2:1交易解禁、各系統で最初にLv4到達でメトロポリス(+2点)</p>
+      ${rows}
+      <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
+  }
+
+  if (d.type === 'knight') {
+    const k = state.knights[d.vertexId];
+    if (!k) return '';
+    const btn = (act, label, title = '') =>
+      `<button data-act="${act}:${d.vertexId}" title="${title}">${label}</button>`;
+    return `<h3>⚔️ 騎士 Lv${k.level}(${k.active ? '活性' : '不活性'})</h3>
+      <div class="row">
+        ${!k.active ? btn('knight-activate', '🌾 活性化', '小麦1') : ''}
+        ${k.level < 3 ? btn('knight-promote', '⬆ 昇格', '羊毛1・鉱石1。Lv3は政治Lv3が必要') : ''}
+        ${k.active ? btn('knight-move', '👣 移動', '道づたいに移動(移動後は不活性)') : ''}
+        ${k.active ? btn('knight-chase', '🥷 盗賊を追い払う', '隣接ヘックスの盗賊を移動させる') : ''}
+      </div>
+      <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
+  }
+
+  if (d.type === 'prog-harvest') {
+    const btns = RESOURCES.map((r) => {
+      const n = d.picks.filter((x) => x === r).length;
+      const ok = d.picks.length < 2 && state.bank.resources[r] > n;
+      return `<button class="pick ${n ? 'sel' : ''}" data-act="ph:${r}" ${ok ? '' : 'disabled'}>
+        <span class="picon">${RES_ICON[r]}</span>${RES_JP[r]}${n ? `<small>×${n}</small>` : ''}</button>`;
+    }).join('');
+    return `<h3>🧺 収穫祭: 資源を2つ選んでください(${d.picks.length}/2)</h3>
+      <div class="row">${btns}</div>
+      <div class="row end">
+        <button class="primary" data-act="ph-confirm" ${d.picks.length === 2 ? '' : 'disabled'}>獲得</button>
+        <button data-act="dialog-cancel">やめる</button>
+      </div>`;
+  }
+
+  if (d.type === 'prog-commodity') {
+    const btns = COMMODITIES.map(
+      (c) => `<button class="pick" data-act="pc:${c}" ${state.bank.commodities[c] > 0 ? '' : 'disabled'}>
+        <span class="picon">${COM_ICON[c]}</span>${COM_JP[c]}</button>`,
+    ).join('');
+    return `<h3>📦 商品倉庫: 商品を1つ選んでください</h3>
+      <div class="row">${btns}</div>
+      <div class="row end"><button data-act="dialog-cancel">やめる</button></div>`;
   }
 
   if (d.type === 'discard') {
@@ -260,6 +431,7 @@ function renderDialog(state, ui) {
 
 export function renderHUD(state, ui) {
   renderPlayers(state);
+  renderBarbarians(state);
   renderDice(state);
   renderHand(state);
   renderControls(state, ui);

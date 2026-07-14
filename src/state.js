@@ -3,6 +3,7 @@
 
 import { makeRng, shuffled } from './rng.js';
 import { generateBoard } from './rules/board.js';
+import { buildProgressDecks } from './rules/cak/progress-cards.js';
 
 export const RESOURCES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
 
@@ -30,7 +31,10 @@ export function zeroResources() {
 }
 
 // humanIndex: 人間プレイヤーの位置(-1 なら全員CPU、セルフプレイ用)
-export function createGame({ seed = 1, playerCount = 4, humanIndex = 0, names = null } = {}) {
+// mode: 'base'(基本カタン) | 'cak'(都市と騎士)
+export function createGame({
+  seed = 1, playerCount = 4, humanIndex = 0, names = null, mode = 'base',
+} = {}) {
   let rng = makeRng(seed);
   let board;
   [rng, board] = generateBoard(rng);
@@ -44,11 +48,26 @@ export function createGame({ seed = 1, playerCount = 4, humanIndex = 0, names = 
       resources: zeroResources(),
       devCards: [], // { type, boughtTurn }
       knightsPlayed: 0,
+      // --- 都市と騎士(設計書 §9)---
+      commodities: { cloth: 0, coin: 0, paper: 0 },
+      improvements: { trade: 0, politics: 0, science: 0 },
+      progressCards: [], // { id, deck, boughtTurn }
+      progressVP: 0,
+      defenderPoints: 0,
     });
   }
 
   let devDeck;
   [rng, devDeck] = shuffled(rng, DEV_POOL);
+
+  let progressDecks = null;
+  if (mode === 'cak') {
+    const decks = buildProgressDecks();
+    progressDecks = {};
+    for (const t of ['trade', 'politics', 'science']) {
+      [rng, progressDecks[t]] = shuffled(rng, decks[t]);
+    }
+  }
 
   // 初期配置: 1巡目 0..n-1、2巡目 n-1..0(スネーク)
   const queue = [];
@@ -57,6 +76,7 @@ export function createGame({ seed = 1, playerCount = 4, humanIndex = 0, names = 
 
   return {
     seed,
+    mode,
     rng,
     phase: 'setup', // 'setup' | 'main' | 'ended'
     turn: 0,
@@ -70,11 +90,19 @@ export function createGame({ seed = 1, playerCount = 4, humanIndex = 0, names = 
     bank: {
       resources: { wood: 19, brick: 19, sheep: 19, wheat: 19, ore: 19 },
       devDeck,
+      commodities: { cloth: 12, coin: 12, paper: 12 },
+      progressDecks,
     },
     dice: null,
+    eventDie: null, // 'ship' | 'trade' | 'politics' | 'science'(cak のみ)
     turnFlags: { rolled: false, playedDev: false },
     longestRoad: { player: null, length: 0 },
-    largestArmy: { player: null, count: 0 },
+    largestArmy: { player: null, count: 0 }, // 都市と騎士では廃止(設計書 §9.1)
+    // --- 都市と騎士 ---
+    knights: {}, // vertexId -> { player, level, active, activatedTurn }
+    walls: {}, // vertexId(都市) -> player
+    barbarians: { position: 0 },
+    metropolis: { trade: null, politics: null, science: null }, // vertexId
     winner: null,
     log: [],
   };

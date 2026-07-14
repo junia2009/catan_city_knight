@@ -560,6 +560,97 @@ function drawBuilding(ctx, view, vid, pid, type) {
   ctx.restore();
 }
 
+// 騎士: 盾型のコマ。レベルはピップ、不活性はグレー表示。
+function drawKnight(ctx, view, vid, k) {
+  const v = LAYOUT.vertices[vid];
+  const [px, py] = toPixel(view, v.x, v.y);
+  const s = view.scale * 0.15;
+  const color = k.active ? PLAYER_COLORS[k.player] : '#8a8f96';
+  const dark = k.active ? PLAYER_COLORS_DARK[k.player] : '#5a5f66';
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = view.scale * 0.06;
+  ctx.shadowOffsetY = view.scale * 0.03;
+  ctx.lineJoin = 'round';
+
+  // 盾
+  const g = ctx.createLinearGradient(px, py - s, px, py + s);
+  g.addColorStop(0, color);
+  g.addColorStop(1, dark);
+  ctx.fillStyle = g;
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = Math.max(1.5, view.scale * 0.03);
+  ctx.beginPath();
+  ctx.moveTo(px - s, py - s * 0.85);
+  ctx.lineTo(px + s, py - s * 0.85);
+  ctx.lineTo(px + s, py + s * 0.15);
+  ctx.quadraticCurveTo(px + s, py + s * 0.85, px, py + s * 1.1);
+  ctx.quadraticCurveTo(px - s, py + s * 0.85, px - s, py + s * 0.15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+  ctx.lineWidth = Math.max(1, view.scale * 0.014);
+  ctx.stroke();
+
+  // レベルピップ
+  ctx.fillStyle = k.active ? '#fff' : '#d5d8dc';
+  const pr = s * 0.18;
+  for (let i = 0; i < k.level; i++) {
+    ctx.beginPath();
+    ctx.arc(px + (i - (k.level - 1) / 2) * pr * 3, py, pr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 城壁: 都市の下の石積みリング
+function drawWall(ctx, view, vid) {
+  const v = LAYOUT.vertices[vid];
+  const [px, py] = toPixel(view, v.x, v.y);
+  const s = view.scale * 0.24;
+  ctx.save();
+  ctx.strokeStyle = '#b7aa93';
+  ctx.lineWidth = Math.max(3, view.scale * 0.06);
+  ctx.beginPath();
+  ctx.arc(px, py + s * 0.35, s, Math.PI * 0.1, Math.PI * 0.9);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(px, py + s * 0.35, s + view.scale * 0.03, Math.PI * 0.1, Math.PI * 0.9);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// メトロポリス: 都市の上の金の冠
+function drawMetropolis(ctx, view, vid) {
+  const v = LAYOUT.vertices[vid];
+  const [px, py] = toPixel(view, v.x, v.y - 0.3);
+  const s = view.scale * 0.1;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = view.scale * 0.05;
+  ctx.fillStyle = '#ffd24a';
+  ctx.strokeStyle = '#a87d10';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(px - s, py + s * 0.7);
+  ctx.lineTo(px - s, py - s * 0.3);
+  ctx.lineTo(px - s * 0.45, py + s * 0.15);
+  ctx.lineTo(px, py - s * 0.75);
+  ctx.lineTo(px + s * 0.45, py + s * 0.15);
+  ctx.lineTo(px + s, py - s * 0.3);
+  ctx.lineTo(px + s, py + s * 0.7);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function pulse(time) {
   return 0.55 + 0.35 * Math.sin(time / 260);
 }
@@ -630,8 +721,17 @@ export function drawBoard(ctx, width, height, state, ui, time = 0) {
   for (const eid of ui.pendingEdges ?? []) {
     drawRoad(ctx, view, eid, 0, 0.55);
   }
+  for (const vid of Object.keys(state.walls ?? {})) {
+    drawWall(ctx, view, vid);
+  }
   for (const [vid, b] of Object.entries(state.buildings)) {
     drawBuilding(ctx, view, vid, b.player, b.type);
+  }
+  for (const vid of Object.values(state.metropolis ?? {})) {
+    if (vid != null && state.buildings[vid]) drawMetropolis(ctx, view, vid);
+  }
+  for (const [vid, k] of Object.entries(state.knights ?? {})) {
+    drawKnight(ctx, view, vid, k);
   }
 
   drawHighlights(ctx, view, ui.highlights ?? {}, ui.selected, time);

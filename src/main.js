@@ -12,6 +12,9 @@ import {
   legalSettlementVertices,
   legalSetupEdges,
 } from './ai/legal-moves.js';
+import { LAYOUT } from './rules/board.js';
+import { razableCities } from './rules/cak/barbarians.js';
+import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
 import { drawBoard } from './render/board-render.js';
 import { renderHUD, RES_ICON } from './render/hud-render.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
@@ -31,6 +34,8 @@ function freshUi() {
     pending: null, // { vertexId } | { edgeId } | { hexId }
     pendingVertex: null, // 初期配置で選んだ開拓地
     pendingEdges: [], // 街道建設カード
+    knightFrom: null, // 騎士の移動元
+    progIndex: null, // 使用中の進歩カード
     dialog: null,
     toast: null,
     highlights: {},
@@ -40,11 +45,12 @@ function freshUi() {
 
 function newGame() {
   const playerCount = Number(document.getElementById('cpu-count').value) + 1;
+  const mode = document.getElementById('mode').value;
   const seedInput = document.getElementById('seed').value.trim();
   const seed = seedInput ? Number(seedInput) >>> 0 : (Date.now() % 0x7fffffff) || 1;
   document.getElementById('seed').value = String(seed);
   clearTimeout(cpuTimer);
-  state = createGame({ seed, playerCount, humanIndex: HUMAN });
+  state = createGame({ seed, playerCount, humanIndex: HUMAN, mode });
   ui = freshUi();
   refresh();
   scheduleCpu();
@@ -54,7 +60,7 @@ function newGame() {
 
 function syncUi() {
   const aw = state.awaiting;
-  const forced = ['setup-settlement', 'setup-road', 'move-robber'].includes(ui.mode);
+  const forced = ['setup-settlement', 'setup-road', 'move-robber', 'raze-city'].includes(ui.mode);
 
   if (state.phase === 'ended') {
     ui.mode = 'idle';
@@ -71,6 +77,10 @@ function syncUi() {
     }
     if (aw.type === 'moveRobber' && ui.mode !== 'move-robber') {
       ui.mode = 'move-robber';
+      ui.pending = null;
+    }
+    if (aw.type === 'barbarianDefense' && ui.mode !== 'raze-city') {
+      ui.mode = 'raze-city';
       ui.pending = null;
     }
     if (aw.type === 'discard' && ui.dialog?.type !== 'discard') {
@@ -106,6 +116,34 @@ function computeHighlights() {
     for (const e of ui.pendingEdges) extra[e] = true;
     return { edges: legalRoadEdges(state, HUMAN, { extraRoads: extra }) };
   }
+  // ---- 都市と騎士 ----
+  if (m === 'build-knight') {
+    return {
+      vertices: Object.keys(LAYOUT.vertices).filter(
+        (v) => validateAction(state, { type: 'BUILD_KNIGHT', player: HUMAN, vertexId: v }) === null,
+      ),
+    };
+  }
+  if (m === 'build-wall') {
+    return {
+      vertices: Object.keys(state.buildings).filter(
+        (v) => validateAction(state, { type: 'BUILD_WALL', player: HUMAN, vertexId: v }) === null,
+      ),
+    };
+  }
+  if (m === 'move-knight' && ui.knightFrom) {
+    return {
+      vertices: Object.keys(LAYOUT.vertices).filter(
+        (v) =>
+          validateAction(state, {
+            type: 'MOVE_KNIGHT', player: HUMAN,
+            fromVertexId: ui.knightFrom, toVertexId: v,
+          }) === null,
+      ),
+    };
+  }
+  if (m === 'raze-city') return { vertices: razableCities(state, HUMAN) };
+  if (m === 'play-bishop') return { hexes: legalRobberHexes(state) };
   return {};
 }
 
@@ -192,6 +230,8 @@ function doAction(action) {
   ui.pending = null;
   ui.pendingVertex = null;
   ui.pendingEdges = [];
+  ui.knightFrom = null;
+  ui.progIndex = null;
   ui.dialog = null;
   refresh();
   scheduleCpu();
@@ -275,6 +315,21 @@ canvas.addEventListener('click', (e) => {
   } else if (m === 'play-road-building') {
     const eid = pickEdge(view, px, py, ui.highlights.edges ?? []);
     if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
+  } else if (['build-knight', 'build-wall', 'move-knight', 'raze-city'].includes(m)) {
+    const vid = pickVertex(view, px, py, ui.highlights.vertices ?? []);
+    if (vid) ui.pending = { vertexId: vid };
+  } else if (m === 'play-bishop') {
+    const hid = pickHex(view, px, py, ui.highlights.hexes ?? []);
+    if (hid) ui.pending = { hexId: hid };
+  } else if (m === 'idle' && state.mode === 'cak') {
+    // 自分の騎士をクリック → 行動メニュー
+    const myKnights = Object.keys(state.knights).filter(
+      (v) => state.knights[v].player === HUMAN,
+    );
+    const vid = pickVertex(view, px, py, myKnights);
+    if (vid && state.currentPlayer === HUMAN && !state.awaiting && state.turnFlags.rolled) {
+      ui.dialog = { type: 'knight', vertexId: vid };
+    }
   }
   refresh();
 });
@@ -305,6 +360,22 @@ function confirmPending() {
       card: 'roadBuilding',
       params: { edges: [...ui.pendingEdges] },
     });
+  } else if (m === 'build-knight' && ui.pending?.vertexId) {
+    doAction({ type: 'BUILD_KNIGHT', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'build-wall' && ui.pending?.vertexId) {
+    doAction({ type: 'BUILD_WALL', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'move-knight' && ui.knightFrom && ui.pending?.vertexId) {
+    doAction({
+      type: 'MOVE_KNIGHT', player: HUMAN,
+      fromVertexId: ui.knightFrom, toVertexId: ui.pending.vertexId,
+    });
+  } else if (m === 'raze-city' && ui.pending?.vertexId) {
+    doAction({ type: 'RAZE_CITY', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'play-bishop' && ui.pending?.hexId && ui.progIndex != null) {
+    doAction({
+      type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+      index: ui.progIndex, params: { hexId: ui.pending.hexId },
+    });
   }
 }
 
@@ -313,10 +384,15 @@ function cancelMode() {
     ui.mode = 'setup-settlement';
     ui.pendingVertex = null;
     ui.pending = null;
-  } else if (['build-road', 'build-settlement', 'build-city', 'play-road-building'].includes(ui.mode)) {
+  } else if ([
+    'build-road', 'build-settlement', 'build-city', 'play-road-building',
+    'build-knight', 'build-wall', 'move-knight', 'play-bishop',
+  ].includes(ui.mode)) {
     ui.mode = 'idle';
     ui.pending = null;
     ui.pendingEdges = [];
+    ui.knightFrom = null;
+    ui.progIndex = null;
   }
   refresh();
 }
@@ -402,6 +478,74 @@ document.addEventListener('click', (e) => {
       return;
 
     case 'dialog-cancel': ui.dialog = null; refresh(); return;
+
+    // ---- 都市と騎士 ----
+
+    case 'improve-open': ui.dialog = { type: 'improve' }; refresh(); return;
+    case 'improve-buy': {
+      const before = { ...ui.dialog };
+      if (doAction({ type: 'BUY_IMPROVEMENT', player: HUMAN, track: arg })) {
+        ui.dialog = before; // 続けて改良できるようダイアログを保持
+        refresh();
+      }
+      return;
+    }
+
+    case 'knight-activate':
+      doAction({ type: 'ACTIVATE_KNIGHT', player: HUMAN, vertexId: arg });
+      return;
+    case 'knight-promote':
+      doAction({ type: 'PROMOTE_KNIGHT', player: HUMAN, vertexId: arg });
+      return;
+    case 'knight-move':
+      ui.dialog = null;
+      ui.mode = 'move-knight';
+      ui.knightFrom = arg;
+      ui.pending = null;
+      refresh();
+      return;
+    case 'knight-chase':
+      doAction({ type: 'CHASE_ROBBER', player: HUMAN, vertexId: arg });
+      return;
+
+    case 'play-prog': {
+      const index = Number(arg);
+      const card = state.players[HUMAN].progressCards[index];
+      if (!card) return;
+      const def = PROGRESS_CARDS[card.id];
+      if (def.needsParams === 'resources2') {
+        ui.dialog = { type: 'prog-harvest', picks: [], index };
+        refresh();
+      } else if (def.needsParams === 'commodity') {
+        ui.dialog = { type: 'prog-commodity', index };
+        refresh();
+      } else if (def.needsParams === 'hex') {
+        ui.mode = 'play-bishop';
+        ui.progIndex = index;
+        ui.pending = null;
+        refresh();
+      } else {
+        doAction({ type: 'PLAY_PROGRESS_CARD', player: HUMAN, index, params: null });
+      }
+      return;
+    }
+
+    case 'ph':
+      ui.dialog.picks.push(arg);
+      refresh();
+      return;
+    case 'ph-confirm':
+      doAction({
+        type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+        index: ui.dialog.index, params: { resources: [...ui.dialog.picks] },
+      });
+      return;
+    case 'pc':
+      doAction({
+        type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+        index: ui.dialog.index, params: { commodity: arg },
+      });
+      return;
   }
 });
 
