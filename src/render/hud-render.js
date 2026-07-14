@@ -26,11 +26,12 @@ function el(id) {
   return document.getElementById(id);
 }
 
-function renderPlayers(state) {
+function renderPlayers(state, ui) {
   const cak = state.mode === 'cak';
   const goal = pointsToWin(state);
   el('players').innerHTML = state.players
     .map((p) => {
+      const expanded = ui.expandedPlayer === p.id;
       const pts = computePoints(state, p.id, { includeHidden: p.id === HUMAN });
       const active =
         state.awaiting ? state.awaiting.players.includes(p.id) : state.currentPlayer === p.id;
@@ -56,7 +57,8 @@ function renderPlayers(state) {
            <span title="発展カード">📜 ${p.devCards.length}</span>
            <span title="使用済み騎士">⚔️ ${p.knightsPlayed}</span>`;
       return `
-      <div class="player ${active ? 'active' : ''}" style="--pc:${PLAYER_COLORS[p.id]}">
+      <div class="player ${active ? 'active' : ''} ${expanded ? 'expanded' : ''}"
+        style="--pc:${PLAYER_COLORS[p.id]}" data-act="pexpand:${p.id}">
         <div class="prow">
           <span class="chip"></span>
           <span class="pname">${p.name}</span>
@@ -109,7 +111,7 @@ function renderDice(state) {
     : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`;
 }
 
-function renderHand(state) {
+function renderHand(state, ui) {
   const p = state.players[HUMAN];
   const cak = state.mode === 'cak';
   const res = RESOURCES.map(
@@ -161,7 +163,9 @@ function renderHand(state) {
       })
       .join('');
   }
-  el('hand').innerHTML =
+  const handEl = el('hand');
+  handEl.className = ui.handOpen ? 'open' : 'closed';
+  handEl.innerHTML =
     res + (coms ? `<div class="sep"></div>${coms}` : '') +
     (extra ? `<div class="sep"></div>${extra}` : '');
 }
@@ -175,6 +179,7 @@ function renderControls(state, ui) {
     `<button data-act="${act}" ${enabled ? '' : 'disabled'} title="${title}">${label}</button>`;
 
   const common = [
+    `<button class="mobile-only ${ui.handOpen ? 'primary' : ''}" data-act="hand-toggle">🂠 手札 ${totalCards(p)}</button>`,
     btn('roll', '🎲 ロール', myTurn && !rolled),
     btn('mode:road', '🛤️ 道', myTurn && rolled && canAfford(p, COSTS.road), '🪵1 🧱1'),
     btn('mode:settlement', '🏠 開拓地', myTurn && rolled && canAfford(p, COSTS.settlement), '🪵1 🧱1 🐑1 🌾1'),
@@ -408,6 +413,30 @@ function dialogHtml(state, ui) {
       </div>`;
   }
 
+  if (d.type === 'settings') {
+    const s = d.settings;
+    const seg = (act, options, current) =>
+      `<div class="seg">${options
+        .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}">${label}</button>`)
+        .join('')}</div>`;
+    return `<h3>⚙️ 設定</h3>
+      <div class="srow"><span>表示</span>${seg('set-view', [['3d', '3D'], ['2d', '2D']], s.view)}</div>
+      <div class="srow"><span>モード</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本']], s.mode)}</div>
+      <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(s.cpuCount))}</div>
+      <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${s.seed}"></div>
+      <p>モード・CPU・シードは「新しいゲーム」開始時に反映されます</p>
+      <div class="row end">
+        <button class="primary" data-act="new-game">🔄 新しいゲーム</button>
+        <button data-act="dialog-cancel">閉じる</button>
+      </div>`;
+  }
+
+  if (d.type === 'log') {
+    return `<h3>📜 ログ</h3>
+      <div class="logsheet">${state.log.slice(-80).map((l) => `<div>${l}</div>`).join('')}</div>
+      <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
+  }
+
   if (d.type === 'winner') {
     const rows = state.players
       .map((pl) => ({ pl, pts: computePoints(state, pl.id, { includeHidden: true }) }))
@@ -430,10 +459,10 @@ function renderDialog(state, ui) {
 }
 
 export function renderHUD(state, ui) {
-  renderPlayers(state);
+  renderPlayers(state, ui);
   renderBarbarians(state);
   renderDice(state);
-  renderHand(state);
+  renderHand(state, ui);
   renderControls(state, ui);
   renderStatus(state, ui);
   renderLog(state);

@@ -883,8 +883,28 @@ export class Board3D {
   onResize() {
     const w = this.container.clientWidth || 1;
     const h = this.container.clientHeight || 1;
+    if (w === this._w && h === this._h) return; // リサイズ時のみ(ズームを潰さない)
+    this._w = w;
+    this._h = h;
     this.renderer.setSize(w, h);
-    this.camera.aspect = w / h;
+    this._fitCamera(w, h);
+  }
+
+  // アスペクト比に合わせて島全体が収まるよう FOV とカメラ距離を調整
+  // (縦持ちスマホでは島が横にはみ出すため)
+  _fitCamera(w, h) {
+    const aspect = w / h;
+    this.camera.aspect = aspect;
+    this.camera.fov = aspect < 0.8 ? 58 : 45;
+    const R = 5.8; // 島 + 余白の半径
+    const halfV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const dist = Math.max(R / halfV, R / (halfV * aspect));
+    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    if (dir.lengthSq() < 0.5) dir.set(0, 0.72, 0.69);
+    this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
+    this.controls.maxDistance = Math.max(24, dist * 1.3);
+    this.scene.fog.near = dist + 14;
+    this.scene.fog.far = dist + 36;
     this.camera.updateProjectionMatrix();
   }
 
@@ -1178,6 +1198,25 @@ export class Board3D {
       if (k === kind && cands.has(id)) return id;
     }
     return null;
+  }
+
+  // 論理要素のスクリーン座標(テスト・チュートリアル表示用)
+  screenPos(kind, id) {
+    let p;
+    if (kind === 'vertex') p = vpos(id);
+    else if (kind === 'edge') {
+      const e = LAYOUT.edges[id];
+      p = new THREE.Vector3(e.x, TILE_TOP, e.y);
+    } else {
+      const c = hexCenterOf(id);
+      p = new THREE.Vector3(c.x, TILE_TOP, c.y);
+    }
+    const v = p.clone().project(this.camera);
+    const r = this.renderer.domElement.getBoundingClientRect();
+    return [
+      r.left + ((v.x + 1) / 2) * r.width,
+      r.top + ((1 - (v.y + 1) / 2) / 1) * r.height,
+    ];
   }
 
   dispose() {

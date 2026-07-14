@@ -32,6 +32,24 @@ let viewMode = '3d'; // '2d' | '3d'
 let renderer3d = null;
 let renderer3dFailed = false;
 
+// 設定(⚙️シートから編集。新しいゲーム開始時に反映)
+const settings = { view: '3d', mode: 'cak', cpuCount: 3, seed: '' };
+
+// モバイル判定: レイアウトを body.mobile で切り替える
+const mobileQuery = window.matchMedia('(max-width: 820px)');
+function updateMobileClass() {
+  document.body.classList.toggle('mobile', mobileQuery.matches);
+}
+mobileQuery.addEventListener('change', () => {
+  updateMobileClass();
+  if (state) refresh();
+});
+updateMobileClass();
+
+function isMobile() {
+  return document.body.classList.contains('mobile');
+}
+
 function freshUi() {
   return {
     mode: 'idle',
@@ -44,17 +62,22 @@ function freshUi() {
     toast: null,
     highlights: {},
     selected: null,
+    handOpen: false, // モバイルの手札シート
+    expandedPlayer: null, // モバイルのプレイヤーチップ展開
   };
 }
 
 function newGame() {
-  const playerCount = Number(document.getElementById('cpu-count').value) + 1;
-  const mode = document.getElementById('mode').value;
-  const seedInput = document.getElementById('seed').value.trim();
+  const seedInput = String(settings.seed ?? '').trim();
   const seed = seedInput ? Number(seedInput) >>> 0 : (Date.now() % 0x7fffffff) || 1;
-  document.getElementById('seed').value = String(seed);
+  settings.seed = String(seed);
   clearTimeout(cpuTimer);
-  state = createGame({ seed, playerCount, humanIndex: HUMAN, mode });
+  state = createGame({
+    seed,
+    playerCount: Number(settings.cpuCount) + 1,
+    humanIndex: HUMAN,
+    mode: settings.mode,
+  });
   ui = freshUi();
   refresh();
   scheduleCpu();
@@ -183,8 +206,7 @@ async function ensureRenderer3d() {
     console.error('3D初期化に失敗:', e);
     renderer3dFailed = true;
     viewMode = '2d';
-    const sel = document.getElementById('view');
-    if (sel) sel.value = '2d';
+    settings.view = '2d';
     if (ui) {
       ui.toast = '3D表示を初期化できないため2D表示にします';
       refresh();
@@ -226,6 +248,7 @@ function refresh() {
 // 資源獲得のフローティング表示(ロール後)
 function showGainFx(before) {
   const fxEl = document.getElementById('fx');
+  const topBase = isMobile() ? Math.round(window.innerHeight * 0.24) : 34;
   let row = 0;
   for (const p of state.players) {
     const gains = RESOURCES.filter((r) => p.resources[r] > before[p.id][r]).map(
@@ -236,7 +259,7 @@ function showGainFx(before) {
     div.className = 'gain';
     div.textContent = `${p.name} ${gains.join(' ')}`;
     div.style.left = 'calc(50% - 80px)';
-    div.style.top = `${34 + row * 36}px`;
+    div.style.top = `${topBase + row * 34}px`;
     fxEl.appendChild(div);
     setTimeout(() => div.remove(), 1700);
     row++;
@@ -481,6 +504,35 @@ document.addEventListener('click', (e) => {
 
   switch (act) {
     case 'new-game': newGame(); return;
+
+    case 'settings-open':
+      ui.dialog = { type: 'settings', settings };
+      refresh();
+      return;
+    case 'log-open':
+      ui.dialog = { type: 'log' };
+      refresh();
+      return;
+    case 'set-view': {
+      settings.view = arg;
+      viewMode = arg;
+      const apply = () => refresh();
+      if (arg === '3d') ensureRenderer3d().then(apply);
+      else apply();
+      return;
+    }
+    case 'set-mode': settings.mode = arg; refresh(); return;
+    case 'set-cpu': settings.cpuCount = Number(arg); refresh(); return;
+
+    case 'hand-toggle':
+      ui.handOpen = !ui.handOpen;
+      refresh();
+      return;
+    case 'pexpand':
+      ui.expandedPlayer = ui.expandedPlayer === Number(arg) ? null : Number(arg);
+      refresh();
+      return;
+
     case 'roll': doAction({ type: 'ROLL_DICE', player: HUMAN }); return;
     case 'end-turn': doAction({ type: 'END_TURN', player: HUMAN }); return;
     case 'buy-dev': doAction({ type: 'BUY_DEV_CARD', player: HUMAN }); return;
@@ -625,10 +677,9 @@ document.addEventListener('click', (e) => {
 
 window.addEventListener('resize', () => state && refresh());
 
-document.getElementById('view').addEventListener('change', async (e) => {
-  viewMode = e.target.value;
-  if (viewMode === '3d') await ensureRenderer3d();
-  refresh();
+// 設定シートのシード入力(再描画されても値を保持する)
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'seed-input') settings.seed = e.target.value;
 });
 
 // デバッグ・テスト用フック(シード制御と合わせて再現検証に使う)
@@ -636,6 +687,9 @@ window.catanDebug = {
   getState: () => state,
   setState: (s) => { state = s; refresh(); scheduleCpu(); },
   doAction,
+  newGameWith: (patch) => { Object.assign(settings, patch); newGame(); },
+  getUi: () => ui,
+  screenPos: (kind, id) => (renderer3d ? renderer3d.screenPos(kind, id) : null),
 };
 
 newGame();
