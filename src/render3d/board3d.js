@@ -649,8 +649,10 @@ export class Board3D {
     this.controls.dampingFactor = 0.08;
     this.controls.minDistance = 5;
     this.controls.maxDistance = 24;
-    this.controls.minPolarAngle = Math.PI * 0.08;
-    this.controls.maxPolarAngle = Math.PI * 0.44;
+    // 誤操作で真俯瞰や水平近くまで倒れると盤面が分からなくなるため範囲を絞る
+    this.controls.minPolarAngle = Math.PI * 0.17;
+    this.controls.maxPolarAngle = Math.PI * 0.36;
+    this.controls.rotateSpeed = 0.65;
     this.controls.enablePan = false;
 
     // ライティング
@@ -1198,6 +1200,14 @@ export class Board3D {
       if (k === kind && cands.has(id)) return id;
     }
     return null;
+  }
+
+  // 視点を初期アングルに戻す
+  resetView() {
+    this.controls.target.set(0, 0, 0.4);
+    this.camera.position.set(0, 8.6, 8.2);
+    this._w = this._h = 0; // 距離の再フィットを強制
+    this.onResize();
   }
 
   // 論理要素のスクリーン座標(テスト・チュートリアル表示用)

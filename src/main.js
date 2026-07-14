@@ -218,6 +218,7 @@ function applyViewMode() {
   const is3d = viewMode === '3d' && renderer3d && !renderer3dFailed;
   canvas.style.display = is3d ? 'none' : 'block';
   board3dWrap.style.display = is3d ? 'block' : 'none';
+  document.getElementById('view-reset').style.display = is3d ? 'block' : 'none';
   if (is3d) renderer3d.onResize();
 }
 
@@ -526,6 +527,9 @@ document.addEventListener('click', (e) => {
     case 'pexpand':
       ui.expandedPlayer = ui.expandedPlayer === Number(arg) ? null : Number(arg);
       refresh();
+      return;
+    case 'view-reset':
+      renderer3d?.resetView();
       return;
 
     case 'roll': doAction({ type: 'ROLL_DICE', player: HUMAN }); return;
