@@ -332,6 +332,9 @@
     margin: -4px 0 22px 0.42em;
   }
   button.big { font-size: 17px; padding: 15px 52px; border-radius: 12px; }
+  #load-note { min-height: 18px; margin-top: 14px; font-size: 12px; color: var(--dim); }
+  #load-note.pulse { animation: notePulse 1.2s ease-in-out infinite; }
+  @keyframes notePulse { 50% { opacity: 0.45; } }
 
   .select-panel {
     background: linear-gradient(180deg, #17334f, #0f2439);
@@ -517,6 +520,7 @@
       <h2 class="title-logo">カタン</h2>
       <div class="title-sub">CITIES & KNIGHTS</div>
       <button class="primary big" data-act="goto-select">はじめる</button>
+      <div id="load-note"></div>
     </div>
   </div>
   <div id="screen-select" class="screen">

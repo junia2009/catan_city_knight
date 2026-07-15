@@ -222,24 +222,35 @@ function animLoop(time) {
   animId = hasPulse() ? requestAnimationFrame(animLoop) : null;
 }
 
-// 3D レンダラーは必要になったときに読み込む(WebGL 不可なら 2D にフォールバック)
+// 3D レンダラーは必要になったときに読み込む。
+// 読み込み失敗・ハング(8秒)時は 2D にフォールバックして操作不能を防ぐ。
+let renderer3dLoading = null;
+
 async function ensureRenderer3d() {
   if (renderer3d || renderer3dFailed) return renderer3d;
-  try {
-    const { Board3D } = await import('./render3d/board3d.js');
-    renderer3d = new Board3D(board3dWrap);
-    attach3dInput();
-  } catch (e) {
-    console.error('3D初期化に失敗:', e);
-    renderer3dFailed = true;
-    viewMode = '2d';
-    settings.view = '2d';
-    if (ui) {
-      ui.toast = '3D表示を初期化できないため2D表示にします';
-      refresh();
+  if (renderer3dLoading) return renderer3dLoading;
+  renderer3dLoading = (async () => {
+    try {
+      const mod = await Promise.race([
+        import('./render3d/board3d.js'),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('3D読み込みタイムアウト')), 8000),
+        ),
+      ]);
+      renderer3d = new mod.Board3D(board3dWrap);
+      attach3dInput();
+    } catch (e) {
+      console.error('3D初期化に失敗:', e);
+      renderer3dFailed = true;
+      viewMode = '2d';
+      settings.view = '2d';
+    } finally {
+      renderer3dLoading = null;
+      if (ui) refresh();
     }
-  }
-  return renderer3d;
+    return renderer3d;
+  })();
+  return renderer3dLoading;
 }
 
 function applyViewMode() {
@@ -267,6 +278,20 @@ function refresh() {
     ui.highlights = {};
   }
   renderSelectPanel();
+  // タイトル画面の読み込み状態表示
+  const note = document.getElementById('load-note');
+  if (note) {
+    if (viewMode === '3d' && !renderer3d && !renderer3dFailed) {
+      note.textContent = '島を読み込んでいます…';
+      note.classList.add('pulse');
+    } else if (renderer3dFailed) {
+      note.textContent = '3Dを読み込めなかったため2D表示で動作します(設定で再試行できます)';
+      note.classList.remove('pulse');
+    } else {
+      note.textContent = '';
+      note.classList.remove('pulse');
+    }
+  }
   ui.highlights = screen === 'game' ? computeHighlights() : {};
   ui.selected = ui.pending ?? (ui.pendingVertex ? { vertexId: ui.pendingVertex } : null);
   applyViewMode();
@@ -568,9 +593,11 @@ document.addEventListener('click', (e) => {
     case 'set-view': {
       settings.view = arg;
       viewMode = arg;
-      const apply = () => refresh();
-      if (arg === '3d') ensureRenderer3d().then(apply);
-      else apply();
+      if (arg === '3d') {
+        renderer3dFailed = false; // 手動で選び直したら再挑戦できる
+        ensureRenderer3d().then(() => refresh());
+      }
+      refresh();
       return;
     }
     case 'set-mode': settings.mode = arg; refresh(); return;
@@ -755,6 +782,7 @@ window.catanDebug = {
   getUi: () => ui,
   screenPos: (kind, id) => (renderer3d ? renderer3d.screenPos(kind, id) : null),
   getRenderer: () => renderer3d,
+  getViewState: () => ({ viewMode, has3d: !!renderer3d, failed: renderer3dFailed, screen }),
 };
 
 // PWA: Service Worker 登録。
