@@ -401,7 +401,7 @@ function dialogHtml(state, ui) {
     const btns = d.targets.map((t) => {
       const tp = state.players[t];
       return `<button class="pick" data-act="steal:${t}" style="--pc:${PLAYER_COLORS[t]}">
-        <span class="chip"></span>${tp.name}<small>手札${totalResources(tp)}枚</small></button>`;
+        <span class="chip"></span>${tp.name}<small>手札${totalCards(tp)}枚</small></button>`;
     }).join('');
     return `<h3>🥷 誰から奪いますか?</h3><div class="row">${btns}</div>`;
   }

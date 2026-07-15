@@ -982,7 +982,11 @@ export class Board3D {
       tile.castShadow = true;
       tile.userData = { kind: 'hex', id: hid };
       this.staticGroup.add(tile);
-      this.pickGroup.add(this._pickerAt('hex', hid, new THREE.Vector3(c.x, TILE_TOP, c.y), 0.75));
+      // ヘックスの当たり判定はタイル全面(盗賊移動などでどこをタップしても反応する)
+      const hexPicker = new THREE.Mesh(GEO.hexFlat, PICK_MAT);
+      hexPicker.position.set(c.x, TILE_TOP + 0.02, c.y);
+      hexPicker.userData = { kind: 'hex', id: hid };
+      this.pickGroup.add(hexPicker);
 
       decorateHex(this.staticGroup, hid, hex.terrain);
 
