@@ -48,6 +48,7 @@ import {
 import { applyImprovement, canBuyImprovement } from './rules/cak/improvements.js';
 import {
   COMMODITIES,
+  COM_JP,
   PROGRESS_CARDS,
   distributeProgressCards,
 } from './rules/cak/progress-cards.js';
@@ -164,6 +165,29 @@ export function validateAction(state, action) {
         ? state.bank.resources[receive]
         : state.bank.commodities[receive];
       if (stock < 1) return '銀行に在庫がありません';
+      return null;
+    }
+
+    case 'TRADE_PLAYERS': {
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      const partner = state.players[action.partner];
+      if (!partner || action.partner === pid) return '交易相手が不正です';
+      const keys = state.mode === 'cak' ? ALL_CARD_KEYS : RESOURCES;
+      const validObj = (obj) =>
+        obj != null &&
+        Object.entries(obj).every(
+          ([k, n]) => keys.includes(k) && Number.isInteger(n) && n > 0,
+        );
+      if (!validObj(action.give) || !validObj(action.receive)) return '交易内容が不正です';
+      if (sumRes(action.give) === 0 || sumRes(action.receive) === 0) {
+        return '渡すものともらうものを両方選んでください';
+      }
+      for (const [r, n] of Object.entries(action.give)) {
+        if (cardCount(p, r) < n) return '手札が足りません';
+      }
+      for (const [r, n] of Object.entries(action.receive)) {
+        if (cardCount(partner, r) < n) return '相手の手札が足りません';
+      }
       return null;
     }
 
@@ -528,6 +552,29 @@ function applyAction(state, action) {
       move(action.give, -rate);
       move(action.receive, 1);
       addLog(state, `${p.name}が${rate}:1 交易(${action.give} → ${action.receive})`);
+      break;
+    }
+
+    case 'TRADE_PLAYERS': {
+      const partner = state.players[action.partner];
+      const transfer = (from, to, obj) => {
+        for (const [r, n] of Object.entries(obj)) {
+          if (RESOURCES.includes(r)) {
+            from.resources[r] -= n;
+            to.resources[r] += n;
+          } else {
+            from.commodities[r] -= n;
+            to.commodities[r] += n;
+          }
+        }
+      };
+      transfer(p, partner, action.give);
+      transfer(partner, p, action.receive);
+      const fmt = (obj) =>
+        Object.entries(obj)
+          .map(([r, n]) => `${RES_JP[r] ?? COM_JP[r]}×${n}`)
+          .join(' ');
+      addLog(state, `🤝 ${p.name} ⇄ ${partner.name}: ${fmt(action.give)} ⇄ ${fmt(action.receive)}`);
       break;
     }
 

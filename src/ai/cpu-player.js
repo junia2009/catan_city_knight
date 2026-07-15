@@ -152,6 +152,69 @@ function tryTradeTowardGoal(state, pid, goal) {
   return null;
 }
 
+// ---- プレイヤー間交易 ----
+
+function cardCountOf(player, key) {
+  return RESOURCES.includes(key) ? player.resources[key] : player.commodities[key];
+}
+
+// pid が「incoming をもらい outgoing を渡す」取引を受けるかどうか。
+// 次の目標への不足資源は高く、余剰は安く評価し、明確に得なときだけ受ける。
+export function cpuAcceptsTrade(state, pid, incoming, outgoing) {
+  const p = state.players[pid];
+  for (const [r, n] of Object.entries(outgoing)) {
+    if (cardCountOf(p, r) < n) return false;
+  }
+  const goal = nextGoal(state, pid);
+  const missing = goal ? missingFor(p, goal.cost) : {};
+
+  const valueOf = (r, forIncoming) => {
+    let v = COMMODITIES.includes(r) ? 1.35 : 1.0;
+    if (missing[r]) v += forIncoming ? 1.0 : 1.3; // 不足資源は欲しいし、手放したくない
+    const surplus = cardCountOf(p, r) - (goal?.cost?.[r] ?? 0);
+    if (!forIncoming && surplus >= 3) v -= 0.3; // 余りは安く出せる
+    return v;
+  };
+
+  let inValue = 0;
+  for (const [r, n] of Object.entries(incoming)) inValue += valueOf(r, true) * n;
+  let outValue = 0;
+  for (const [r, n] of Object.entries(outgoing)) outValue += valueOf(r, false) * n;
+
+  // 枚数差が大きすぎる取引は数量で損(手札上限・柔軟性)
+  const countDiff = Object.values(outgoing).reduce((a, b) => a + b, 0) -
+    Object.values(incoming).reduce((a, b) => a + b, 0);
+  return inValue >= outValue + 0.5 + Math.max(0, countDiff) * 0.3;
+}
+
+// CPU が他の CPU に 1:1 交易を持ちかける(不足資源 ⇄ 余剰資源)
+function tryTradeWithPlayers(state, pid, goal) {
+  if (!goal) return null;
+  const p = state.players[pid];
+  const missing = missingFor(p, goal.cost);
+  const missingRes = Object.keys(missing);
+  if (!missingRes.length) return null;
+
+  const surpluses = RESOURCES.filter(
+    (r) => p.resources[r] - (goal.cost[r] ?? 0) >= 2 && !missing[r],
+  );
+  for (const want of missingRes) {
+    for (const give of surpluses) {
+      for (const other of state.players) {
+        if (other.id === pid || !other.isCPU) continue; // 人間には割り込めないためCPU同士のみ
+        if (cardCountOf(other, want) < 1) continue;
+        if (!cpuAcceptsTrade(state, other.id, { [give]: 1 }, { [want]: 1 })) continue;
+        const action = {
+          type: 'TRADE_PLAYERS', player: pid, partner: other.id,
+          give: { [give]: 1 }, receive: { [want]: 1 },
+        };
+        if (valid(state, action)) return action;
+      }
+    }
+  }
+  return null;
+}
+
 // ---- 基本カタン: 発展カード ----
 
 function tryPlayDevCard(state, pid) {
@@ -411,10 +474,12 @@ export function chooseAction(state, pid) {
     }
   }
 
-  // 5. 目標に向けた銀行/港交易
+  // 5. 目標に向けた銀行/港交易 → だめなら他のCPUへ1:1交易を提案
   const goal = nextGoal(state, pid);
   const trade = tryTradeTowardGoal(state, pid, goal);
   if (trade) return trade;
+  const ptrade = tryTradeWithPlayers(state, pid, goal);
+  if (ptrade) return ptrade;
 
   // 6. cak: 城壁(レンガ余剰時)/ 基本: 発展カード購入
   if (cak) {

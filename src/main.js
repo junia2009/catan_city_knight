@@ -3,7 +3,7 @@
 
 import { createGame, RESOURCES } from './state.js';
 import { dispatch, validateAction } from './actions.js';
-import { chooseAction } from './ai/cpu-player.js';
+import { chooseAction, cpuAcceptsTrade } from './ai/cpu-player.js';
 import { stealableTargets } from './rules/robber.js';
 import {
   legalCityVertices,
@@ -646,7 +646,46 @@ document.addEventListener('click', (e) => {
       return;
     }
 
-    case 'trade-open': ui.dialog = { type: 'trade', give: null, receive: null }; refresh(); return;
+    case 'trade-open':
+      ui.dialog = { type: 'trade', tab: 'bank', give: null, receive: null, pgive: {}, precv: {} };
+      refresh();
+      return;
+    case 'trade-tab': ui.dialog.tab = arg; refresh(); return;
+
+    case 'ptg-add':
+      ui.dialog.pgive[arg] = (ui.dialog.pgive[arg] ?? 0) + 1;
+      refresh();
+      return;
+    case 'ptg-sub':
+      if (--ui.dialog.pgive[arg] <= 0) delete ui.dialog.pgive[arg];
+      refresh();
+      return;
+    case 'ptr-add':
+      ui.dialog.precv[arg] = (ui.dialog.precv[arg] ?? 0) + 1;
+      refresh();
+      return;
+    case 'ptr-sub':
+      if (--ui.dialog.precv[arg] <= 0) delete ui.dialog.precv[arg];
+      refresh();
+      return;
+    case 'pt-propose': {
+      const { pgive, precv } = ui.dialog;
+      for (const pl of state.players) {
+        if (!pl.isCPU) continue;
+        const action = {
+          type: 'TRADE_PLAYERS', player: HUMAN, partner: pl.id,
+          give: { ...pgive }, receive: { ...precv },
+        };
+        if (validateAction(state, action) === null &&
+            cpuAcceptsTrade(state, pl.id, pgive, precv)) {
+          doAction(action);
+          return;
+        }
+      }
+      ui.toast = '誰も交易に応じませんでした';
+      refresh();
+      return;
+    }
     case 'trade-give': ui.dialog.give = arg; if (ui.dialog.receive === arg) ui.dialog.receive = null; refresh(); return;
     case 'trade-receive': ui.dialog.receive = arg; refresh(); return;
     case 'trade-confirm':

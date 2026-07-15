@@ -289,6 +289,35 @@ function dialogHtml(state, ui) {
     const icon = (k) => RES_ICON[k] ?? COM_ICON[k];
     const jp = (k) => RES_JP[k] ?? COM_JP[k];
     const have = (k) => (RES_ICON[k] ? p.resources[k] : p.commodities[k]);
+
+    const tabs = `<div class="seg">
+      <button class="${d.tab === 'bank' ? 'sel' : ''}" data-act="trade-tab:bank">🏦 銀行/港</button>
+      <button class="${d.tab === 'players' ? 'sel' : ''}" data-act="trade-tab:players">🤝 プレイヤー</button>
+    </div>`;
+
+    if (d.tab === 'players') {
+      const sum = (obj) => Object.values(obj).reduce((a, b) => a + b, 0);
+      const chipRow = (selected, addAct, subAct, maxOf) => keys.map((r) => {
+        const n = selected[r] ?? 0;
+        const ok = maxOf(r) > n;
+        return `<button class="pick tchip ${n ? 'sel' : ''}" data-act="${addAct}:${r}" ${ok || n ? '' : 'disabled'}>
+          <span class="picon">${icon(r)}</span>${jp(r)}
+          ${n ? `<span class="tbadge" data-act="${subAct}:${r}">− ${n}</span>` : `<small>${maxOf(r)}</small>`}
+        </button>`;
+      }).join('');
+      return `<h3>⚖️ 交易</h3>${tabs}
+        <p>渡すもの(タップで追加、バッジで減らす)</p>
+        <div class="row">${chipRow(d.pgive, 'ptg-add', 'ptg-sub', (r) => have(r))}</div>
+        <p>もらうもの</p>
+        <div class="row">${chipRow(d.precv, 'ptr-add', 'ptr-sub', () => 6)}</div>
+        <p>提案すると、得だと判断したCPUが応じます</p>
+        <div class="row end">
+          <button class="primary" data-act="pt-propose"
+            ${sum(d.pgive) > 0 && sum(d.precv) > 0 ? '' : 'disabled'}>提案する</button>
+          <button data-act="dialog-cancel">閉じる</button>
+        </div>`;
+    }
+
     const stock = (k) =>
       RES_ICON[k] ? state.bank.resources[k] : state.bank.commodities[k];
     const giveBtns = keys.map((r) => {
@@ -302,7 +331,7 @@ function dialogHtml(state, ui) {
       return `<button class="pick ${d.receive === r ? 'sel' : ''}" data-act="trade-receive:${r}" ${ok ? '' : 'disabled'}>
         <span class="picon">${icon(r)}</span>${jp(r)}</button>`;
     }).join('');
-    return `<h3>⚖️ 銀行/港と交易</h3>
+    return `<h3>⚖️ 交易</h3>${tabs}
       <p>渡すもの</p><div class="row">${giveBtns}</div>
       <p>もらうもの</p><div class="row">${recvBtns}</div>
       <div class="row end">
