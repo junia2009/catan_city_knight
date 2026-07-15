@@ -676,6 +676,19 @@ document.addEventListener('click', (e) => {
 
 window.addEventListener('resize', () => state && refresh());
 
+// iOS は user-scalable=no を無視してページのピンチズームを許可するため明示的に抑止する
+// (盤面の2本指ピンチは OrbitControls のカメラズームとしてのみ機能させる)
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+}
+document.addEventListener(
+  'touchmove',
+  (e) => {
+    if (e.scale !== undefined && e.scale !== 1) e.preventDefault();
+  },
+  { passive: false },
+);
+
 // 設定シートのシード入力(再描画されても値を保持する)
 document.addEventListener('input', (e) => {
   if (e.target.id === 'seed-input') settings.seed = e.target.value;

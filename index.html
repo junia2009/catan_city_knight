@@ -20,6 +20,8 @@
   html, body { height: 100%; }
   /* iOS WebKit のフォント自動拡大を無効化(レイアウト崩れの原因になる) */
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  /* ダブルタップズームを無効化(タップ操作の誤爆防止。ピンチはJS側で抑止) */
+  html, body, button { touch-action: manipulation; }
   body {
     background: var(--bg);
     color: var(--text);
