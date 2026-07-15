@@ -35,6 +35,34 @@ let renderer3dFailed = false;
 // 設定(⚙️シートから編集。新しいゲーム開始時に反映)
 const settings = { view: '3d', mode: 'cak', cpuCount: 3, seed: '' };
 
+// 画面フロー: title(タイトル) → select(ルール選択) → game(ゲーム)
+let screen = 'title';
+
+function setScreen(s) {
+  screen = s;
+  document.body.dataset.screen = s;
+  if (ui) refresh();
+}
+
+// ルール選択画面の描画(settings と連動)
+function renderSelectPanel() {
+  const panel = document.getElementById('select-panel');
+  if (!panel || screen !== 'select') return;
+  const seg = (act, options, current) =>
+    `<div class="seg">${options
+      .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}">${label}</button>`)
+      .join('')}</div>`;
+  panel.innerHTML = `
+    <h3>⬡ ゲーム設定</h3>
+    <div class="srow"><span>ルール</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本']], settings.mode)}</div>
+    <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(settings.cpuCount))}</div>
+    <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${settings.seed}"></div>
+    <div class="row end">
+      <button data-act="goto-title">← タイトル</button>
+      <button class="primary" data-act="start-game">ゲーム開始</button>
+    </div>`;
+}
+
 // モバイル判定: レイアウトを body.mobile で切り替える
 const mobileQuery = window.matchMedia('(max-width: 820px)');
 function updateMobileClass() {
@@ -224,7 +252,15 @@ function applyViewMode() {
 
 function refresh() {
   syncUi();
-  ui.highlights = computeHighlights();
+  if (screen !== 'game') {
+    // タイトル/選択画面中はダイアログ・入力モードを持ち込まない
+    ui.dialog = null;
+    ui.mode = 'idle';
+    ui.pending = null;
+    ui.highlights = {};
+  }
+  renderSelectPanel();
+  ui.highlights = screen === 'game' ? computeHighlights() : {};
   ui.selected = ui.pending ?? (ui.pendingVertex ? { vertexId: ui.pendingVertex } : null);
   applyViewMode();
   if (viewMode === '3d' && renderer3d) {
@@ -321,6 +357,7 @@ function actingCpu() {
 
 function scheduleCpu() {
   clearTimeout(cpuTimer);
+  if (screen !== 'game') return; // タイトル背景の盤面ではCPUを動かさない
   const pid = actingCpu();
   if (pid == null) return;
   const delay = state.awaiting ? 300 : state.phase === 'setup' ? 450 : 550;
@@ -504,6 +541,14 @@ document.addEventListener('click', (e) => {
 
   switch (act) {
     case 'new-game': newGame(); return;
+
+    // ---- 画面フロー ----
+    case 'goto-select': setScreen('select'); return;
+    case 'goto-title': setScreen('title'); return;
+    case 'start-game':
+      setScreen('game');
+      newGame();
+      return;
 
     case 'settings-open':
       ui.dialog = { type: 'settings', settings };
@@ -699,7 +744,7 @@ window.catanDebug = {
   getState: () => state,
   setState: (s) => { state = s; refresh(); scheduleCpu(); },
   doAction,
-  newGameWith: (patch) => { Object.assign(settings, patch); newGame(); },
+  newGameWith: (patch) => { Object.assign(settings, patch); setScreen('game'); newGame(); },
   getUi: () => ui,
   screenPos: (kind, id) => (renderer3d ? renderer3d.screenPos(kind, id) : null),
   getRenderer: () => renderer3d,
@@ -718,5 +763,14 @@ if ('serviceWorker' in navigator) {
     .catch((e) => console.warn('SW登録失敗:', e));
 }
 
-newGame();
+// 起動: タイトル画面。背景用にCPUなしの盤面を1つ生成して飾る
+document.body.dataset.screen = screen;
+state = createGame({
+  seed: (Date.now() % 0x7fffffff) || 1,
+  playerCount: 4,
+  humanIndex: -1,
+  mode: 'cak',
+});
+ui = freshUi();
+refresh();
 if (viewMode === '3d') ensureRenderer3d().then(() => state && refresh());

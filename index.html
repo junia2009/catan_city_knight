@@ -296,6 +296,52 @@
     100% { transform: translateY(-46px); opacity: 0; }
   }
 
+  /* ---------- 画面フロー(タイトル / ルール選択) ---------- */
+  .screen {
+    position: fixed; inset: 0; z-index: 20;
+    display: none; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 40%,
+      rgba(8, 22, 38, 0.35) 0%, rgba(8, 22, 38, 0.88) 78%);
+    animation: fadeIn 0.3s ease-out;
+  }
+  body[data-screen="title"] #screen-title { display: flex; }
+  body[data-screen="select"] #screen-select { display: flex; }
+  body:not([data-screen="game"]) #topbar,
+  body:not([data-screen="game"]) #side,
+  body:not([data-screen="game"]) #bottom,
+  body:not([data-screen="game"]) #view-reset { display: none !important; }
+
+  .title-inner {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 24px; text-align: center;
+    transform: translateY(-4vh);
+  }
+  .title-icon {
+    width: 96px; height: 96px; border-radius: 22px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+    margin-bottom: 6px;
+  }
+  .title-logo {
+    font-size: 44px; font-weight: 800; letter-spacing: 0.3em;
+    color: var(--accent2); text-shadow: 0 4px 18px rgba(0,0,0,0.7);
+    margin-left: 0.3em; /* letter-spacing の右余白を相殺 */
+  }
+  .title-sub {
+    font-size: 12px; letter-spacing: 0.42em; color: var(--dim);
+    margin: -4px 0 22px 0.42em;
+  }
+  button.big { font-size: 17px; padding: 15px 52px; border-radius: 12px; }
+
+  .select-panel {
+    background: linear-gradient(180deg, #17334f, #0f2439);
+    border: 1px solid rgba(130, 180, 230, 0.3);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    padding: 22px 20px; width: min(420px, 92vw);
+    display: flex; flex-direction: column; gap: 13px;
+  }
+  .select-panel h3 { font-size: 17px; color: var(--accent2); text-align: center; }
+
   /* ---------- 設定シート ---------- */
   .seg { display: flex; gap: 6px; }
   .seg button { flex: 1; }
@@ -463,6 +509,19 @@
       <div id="controls"></div>
     </div>
   </div>
+  <!-- 画面フロー: タイトル → ルール選択 → ゲーム -->
+  <div id="screen-title" class="screen">
+    <div class="title-inner">
+      <img src="icons/icon-192.png" alt="" class="title-icon">
+      <h2 class="title-logo">カタン</h2>
+      <div class="title-sub">CITIES & KNIGHTS</div>
+      <button class="primary big" data-act="goto-select">はじめる</button>
+    </div>
+  </div>
+  <div id="screen-select" class="screen">
+    <div class="select-panel" id="select-panel"></div>
+  </div>
+
   <div id="dialog-root"></div>
   <script type="importmap">
   {

@@ -442,6 +442,7 @@ function dialogHtml(state, ui) {
       <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${s.seed}"></div>
       <p>モード・CPU・シードは「新しいゲーム」開始時に反映されます</p>
       <div class="row end">
+        <button data-act="goto-title">🏝 ゲームをやめてタイトルへ</button>
         <button class="primary" data-act="new-game">🔄 新しいゲーム</button>
         <button data-act="dialog-cancel">閉じる</button>
       </div>`;
@@ -463,7 +464,10 @@ function dialogHtml(state, ui) {
       .join('');
     return `<h3 class="win-title">🏆 ${state.players[state.winner].name}の勝利!</h3>
       ${rows}
-      <div class="row end"><button class="primary" data-act="new-game">新しいゲーム</button></div>`;
+      <div class="row end">
+        <button data-act="new-game">もう一度</button>
+        <button class="primary" data-act="goto-title">タイトルへ</button>
+      </div>`;
   }
   return '';
 }
