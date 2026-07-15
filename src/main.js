@@ -705,5 +705,18 @@ window.catanDebug = {
   getRenderer: () => renderer3d,
 };
 
+// PWA: Service Worker 登録。
+// updateViaCache: 'none' で sw.js の更新確認は常にネットワークへ。
+// SW はネットワーク優先なので、オンライン時は必ず最新バージョンが表示される。
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker
+    .register('./sw.js', { updateViaCache: 'none' })
+    .then((reg) => {
+      reg.update();
+      setInterval(() => reg.update(), 60 * 60 * 1000); // 長時間開きっぱなし対策
+    })
+    .catch((e) => console.warn('SW登録失敗:', e));
+}
+
 newGame();
 if (viewMode === '3d') ensureRenderer3d().then(() => state && refresh());
