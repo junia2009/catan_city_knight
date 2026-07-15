@@ -243,11 +243,18 @@ async function ensureRenderer3d() {
 }
 
 function applyViewMode() {
-  const is3d = viewMode === '3d' && renderer3d && !renderer3dFailed;
-  canvas.style.display = is3d ? 'none' : 'block';
+  const want3d = viewMode === '3d' && !renderer3dFailed;
+  const is3d = want3d && renderer3d;
+  // 3D読み込み待ちの間も2D盤面は出さない(2D→3Dのちらつき防止)
+  canvas.style.display = want3d ? 'none' : 'block';
   board3dWrap.style.display = is3d ? 'block' : 'none';
+  if (is3d) {
+    requestAnimationFrame(() => board3dWrap.classList.add('on')); // フェードイン
+    renderer3d.onResize();
+  } else {
+    board3dWrap.classList.remove('on');
+  }
   document.getElementById('view-reset').style.display = is3d ? 'block' : 'none';
-  if (is3d) renderer3d.onResize();
 }
 
 function refresh() {
