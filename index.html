@@ -336,19 +336,21 @@
     pointer-events: none;
   }
   body.mobile #players {
-    flex-direction: row; overflow-x: auto; gap: 6px; padding: 6px 8px;
-    pointer-events: auto; scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    flex-direction: row; gap: 5px; padding: 6px 8px;
+    pointer-events: auto;
   }
-  body.mobile #players::-webkit-scrollbar { display: none; }
   body.mobile .player {
-    flex: none; min-width: 96px; padding: 5px 9px;
+    flex: 1 1 0; min-width: 0; padding: 5px 6px;
     background: rgba(11, 26, 43, 0.85); border-radius: 10px;
     transition: none;
   }
   body.mobile .player.active { transform: none; }
-  body.mobile .pname { font-size: 12px; }
-  body.mobile .ppts { font-size: 15px; }
+  body.mobile .player .prow { gap: 5px; flex-wrap: nowrap; justify-content: center; }
+  /* チップは色ドット+点数のみ(名前はタップ展開時に表示) */
+  body.mobile .pname { display: none; font-size: 11px; }
+  body.mobile .player.expanded .pname { display: block; }
+  body.mobile .ppts { font-size: 15px; flex: none; margin-left: 0; }
+  body.mobile .chip { width: 12px; height: 12px; }
   body.mobile .player .pinfo { display: none; }
   body.mobile .player.expanded .pinfo { display: flex; }
   body.mobile #barb {

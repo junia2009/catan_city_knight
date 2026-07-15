@@ -644,7 +644,7 @@ export class Board3D {
     this.camera.position.set(0, 8.6, 8.2);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(0, 0, 0.4);
+    this.controls.target.set(0, 0, 0); // 回転軸は島の中心
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
     this.controls.minDistance = 5;
@@ -1236,7 +1236,7 @@ export class Board3D {
 
   // 視点を初期アングルに戻す
   resetView() {
-    this.controls.target.set(0, 0, 0.4);
+    this.controls.target.set(0, 0, 0); // 回転軸は島の中心
     this.camera.position.copy(this.controls.target).addScaledVector(this._defaultDir(), 12);
     this._w = this._h = 0; // 距離の再フィットを強制
     this.onResize();
