@@ -446,6 +446,82 @@ function makeKnight(k) {
   return g;
 }
 
+// ---- 環境演出(帆船・飛行機・雲) ----
+
+function makeSailboat(sailColor) {
+  const g = new THREE.Group();
+  const hullMat = mat(0x8a6238, { roughness: 0.9 });
+  const hull = new THREE.Mesh(GEO.box, hullMat);
+  hull.scale.set(0.55, 0.13, 0.2);
+  hull.position.y = 0.08;
+  const prow = new THREE.Mesh(GEO.cone, hullMat);
+  prow.scale.set(0.1, 0.2, 0.1);
+  prow.rotation.z = -Math.PI / 2;
+  prow.position.set(0.37, 0.08, 0);
+  const mast = new THREE.Mesh(GEO.pole, mat(0x5a4328));
+  mast.position.y = 0.38;
+  const sailShape = new THREE.Shape();
+  sailShape.moveTo(0, 0);
+  sailShape.lineTo(0, 0.46);
+  sailShape.quadraticCurveTo(0.3, 0.24, 0.26, 0);
+  sailShape.closePath();
+  const sail = new THREE.Mesh(
+    new THREE.ShapeGeometry(sailShape),
+    new THREE.MeshStandardMaterial({
+      color: sailColor, roughness: 0.85, side: THREE.DoubleSide, flatShading: true,
+    }),
+  );
+  sail.position.set(0.02, 0.16, 0);
+  g.add(hull, prow, mast, sail);
+  g.traverse((o) => { o.castShadow = true; });
+  return g;
+}
+
+function makePlane() {
+  const g = new THREE.Group();
+  const bodyMat = mat(0xe8e2d2, { roughness: 0.6 });
+  const accentMat = mat(0xd9534f, { roughness: 0.6 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.055, 0.62, 8), bodyMat);
+  body.rotation.z = -Math.PI / 2;
+  const nose = new THREE.Mesh(GEO.cone, accentMat);
+  nose.scale.set(0.09, 0.12, 0.09);
+  nose.rotation.z = -Math.PI / 2;
+  nose.position.x = 0.36;
+  const wing = new THREE.Mesh(GEO.box, accentMat);
+  wing.scale.set(0.16, 0.03, 0.95);
+  wing.position.set(0.05, 0.03, 0);
+  const tail = new THREE.Mesh(GEO.box, accentMat);
+  tail.scale.set(0.1, 0.03, 0.3);
+  tail.position.set(-0.28, 0.04, 0);
+  const fin = new THREE.Mesh(GEO.box, accentMat);
+  fin.scale.set(0.1, 0.16, 0.03);
+  fin.position.set(-0.28, 0.12, 0);
+  const prop = new THREE.Mesh(GEO.box, mat(0x4a4038));
+  prop.scale.set(0.02, 0.3, 0.05);
+  prop.position.x = 0.43;
+  g.add(body, nose, wing, tail, fin, prop);
+  g.userData.prop = prop;
+  g.traverse((o) => { o.castShadow = true; });
+  return g;
+}
+
+function makeCloud(rng) {
+  const g = new THREE.Group();
+  const m = new THREE.MeshStandardMaterial({
+    color: 0xf2f5f8, roughness: 1, flatShading: true,
+    transparent: true, opacity: 0.92,
+  });
+  const n = 3 + Math.floor(rng() * 3);
+  for (let i = 0; i < n; i++) {
+    const puff = new THREE.Mesh(GEO.sphere, m);
+    const s = 0.5 + rng() * 0.7;
+    puff.scale.set(s * 1.6, s * 0.55, s);
+    puff.position.set((i - (n - 1) / 2) * s * 1.2, (rng() - 0.5) * 0.2, (rng() - 0.5) * 0.6);
+    g.add(puff);
+  }
+  return g;
+}
+
 function makeRobber() {
   const g = new THREE.Group();
   // 足元の赤リングで目立たせる
@@ -696,6 +772,11 @@ export class Board3D {
     this.barbPos = null;
     this.attackFxList = [];
 
+    // 環境演出: 島の周りを巡る帆船・漂う雲・時々横切る飛行機
+    this.ambient = new THREE.Group();
+    this.scene.add(this.ambient);
+    this._initAmbient();
+
     this.diceAnims = [];
     this.prevPieceKeys = null;
     this.boardYaw = 0; // 盤面構図の方位角(縦持ちでは 90°)
@@ -720,6 +801,7 @@ export class Board3D {
       this._tickRobber(t);
       this._tickSpawns(t);
       this._tickShip(t);
+      this._tickAmbient(t);
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(loop);
     };
@@ -830,6 +912,93 @@ export class Board3D {
       const base = child.userData.baseScale;
       child.scale.set(base.x * s, base.y * s, base.z * s);
       if (k >= 1) delete child.userData.spawnAt;
+    }
+  }
+
+  _initAmbient() {
+    const rng = localRng(20260715);
+
+    // 帆船: 楕円軌道(画面に見える上下/左右の海側に長い)で島を周回
+    this.boats = [
+      { radius: 6.6, speed: 0.00009, dir: 1, phase: 0.5, sail: 0xf5f2e8 },
+      { radius: 7.4, speed: 0.000085, dir: -1, phase: 1.4, sail: 0xe8f0d8 },
+      { radius: 8.2, speed: 0.00007, dir: -1, phase: 2.9, sail: 0xdfe9f2 },
+      { radius: 9.8, speed: 0.00008, dir: 1, phase: 3.8, sail: 0xf2e3c0 },
+      { radius: 11.2, speed: 0.00006, dir: -1, phase: 5.3, sail: 0xf5f2e8 },
+    ].map((cfg) => {
+      const mesh = makeSailboat(cfg.sail);
+      this.ambient.add(mesh);
+      return { ...cfg, mesh };
+    });
+
+    // 雲: 島の周辺(真上は避ける)をゆっくり周回
+    this.clouds = [];
+    for (let i = 0; i < 5; i++) {
+      const mesh = makeCloud(rng);
+      const cfg = {
+        mesh,
+        radius: 8.5 + rng() * 5,
+        y: 4.2 + rng() * 2.2,
+        phase: (i / 5) * Math.PI * 2 + rng(),
+        speed: 0.000006 + rng() * 0.000006,
+      };
+      this.ambient.add(mesh);
+      this.clouds.push(cfg);
+    }
+
+    // 飛行機: 時々空を横切る
+    this.plane = makePlane();
+    this.plane.visible = false;
+    this.ambient.add(this.plane);
+    this.planeFlight = null;
+    this.planeNextAt = performance.now() + 6000;
+  }
+
+  _tickAmbient(now) {
+    const EX = 1.35; // 楕円の長軸倍率(構図で見える側の海に長く滞在させる)
+    const EZ = 0.78;
+    for (const b of this.boats) {
+      const a = b.phase + now * b.speed * b.dir;
+      b.mesh.position.set(
+        Math.cos(a) * b.radius * EX,
+        SEA_Y + 0.02 + Math.sin(now / 700 + b.phase) * 0.03,
+        Math.sin(a) * b.radius * EZ,
+      );
+      // 進行方向(楕円の接線)を向く
+      const dx = -Math.sin(a) * EX * b.dir;
+      const dz = Math.cos(a) * EZ * b.dir;
+      b.mesh.rotation.y = -Math.atan2(dz, dx);
+      b.mesh.rotation.z = Math.sin(now / 900 + b.phase) * 0.06;
+    }
+
+    for (const c of this.clouds) {
+      const a = c.phase + now * c.speed;
+      c.mesh.position.set(Math.cos(a) * c.radius * 1.3, c.y, Math.sin(a) * c.radius * 0.85);
+    }
+
+    if (this.planeFlight) {
+      const f = this.planeFlight;
+      const k = (now - f.t0) / f.dur;
+      if (k >= 1) {
+        this.plane.visible = false;
+        this.planeFlight = null;
+        this.planeNextAt = now + 14000 + Math.random() * 18000;
+      } else {
+        this.plane.position.lerpVectors(f.from, f.to, k);
+        this.plane.position.y = f.y + Math.sin(k * Math.PI) * 0.5;
+        this.plane.rotation.z = Math.sin(now / 500) * 0.05;
+        this.plane.userData.prop.rotation.x = now / 18; // プロペラ回転
+      }
+    } else if (now >= this.planeNextAt) {
+      const angle = Math.random() * Math.PI * 2;
+      const offset = (Math.random() - 0.5) * 7; // 島の真上ばかり通らないように
+      const dirV = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+      const side = new THREE.Vector3(-dirV.z, 0, dirV.x);
+      const from = side.clone().multiplyScalar(offset).addScaledVector(dirV, -20);
+      const to = side.clone().multiplyScalar(offset).addScaledVector(dirV, 20);
+      this.planeFlight = { from, to, y: 5.2 + Math.random() * 1.6, t0: now, dur: 13000 };
+      this.plane.rotation.y = -Math.atan2(dirV.z, dirV.x);
+      this.plane.visible = true;
     }
   }
 
