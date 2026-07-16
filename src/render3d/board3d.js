@@ -1014,6 +1014,11 @@ export class Board3D {
     this.scene.add(this.flameGroup);
     this.flames = [];
     this.flameKey = '';
+    // 火炎ブレス(暴走の到着後に吹く)
+    this.pendingBreath = null;
+    this.currentBurning = [];
+    this.breathLight = new THREE.PointLight(0xff7a20, 0, 7);
+    this.scene.add(this.breathLight);
 
     // 蛮族船(cak): トラックの前進とともに島へ近づく
     this.ship = makeBarbarianShip();
@@ -1068,6 +1073,7 @@ export class Board3D {
       for (const m of this.pulseMats) m.opacity = a;
       this._tickDice(t);
       this._tickRobber(t);
+      this._tickBreath(t);
       this._tickSpawns(t);
       this._tickShip(t);
       this._tickAmbient(t);
@@ -1156,6 +1162,98 @@ export class Board3D {
     if (allDone) {
       for (const d of this.diceAnims) d.mesh.quaternion.copy(d.target);
       this.diceAnims = [];
+    }
+  }
+
+  // 炎を組み直す(ブレス待ちのヘックスはまだ燃やさない)
+  _rebuildFlames(burning) {
+    this.flameGroup.clear();
+    this.flames = [];
+    for (const hid of burning) {
+      if (hid === this.pendingBreath?.hexId) continue;
+      const c = hexCenterOf(hid);
+      for (const [ox, oz] of [[-0.32, 0.15], [0.3, 0.22], [0.02, -0.3]]) {
+        const f = makeFlame();
+        f.position.set(c.x + ox, TILE_TOP, c.y + oz);
+        this.flameGroup.add(f);
+        this.flames.push(f);
+      }
+    }
+  }
+
+  _disposeBreath() {
+    if (!this.pendingBreath) return;
+    for (const pt of this.pendingBreath.particles ?? []) {
+      this.scene.remove(pt.mesh);
+      pt.mesh.material.dispose();
+    }
+    this.breathLight.intensity = 0;
+    if (this.dragonMesh) this.dragonMesh.rotation.x = 0;
+    this.pendingBreath = null;
+  }
+
+  // 火炎ブレス: 到着後、口から火の粒を吹き付けて着弾 → 焦げ波紋 → 着火
+  _tickBreath(now) {
+    const pb = this.pendingBreath;
+    if (!pb) return;
+
+    if (pb.phase === 'wait') {
+      if (this.robberAnim) return; // まだ飛んでいる
+      pb.phase = 'breath';
+      pb.t0 = now;
+      const mouth = this.dragonMesh.localToWorld(new THREE.Vector3(0, 0.7, 0.62));
+      const c = hexCenterOf(pb.hexId);
+      pb.ground = new THREE.Vector3(c.x, TILE_TOP + 0.04, c.y);
+      this.breathLight.position.set(c.x, TILE_TOP + 0.8, c.y);
+      pb.particles = [];
+      const colors = [0xffd24a, 0xff8c28, 0xff5a1e];
+      for (let i = 0; i < 30; i++) {
+        const m = new THREE.Mesh(
+          new THREE.SphereGeometry(0.07, 6, 5),
+          new THREE.MeshBasicMaterial({
+            color: colors[i % 3], transparent: true, opacity: 1, depthWrite: false,
+          }),
+        );
+        m.visible = false;
+        this.scene.add(m);
+        const to = pb.ground.clone();
+        to.x += (Math.random() - 0.5) * 0.95;
+        to.z += (Math.random() - 0.5) * 0.85;
+        pb.particles.push({
+          mesh: m, from: mouth.clone(), to,
+          start: pb.t0 + i * 24, dur: 340 + Math.random() * 140,
+        });
+      }
+      return;
+    }
+
+    const elapsed = now - pb.t0;
+    const total = 30 * 24 + 520;
+    // 首をもたげて吹き下ろすポーズ
+    this.dragonMesh.rotation.x = 0.32 * Math.sin(Math.min(elapsed / total, 1) * Math.PI);
+    // 炎の照り返し
+    this.breathLight.intensity = Math.max(0, Math.sin(Math.min(elapsed / total, 1) * Math.PI)) * 2.8;
+
+    for (const pt of pb.particles) {
+      const k = (now - pt.start) / pt.dur;
+      if (k < 0 || k >= 1) {
+        pt.mesh.visible = false;
+        continue;
+      }
+      pt.mesh.visible = true;
+      pt.mesh.position.lerpVectors(pt.from, pt.to, k);
+      pt.mesh.scale.setScalar(0.6 + k * 2.6); // 口元で小さく、着弾で膨らむ
+      pt.mesh.material.opacity = 1 - k * 0.8;
+    }
+    // 着弾の焦げ波紋
+    if (!pb.scorched && elapsed > 380) {
+      pb.scorched = true;
+      this._spawnAttackFx(pb.ground, { color: 0xff7a20, grow: 3.6, dur: 750, opacity: 0.85 });
+    }
+    if (elapsed > total) {
+      const burning = this.currentBurning;
+      this._disposeBreath(); // pendingBreath を消してから組み直す(着火)
+      this._rebuildFlames(burning);
     }
   }
 
@@ -1462,6 +1560,7 @@ export class Board3D {
     this.flameGroup.clear();
     this.flames = [];
     this.flameKey = '';
+    this._disposeBreath();
 
     // 海
     const sea = new THREE.Mesh(
@@ -1695,24 +1794,22 @@ export class Board3D {
       this.robberHex = state.board.robber;
     }
 
-    // 炎上ヘックス(ドラゴンの島): 燃えている集合が変わったら組み直す
+    // 炎上ヘックス(ドラゴンの島): 燃えている集合が変わったら組み直す。
+    // ドラゴンの現在地で新たに火がついた場合は「到着 → 火炎ブレス → 着火」の順で見せる
     const burning = Object.keys(state.burned ?? {})
       .filter((h) => state.burned[h] > state.turn)
       .sort();
+    this.currentBurning = burning;
     const fkey = burning.join(',');
     if (fkey !== this.flameKey) {
-      this.flameKey = fkey;
-      this.flameGroup.clear();
-      this.flames = [];
-      for (const hid of burning) {
-        const c = hexCenterOf(hid);
-        for (const [ox, oz] of [[-0.32, 0.15], [0.3, 0.22], [0.02, -0.3]]) {
-          const f = makeFlame();
-          f.position.set(c.x + ox, TILE_TOP, c.y + oz);
-          this.flameGroup.add(f);
-          this.flames.push(f);
-        }
+      const prev = new Set(this.flameKey.split(',').filter(Boolean));
+      const added = burning.filter((h) => !prev.has(h));
+      if (isDragon && added.includes(state.board.robber)) {
+        this._disposeBreath();
+        this.pendingBreath = { hexId: state.board.robber, phase: 'wait' };
       }
+      this.flameKey = fkey;
+      this._rebuildFlames(burning);
     }
 
     this._updateHighlights(state, ui);
