@@ -568,6 +568,65 @@ function makeMerchant(colorHex) {
   return g;
 }
 
+// 蛮族トラックのブイ(航路マーカー)。旗の色で進行度を示す
+function makeBuoy() {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.13, 0.11, 8),
+    mat(0xe8e2d4, { roughness: 0.7 }),
+  );
+  base.position.y = 0.05;
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.015, 0.015, 0.3, 6),
+    mat(0x4a4a4a),
+  );
+  pole.position.y = 0.24;
+  const flag = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.16, 0.1),
+    new THREE.MeshBasicMaterial({ color: 0x9aa4ad, side: THREE.DoubleSide }),
+  );
+  flag.position.set(0.08, 0.34, 0);
+  g.add(base, pole, flag);
+  g.userData.flagMat = flag.material;
+  g.userData.baseMat = base.material;
+  return g;
+}
+
+// 船の上に出す「n/7」バッジ(スプライト)
+function makeShipBadge() {
+  const cv = document.createElement('canvas');
+  cv.width = 160;
+  cv.height = 80;
+  const tex = new THREE.CanvasTexture(cv);
+  const sp = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }),
+  );
+  sp.scale.set(0.85, 0.42, 1);
+  sp.position.y = 1.65;
+  sp.userData = { cv, tex };
+  return sp;
+}
+
+function drawShipBadge(sp, text) {
+  const { cv, tex } = sp.userData;
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  g.fillStyle = 'rgba(150, 30, 25, 0.92)';
+  g.beginPath();
+  if (g.roundRect) g.roundRect(8, 8, cv.width - 16, cv.height - 16, 18);
+  else g.rect(8, 8, cv.width - 16, cv.height - 16);
+  g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.7)';
+  g.lineWidth = 4;
+  g.stroke();
+  g.fillStyle = '#fff';
+  g.font = '800 40px sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, cv.width / 2, cv.height / 2 + 2);
+  tex.needsUpdate = true;
+}
+
 // ---- 3D ダイス ----
 
 function diePipTexture(n, bg = '#f5f2e8', fg = '#22242a') {
@@ -787,13 +846,29 @@ export class Board3D {
 
     // 蛮族船(cak): トラックの前進とともに島へ近づく
     this.ship = makeBarbarianShip();
-    this.ship.scale.setScalar(1.3);
+    this.ship.scale.setScalar(1.75);
     this.ship.visible = false;
+    this.shipBadge = makeShipBadge();
+    this.ship.add(this.shipBadge);
     this.scene.add(this.ship);
     this.shipBase = new THREE.Vector3();
     this.shipAnim = null;
     this.barbPos = null;
     this.attackFxList = [];
+
+    // 蛮族の航路(ブイのトラック)。旗が赤くなった分だけ進んでいる
+    this.barbTrack = new THREE.Group();
+    this.barbBuoys = [];
+    for (let i = 0; i <= BARB_TRACK; i++) {
+      const b = makeBuoy();
+      const p = this._shipSpot(i);
+      b.position.set(p.x, SEA_Y, p.z);
+      if (i === BARB_TRACK) b.scale.setScalar(1.4); // 終点(襲来地点)は大きく
+      this.barbTrack.add(b);
+      this.barbBuoys.push(b);
+    }
+    this.barbTrack.visible = false;
+    this.scene.add(this.barbTrack);
 
     // 環境演出: 島の周りを巡る帆船・漂う雲・時々横切る飛行機
     this.ambient = new THREE.Group();
@@ -1026,35 +1101,64 @@ export class Board3D {
   }
 
   // 襲来トラック position(0..7) → 海上の位置。進むほど島に近づく
+  // トラック位置 → 海上の座標。構図(boardYaw)の「奥側」の見える海を
+  // 横切って島へ近づく弧にする(縦持ちでも横持ちでも画面内に収まる)
   _shipSpot(pos) {
     const t = Math.min(pos / BARB_TRACK, 1);
-    const angle = Math.PI * (0.4 - 0.12 * t);
-    const r = 8.4 - 3.4 * t;
+    const farSide = Math.PI * 1.5 - this.boardYaw; // カメラの反対側(画面の奥)
+    const angle = farSide + 0.58 - 0.78 * t;
+    const r = 7.1 - 2.2 * t;
     return new THREE.Vector3(Math.cos(angle) * r, SEA_Y, Math.sin(angle) * r);
   }
 
-  _spawnAttackFx(pos) {
+  // 構図が変わったらブイと船をレイアウトし直す
+  _layoutBarbTrack() {
+    for (let i = 0; i < this.barbBuoys.length; i++) {
+      const p = this._shipSpot(i);
+      this.barbBuoys[i].position.set(p.x, SEA_Y, p.z);
+    }
+    if (this.barbPos != null && !this.shipAnim) {
+      this.shipBase.copy(this._shipSpot(this.barbPos));
+    }
+  }
+
+  _spawnAttackFx(pos, { color = 0xff4030, grow = 5.5, dur = 950, opacity = 0.9 } = {}) {
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.45, 0.7, 32),
       new THREE.MeshBasicMaterial({
-        color: 0xff4030, transparent: true, opacity: 0.9,
+        color, transparent: true, opacity,
         side: THREE.DoubleSide, depthWrite: false,
       }),
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(pos.x, SEA_Y + 0.06, pos.z);
     this.scene.add(ring);
-    this.attackFxList.push({ mesh: ring, t0: performance.now() });
+    this.attackFxList.push({ mesh: ring, t0: performance.now(), grow, dur, opacity });
+  }
+
+  // トラック進行度に合わせてブイの旗を塗り、船のバッジを更新する
+  _updateBarbTrack(pos) {
+    for (let i = 0; i < this.barbBuoys.length; i++) {
+      const { flagMat, baseMat } = this.barbBuoys[i].userData;
+      const passed = i <= pos && pos > 0;
+      flagMat.color.setHex(passed ? 0xd93030 : i === this.barbBuoys.length - 1 ? 0x8a2020 : 0x9aa4ad);
+      baseMat.color.setHex(passed ? 0xf0c8b8 : 0xe8e2d4);
+    }
+    drawShipBadge(this.shipBadge, `⚔ ${pos}/${BARB_TRACK}`);
   }
 
   _tickShip(now) {
     if (this.ship.visible) {
       if (this.shipAnim) {
-        const { from, to, t0, dur } = this.shipAnim;
+        const { fromPos, toPos, t0, dur } = this.shipAnim;
         const k = Math.max(0, Math.min((now - t0) / dur, 1));
         const e = k * k * (3 - 2 * k);
-        this.shipBase.lerpVectors(from, to, e);
-        if (k >= 1) this.shipAnim = null;
+        // トラック上の弧に沿って進む(直線ワープではなく航行して見せる)
+        this.shipBase.copy(this._shipSpot(fromPos + (toPos - fromPos) * e));
+        if (k >= 1) {
+          this.shipAnim = null;
+          this._spawnAttackFx(this.shipBase, { color: 0xd7ecff, grow: 2.4, dur: 620, opacity: 0.7 });
+        }
       }
       // 波の上下 + 島の方角を向く
       this.ship.position.copy(this.shipBase);
@@ -1064,17 +1168,22 @@ export class Board3D {
       const dz = -this.shipBase.z;
       this.ship.rotation.y = -Math.atan2(dz, dx);
     }
+    if (this.barbTrack.visible) {
+      for (let i = 0; i < this.barbBuoys.length; i++) {
+        this.barbBuoys[i].position.y = SEA_Y + Math.sin(now / 700 + i * 1.7) * 0.025;
+      }
+    }
     for (let i = this.attackFxList.length - 1; i >= 0; i--) {
       const fx = this.attackFxList[i];
-      const k = (now - fx.t0) / 950;
+      const k = (now - fx.t0) / (fx.dur ?? 950);
       if (k >= 1) {
         this.scene.remove(fx.mesh);
         fx.mesh.geometry.dispose();
         fx.mesh.material.dispose();
         this.attackFxList.splice(i, 1);
       } else {
-        fx.mesh.scale.setScalar(1 + k * 5.5);
-        fx.mesh.material.opacity = 0.9 * (1 - k);
+        fx.mesh.scale.setScalar(1 + k * (fx.grow ?? 5.5));
+        fx.mesh.material.opacity = (fx.opacity ?? 0.9) * (1 - k);
       }
     }
   }
@@ -1115,6 +1224,7 @@ export class Board3D {
       // 方位角は構図中心 ±60° に制限(「横向き」への迷子を防ぐ)
       this.controls.minAzimuthAngle = yaw - Math.PI / 3;
       this.controls.maxAzimuthAngle = yaw + Math.PI / 3;
+      this._layoutBarbTrack(); // 蛮族の航路も構図の奥側へ置き直す
     }
 
     // 画面横方向に収めるべき半径: 縦構図では島の短軸(≈4.5)、横構図では長軸(≈5.8)
@@ -1321,23 +1431,25 @@ export class Board3D {
     // 蛮族船: トラック前進で島へ接近、襲来(リセット)で衝撃波を出して引き返す
     if (state.mode === 'cak') {
       this.ship.visible = true;
+      this.barbTrack.visible = true;
       const pos = state.barbarians.position;
       if (this.barbPos == null) {
         this.shipBase.copy(this._shipSpot(pos));
         this.barbPos = pos;
+        this._updateBarbTrack(pos);
       } else if (pos !== this.barbPos) {
-        const from = this.shipBase.clone();
-        const to = this._shipSpot(pos);
         if (pos < this.barbPos) {
-          this._spawnAttackFx(from); // 襲来!
-          this.shipAnim = { from, to, t0: performance.now() + 500, dur: 1800 };
+          this._spawnAttackFx(this.shipBase); // 襲来!
+          this.shipAnim = { fromPos: this.barbPos, toPos: pos, t0: performance.now() + 500, dur: 2200 };
         } else {
-          this.shipAnim = { from, to, t0: performance.now(), dur: 1000 };
+          this.shipAnim = { fromPos: this.barbPos, toPos: pos, t0: performance.now(), dur: 1300 };
         }
         this.barbPos = pos;
+        this._updateBarbTrack(pos);
       }
     } else {
       this.ship.visible = false;
+      this.barbTrack.visible = false;
     }
 
     // 商人(進歩カード): 保持者の色のテントをヘックス脇に置く

@@ -382,6 +382,54 @@ function showGainFx(before) {
   }
 }
 
+// 2D表示時のダイスロール演出(3Dは物理ダイスがあるのでDOM版は2D専用)
+const PIP_FX = {
+  1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
+};
+const EV_FX = { ship: '⛵', trade: '🧵', politics: '🪙', science: '📜' };
+
+function showDiceRollFx(dice, eventDie) {
+  const fxEl = document.getElementById('fx');
+  fxEl.querySelector('.rollfx')?.remove(); // 連続ロールは前の演出を破棄
+  const wrap = document.createElement('div');
+  wrap.className = 'rollfx';
+  const pips = (n) =>
+    Array.from({ length: 9 }, (_, i) => `<i class="${PIP_FX[n].includes(i) ? 'on' : ''}"></i>`).join('');
+  const cak = state.mode === 'cak';
+  wrap.innerHTML = `
+    <span class="rdie ${cak ? 'rdie-red' : ''}">${pips(dice[0])}</span>
+    <span class="rdie ${cak ? 'rdie-yellow' : ''}">${pips(dice[1])}</span>
+    ${eventDie ? `<span class="rdie rdie-ev">${EV_FX[eventDie]}</span>` : ''}`;
+  fxEl.appendChild(wrap);
+
+  // 転がっている間はランダムな目をパラパラ切り替え、着地で本当の目を見せる
+  const dies = wrap.querySelectorAll('.rdie:not(.rdie-ev)');
+  const evEl = wrap.querySelector('.rdie-ev');
+  const shuffle = setInterval(() => {
+    for (const d of dies) d.innerHTML = pips(1 + Math.floor(Math.random() * 6));
+    if (evEl) evEl.textContent = Object.values(EV_FX)[Math.floor(Math.random() * 4)];
+  }, 90);
+  setTimeout(() => {
+    clearInterval(shuffle);
+    dies[0].innerHTML = pips(dice[0]);
+    dies[1].innerHTML = pips(dice[1]);
+    if (evEl) evEl.textContent = EV_FX[eventDie];
+    wrap.classList.add('land');
+  }, 620);
+  setTimeout(() => wrap.classList.add('out'), 1750);
+  setTimeout(() => wrap.remove(), 2100);
+}
+
+// ロール後の演出: 3Dは物理ダイス、2DはDOMダイス
+function rollFx() {
+  if (!state.dice) return;
+  if (viewMode === '3d' && renderer3d) {
+    renderer3d.rollDice(state.dice, state.mode === 'cak' ? state.eventDie : null);
+  } else {
+    showDiceRollFx(state.dice, state.mode === 'cak' ? state.eventDie : null);
+  }
+}
+
 // 交易成立の目立つバナー(誰が何を渡し何を得たか)
 function showTradeFx(aName, bName, give, receive) {
   const fxEl = document.getElementById('fx');
@@ -446,9 +494,7 @@ function doAction(action) {
   maybeTradeFx(action, prevAwaiting);
   if (before) {
     showGainFx(before);
-    if (viewMode === '3d' && renderer3d && state.dice) {
-      renderer3d.rollDice(state.dice, state.mode === 'cak' ? state.eventDie : null);
-    }
+    rollFx();
   }
   ui.mode = 'idle';
   ui.pending = null;
@@ -491,9 +537,7 @@ function scheduleCpu() {
       maybeTradeFx(action, prevAwaiting);
       if (before) {
         showGainFx(before);
-        if (viewMode === '3d' && renderer3d && state.dice) {
-          renderer3d.rollDice(state.dice, state.mode === 'cak' ? state.eventDie : null);
-        }
+        rollFx();
       }
     } catch (e) {
       // CPU の手が通らない場合は安全側でターン終了を試みる
