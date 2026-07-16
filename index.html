@@ -198,7 +198,7 @@
     transition: transform 0.15s, opacity 0.2s;
   }
   .card .icon { font-size: 19px; line-height: 1.1; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3)); }
-  .card .label { font-size: 10px; font-weight: 700; opacity: 0.75; }
+  .card .label { font-size: 10px; font-weight: 700; opacity: 0.75; white-space: nowrap; }
   .card .cnt { font-size: 17px; font-weight: 800; line-height: 1; }
   .card.zero { opacity: 0.45; }
   .card-wood { background: linear-gradient(160deg, #9ccb72, #6f9d4a); }
@@ -223,6 +223,7 @@
     border-radius: 8px;
     padding: 9px 14px; font-size: 13px; cursor: pointer;
     font-family: inherit; font-weight: 600;
+    white-space: nowrap; /* ボタン内でラベルを折り返さない */
     box-shadow: 0 2px 5px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
     transition: transform 0.12s, filter 0.12s;
   }
@@ -389,7 +390,8 @@
 
   /* ---------- 設定シート ---------- */
   .seg { display: flex; gap: 6px; }
-  .seg button { flex: 1; }
+  /* ラベルの長さに応じて幅を配分(「都市と騎士」等が改行しないように) */
+  .seg button { flex: 1 1 auto; min-width: 0; padding: 9px 10px; }
   .seg button.sel {
     background: linear-gradient(180deg, #ffc95e, #eda428);
     color: #4a2f00; font-weight: 700; border-color: rgba(0,0,0,0.35);
