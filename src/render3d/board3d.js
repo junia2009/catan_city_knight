@@ -705,6 +705,99 @@ function makeMerchant(colorHex) {
   return g;
 }
 
+// ---- 空(スカイドーム + 時間サイクル)----
+// 昼 → 夕暮れ → 星夜 → 昼 をゆっくり巡る。太陽の光暈と夜の星は
+// シェーダーで手続き生成。ライト・霧・海の縁の色も同じパレットに連動する。
+const SKY_CYCLE_SEC = 300; // 1周の長さ
+const SKY_PHASES = [
+  // t: サイクル内の位置, zenith: 天頂, horizon: 地平線,
+  // sun: 太陽光の色, sunI: 強さ, hemi: 半球光の強さ, night: 星の濃さ
+  { t: 0.0, zenith: 0x2a5d94, horizon: 0x9cc4d8, sun: 0xfff2dd, sunI: 2.4, hemi: 1.05, night: 0 },
+  { t: 0.35, zenith: 0x1c4173, horizon: 0xe8a35e, sun: 0xffc27a, sunI: 1.9, hemi: 0.85, night: 0 },
+  { t: 0.5, zenith: 0x0a1d3a, horizon: 0x35507a, sun: 0x9fb8ff, sunI: 0.9, hemi: 0.55, night: 1 },
+  { t: 0.65, zenith: 0x14355f, horizon: 0xd88a6a, sun: 0xffcf95, sunI: 1.7, hemi: 0.8, night: 0.15 },
+  { t: 1.0, zenith: 0x2a5d94, horizon: 0x9cc4d8, sun: 0xfff2dd, sunI: 2.4, hemi: 1.05, night: 0 },
+];
+
+function skyAt(phase) {
+  let a = SKY_PHASES[0];
+  let b = SKY_PHASES[SKY_PHASES.length - 1];
+  for (let i = 0; i < SKY_PHASES.length - 1; i++) {
+    if (phase >= SKY_PHASES[i].t && phase <= SKY_PHASES[i + 1].t) {
+      a = SKY_PHASES[i];
+      b = SKY_PHASES[i + 1];
+      break;
+    }
+  }
+  const k = (phase - a.t) / Math.max(b.t - a.t, 1e-6);
+  const e = k * k * (3 - 2 * k);
+  const lerpC = (x, y) => new THREE.Color(x).lerp(new THREE.Color(y), e);
+  return {
+    zenith: lerpC(a.zenith, b.zenith),
+    horizon: lerpC(a.horizon, b.horizon),
+    sun: lerpC(a.sun, b.sun),
+    sunI: a.sunI + (b.sunI - a.sunI) * e,
+    hemi: a.hemi + (b.hemi - a.hemi) * e,
+    night: a.night + (b.night - a.night) * e,
+  };
+}
+
+function makeSky() {
+  const uniforms = {
+    uZenith: { value: new THREE.Color(0x2a5d94) },
+    uHorizon: { value: new THREE.Color(0x9cc4d8) },
+    uSunDir: { value: new THREE.Vector3(0.5, 0.6, 0.4).normalize() },
+    uSunColor: { value: new THREE.Color(0xfff2dd) },
+    uNight: { value: 0 },
+  };
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    vertexShader: `
+      varying vec3 vDir;
+      void main() {
+        vDir = normalize(position);
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uZenith;
+      uniform vec3 uHorizon;
+      uniform vec3 uSunDir;
+      uniform vec3 uSunColor;
+      uniform float uNight;
+      varying vec3 vDir;
+
+      float hash3(vec3 p) {
+        return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+      }
+
+      void main() {
+        vec3 dir = normalize(vDir);
+        // 地平線 → 天頂のグラデーション
+        float h = clamp(dir.y, 0.0, 1.0);
+        vec3 col = mix(uHorizon, uZenith, pow(h, 0.62));
+        // 太陽の光暈(コア + 大きなハロー)
+        float s = max(dot(dir, uSunDir), 0.0);
+        col += uSunColor * (pow(s, 220.0) * 1.2 + pow(s, 18.0) * 0.35 + pow(s, 4.0) * 0.12);
+        // 夜: 上空に星(セルごとの点)
+        if (uNight > 0.01 && dir.y > 0.05) {
+          vec3 cell = floor(dir * 90.0);
+          float star = step(0.992, hash3(cell));
+          float tw = 0.6 + 0.4 * hash3(cell + 7.0);
+          col += vec3(0.9, 0.95, 1.0) * star * tw * uNight * smoothstep(0.05, 0.3, dir.y);
+        }
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(58, 32, 16), material);
+  return { mesh, uniforms };
+}
+
 // ---- 海(カスタムシェーダー)----
 // 浅瀬→深海のグラデーション、流れる波ノイズ、波頭のきらめき、
 // 島の海岸線に寄せて返す泡。頂点もわずかにうねらせる。
@@ -786,6 +879,10 @@ function makeSea(centersXZ) {
         float foamN = vnoise(xz * 6.5 + vec2(uTime * 0.45, -uTime * 0.35));
         float foam = band * smoothstep(0.42, 0.8, foamN * 0.62 + lap * 0.38);
         col = mix(col, vec3(0.93, 0.97, 1.0), foam * 0.85);
+
+        // 雲の影がゆっくり流れる
+        float cloud = smoothstep(0.58, 0.8, vnoise(xz * 0.09 + vec2(uTime * 0.021, uTime * 0.013)));
+        col *= 1.0 - cloud * 0.14;
 
         // 外縁は背景色へ溶かす(水平線の空気感)
         col = mix(col, uBg, smoothstep(20.0, 33.0, r));
@@ -1211,9 +1308,17 @@ export class Board3D {
     this.controls.rotateSpeed = 0.65;
     this.controls.enablePan = false;
 
+    // 空(スカイドーム + 時間サイクル)
+    const sky = makeSky();
+    this.skyUniforms = sky.uniforms;
+    this.scene.add(sky.mesh);
+    this.skyPhaseOverride = null; // デバッグ用: 0..1 で時刻を固定
+
     // ライティング
-    this.scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x46617a, 1.05));
+    this.hemi = new THREE.HemisphereLight(0xcfe3ff, 0x46617a, 1.05);
+    this.scene.add(this.hemi);
     const sun = new THREE.DirectionalLight(0xfff2dd, 2.4);
+    this.sun = sun;
     sun.position.set(7, 12, 5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -1305,6 +1410,7 @@ export class Board3D {
       for (const m of this.pulseMats) m.opacity = a;
       this._tickDice(t);
       if (this.seaUniforms) this.seaUniforms.uTime.value = t / 1000;
+      this._tickSky(t);
       this._tickRobber(t);
       this._tickBreath(t);
       this._tickSpawns(t);
@@ -1488,6 +1594,35 @@ export class Board3D {
       this._disposeBreath(); // pendingBreath を消してから組み直す(着火)
       this._rebuildFlames(burning);
     }
+  }
+
+  // 空の時間サイクル: 空・太陽・ライト・霧・海の縁を同じパレットで動かす
+  _tickSky(now) {
+    if (!this.skyUniforms) return;
+    const phase = this.skyPhaseOverride ?? (now / 1000 / SKY_CYCLE_SEC) % 1;
+    const s = skyAt(phase);
+    this.skyUniforms.uZenith.value.copy(s.zenith);
+    this.skyUniforms.uHorizon.value.copy(s.horizon);
+    this.skyUniforms.uSunColor.value.copy(s.sun);
+    this.skyUniforms.uNight.value = s.night;
+
+    // 太陽は空を大きく巡る(夜は低く沈む)
+    const ang = phase * Math.PI * 2 - Math.PI * 0.25;
+    const elev = 0.35 + 0.65 * Math.max(0.12, Math.cos(phase * Math.PI * 2) * 0.5 + 0.5);
+    const sunDir = new THREE.Vector3(
+      Math.cos(ang) * 0.8, elev, Math.sin(ang) * 0.8,
+    ).normalize();
+    this.skyUniforms.uSunDir.value.copy(sunDir);
+    this.sun.position.copy(sunDir).multiplyScalar(15);
+    this.sun.color.copy(s.sun);
+    this.sun.intensity = s.sunI;
+    this.hemi.intensity = s.hemi;
+
+    // 霧・背景・海の縁も地平線の色へ寄せる(空との継ぎ目を消す)
+    const fogCol = s.horizon.clone().lerp(s.zenith, 0.55);
+    this.scene.fog.color.copy(fogCol);
+    this.scene.background.copy(fogCol);
+    if (this.seaUniforms) this.seaUniforms.uBg.value.copy(fogCol);
   }
 
   _tickRobber(now) {
