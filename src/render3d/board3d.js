@@ -568,6 +568,101 @@ function makeMerchant(colorHex) {
   return g;
 }
 
+// ---- 海(カスタムシェーダー)----
+// 浅瀬→深海のグラデーション、流れる波ノイズ、波頭のきらめき、
+// 島の海岸線に寄せて返す泡。頂点もわずかにうねらせる。
+function makeSea(centersXZ) {
+  const uniforms = {
+    uTime: { value: 0 },
+    uCenters: { value: centersXZ },
+    uBg: { value: new THREE.Color(0x0d2740) },
+  };
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    fog: false,
+    vertexShader: `
+      uniform float uTime;
+      varying vec3 vWorld;
+      void main() {
+        vec3 p = position;
+        // ゆったりした大きなうねり(ローカルXY = ワールドXZ)
+        p.z += sin(p.x * 0.9 + uTime * 0.9) * 0.028
+             + sin(p.y * 1.3 - uTime * 0.7) * 0.022
+             + sin((p.x + p.y) * 0.5 + uTime * 0.45) * 0.02;
+        vec4 wp = modelMatrix * vec4(p, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec2 uCenters[19];
+      uniform vec3 uBg;
+      varying vec3 vWorld;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+      float vnoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+          mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+          f.y);
+      }
+
+      void main() {
+        vec2 xz = vWorld.xz;
+        float r = length(xz);
+        if (r > 33.5) discard;
+
+        // 島(最寄りのヘックス中心)までの距離 = 岸からの遠さの近似
+        float d = 1e5;
+        for (int i = 0; i < 19; i++) {
+          d = min(d, distance(xz, uCenters[i]));
+        }
+
+        // 流れる2層の波ノイズ
+        float n1 = vnoise(xz * 0.85 + vec2(uTime * 0.16, uTime * 0.11));
+        float n2 = vnoise(xz * 2.3 + vec2(-uTime * 0.22, uTime * 0.15));
+        float n = n1 * 0.62 + n2 * 0.38;
+
+        // 深さの色: 浅瀬ターコイズ → 中間 → 深い紺
+        vec3 shallow = vec3(0.15, 0.55, 0.60);
+        vec3 midsea  = vec3(0.07, 0.36, 0.53);
+        vec3 deep    = vec3(0.02, 0.16, 0.33);
+        vec3 col = mix(shallow, midsea, smoothstep(1.05, 2.4, d));
+        col = mix(col, deep, smoothstep(2.4, 8.0, d));
+
+        // 波の明暗と、波頭のきらめき(深場ほど静かに)
+        float calm = 1.0 - 0.62 * smoothstep(2.2, 7.5, d);
+        col += (n - 0.5) * 0.075 * calm;
+        float glint = smoothstep(0.8, 0.93, n2) * (0.4 - 0.32 * smoothstep(1.2, 5.0, d));
+        col += glint * vec3(0.55, 0.6, 0.6);
+
+        // 岸辺: 浅瀬の透け(砂色を混ぜる)+ 寄せて返す泡
+        col = mix(col, vec3(0.55, 0.72, 0.66), smoothstep(1.35, 0.95, d) * 0.35);
+        float band = smoothstep(1.42, 1.06, d) * smoothstep(0.9, 1.02, d);
+        float lap = 0.5 + 0.5 * sin(uTime * 1.5 - d * 7.0);
+        float foamN = vnoise(xz * 6.5 + vec2(uTime * 0.45, -uTime * 0.35));
+        float foam = band * smoothstep(0.42, 0.8, foamN * 0.62 + lap * 0.38);
+        col = mix(col, vec3(0.93, 0.97, 1.0), foam * 0.85);
+
+        // 外縁は背景色へ溶かす(水平線の空気感)
+        col = mix(col, uBg, smoothstep(20.0, 33.0, r));
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  });
+  const geo = new THREE.PlaneGeometry(68, 68, 100, 100);
+  geo.rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.position.y = SEA_Y;
+  return { mesh, uniforms };
+}
+
 // 蛮族トラックのブイ(航路マーカー)。旗の色で進行度を示す
 function makeBuoy() {
   const g = new THREE.Group();
@@ -1072,6 +1167,7 @@ export class Board3D {
       const a = 0.35 + 0.25 * Math.sin(t / 260);
       for (const m of this.pulseMats) m.opacity = a;
       this._tickDice(t);
+      if (this.seaUniforms) this.seaUniforms.uTime.value = t / 1000;
       this._tickRobber(t);
       this._tickBreath(t);
       this._tickSpawns(t);
@@ -1562,15 +1658,23 @@ export class Board3D {
     this.flameKey = '';
     this._disposeBreath();
 
-    // 海
-    const sea = new THREE.Mesh(
+    // 海(シェーダー): 深さのグラデーション・波・岸辺の泡
+    const centersXZ = LAYOUT.hexIds.map((hid) => {
+      const c = hexCenterOf(hid);
+      return new THREE.Vector2(c.x, c.y);
+    });
+    const sea = makeSea(centersXZ);
+    this.seaUniforms = sea.uniforms;
+    this.staticGroup.add(sea.mesh);
+    // ShaderMaterial は影を受けないため、透明な影受け面を重ねる
+    const shadowCatcher = new THREE.Mesh(
       new THREE.CircleGeometry(34, 48),
-      new THREE.MeshStandardMaterial({ color: 0x1a628f, roughness: 0.35, metalness: 0.2 }),
+      new THREE.ShadowMaterial({ opacity: 0.24 }),
     );
-    sea.rotation.x = -Math.PI / 2;
-    sea.position.y = SEA_Y;
-    sea.receiveShadow = true;
-    this.staticGroup.add(sea);
+    shadowCatcher.rotation.x = -Math.PI / 2;
+    shadowCatcher.position.y = SEA_Y + 0.005;
+    shadowCatcher.receiveShadow = true;
+    this.staticGroup.add(shadowCatcher);
 
     // 砂浜 + タイル + 装飾 + トークン
     for (const hid of LAYOUT.hexIds) {
