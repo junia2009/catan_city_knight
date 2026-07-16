@@ -4,6 +4,7 @@
 import { makeRng, shuffled } from './rng.js';
 import { generateBoard } from './rules/board.js';
 import { buildProgressDecks } from './rules/cak/progress-cards.js';
+import { dragonNestHex } from './rules/dragon.js';
 
 export const RESOURCES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
 
@@ -39,6 +40,8 @@ export function createGame({
   let rng = makeRng(seed);
   let board;
   [rng, board] = generateBoard(rng);
+  // ドラゴンの島: ドラゴン(=盗賊コマ)は巣(最良の山)から始まる
+  if (mode === 'dragon') board.robber = dragonNestHex(board);
 
   const players = [];
   for (let i = 0; i < playerCount; i++) {
@@ -55,6 +58,8 @@ export function createGame({
       progressCards: [], // { id, deck, boughtTurn }
       progressVP: 0,
       defenderPoints: 0,
+      // --- ドラゴンの島 ---
+      treasures: 0, // 財宝(1個=+1点)
     });
   }
 
@@ -103,6 +108,10 @@ export function createGame({
     // --- 都市と騎士 ---
     knights: {}, // vertexId -> { player, level, active, activatedTurn }
     merchant: null, // { hexId, player } 商人(進歩カード)。保持者は+1点
+    // --- ドラゴンの島 ---
+    dragon: mode === 'dragon' ? { nestHex: dragonNestHex(board) } : null,
+    towers: {}, // vertexId -> pid(見張り塔)
+    burned: {}, // hexId -> この手番まで炎上(産出停止)
     walls: {}, // vertexId(都市) -> player
     barbarians: { position: 0 },
     metropolis: { trade: null, politics: null, science: null }, // vertexId

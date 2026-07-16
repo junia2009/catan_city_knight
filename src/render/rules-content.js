@@ -4,9 +4,10 @@
 import { PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
 
 export const RULES_TABS = [
-  ['basic', '基本ルール'],
+  ['basic', '基本'],
   ['cak', '都市と騎士'],
   ['cards', '進歩カード'],
+  ['dragon', '🐉ドラゴン'],
 ];
 
 const costRow = (icon, name, cost) =>
@@ -107,12 +108,47 @@ function cardsHtml() {
   ${sections.join('')}`;
 }
 
+function dragonHtml() {
+  return `
+  <h4>🐉 ドラゴンの島とは</h4>
+  <p>基本ルールをベースにした<b>このアプリだけのオリジナルルール</b>。
+  島にドラゴンが棲みつき、盗賊の代わりに暴れまわります。勝利点は<b>12点</b>。</p>
+
+  <h4>🌋 ドラゴンの巣</h4>
+  <p>ゲーム開始時、ドラゴンは<b>最も出目の良い山ヘックス</b>に巣を作ります。
+  ドラゴンのいるヘックスは資源が出ません(盗賊と同じ)。
+  7や騎士カードで好きなヘックスへ飛ばして略奪できるのも盗賊と同じです。</p>
+
+  <h4>🔥 暴走(ゾロ目)</h4>
+  <p>ダイスが<b>ゾロ目</b>になると(資源分配のあと)ドラゴンが暴走!
+  <b>島で最も稼いでいるヘックス</b>(出目の良さ×隣接する建物の数)へ飛び、
+  <b>8手番のあいだ炎上</b>させて産出を止めます。
+  炎上ヘックスに隣接するプレイヤーは資源を1枚焼かれます。</p>
+
+  <h4>🗼 見張り塔</h4>
+  ${costRow('🗼', '見張り塔', '🪵1 🧱1 🪨1(自分の開拓地・都市の上、1人2基まで)')}
+  <p>見張り塔が隣接するヘックスが襲撃されたら、<b>撃退成功</b>!
+  資源を焼かれないうえ、<b>財宝</b>を獲得します。産出の要になるヘックスを守りましょう。</p>
+
+  <h4>💎 財宝</h4>
+  <p>財宝1つにつき<b>勝利点+1</b>、獲得時に銀行から資源も1枚もらえます。
+  ドラゴンをあえて自分の縄張りへ誘い込み、塔で迎え撃つ戦略も有効です。</p>
+
+  <h4>📜 そのほか</h4>
+  <p>発展カード・港・最長交易路・最大騎士力は基本ルールのまま使えます。
+  騎士カードでドラゴンを追い払うのは冒険者の腕の見せどころ。</p>`;
+}
+
 // タブ付きの説明書本体。tabAct のボタンで data-act="rules-tab:<id>" を発行する
 export function rulesHtml(tab = 'basic') {
   const tabs = `<div class="seg rules-tabs">${RULES_TABS.map(
     ([id, label]) =>
       `<button class="${tab === id ? 'sel' : ''}" data-act="rules-tab:${id}">${label}</button>`,
   ).join('')}</div>`;
-  const body = tab === 'cak' ? cakHtml() : tab === 'cards' ? cardsHtml() : basicHtml();
+  const body =
+    tab === 'cak' ? cakHtml()
+    : tab === 'cards' ? cardsHtml()
+    : tab === 'dragon' ? dragonHtml()
+    : basicHtml();
   return `${tabs}<div class="rules-body">${body}</div>`;
 }

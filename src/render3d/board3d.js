@@ -627,6 +627,85 @@ function drawShipBadge(sp, text) {
   tex.needsUpdate = true;
 }
 
+// ドラゴン(ドラゴンの島): 羽ばたく赤竜
+function makeDragon() {
+  const g = new THREE.Group();
+  const bodyMat = mat(0x8f2620, { roughness: 0.55 });
+  const body = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.62, 8), bodyMat);
+  body.rotation.x = Math.PI / 2; // 尾を後ろへ
+  body.position.y = 0.34;
+  body.castShadow = true;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), bodyMat);
+  head.position.set(0, 0.42, 0.36);
+  head.castShadow = true;
+  const snout = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.18, 6), bodyMat);
+  snout.rotation.x = Math.PI / 2;
+  snout.position.set(0, 0.4, 0.5);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffd24a });
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.022, 6, 6), eyeMat);
+    eye.position.set(sx * 0.055, 0.47, 0.44);
+    g.add(eye);
+  }
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0, 0);
+  wingShape.quadraticCurveTo(0.28, 0.3, 0.62, 0.16);
+  wingShape.quadraticCurveTo(0.34, 0.02, 0.3, -0.12);
+  wingShape.closePath();
+  const wingGeo = new THREE.ShapeGeometry(wingShape);
+  const wingMat = new THREE.MeshStandardMaterial({
+    color: 0xb0453a, roughness: 0.6, side: THREE.DoubleSide, flatShading: true,
+  });
+  const wingL = new THREE.Mesh(wingGeo, wingMat);
+  wingL.position.set(0.06, 0.42, 0.1);
+  wingL.rotation.y = -0.25;
+  const wingR = new THREE.Mesh(wingGeo, wingMat);
+  wingR.scale.x = -1;
+  wingR.position.set(-0.06, 0.42, 0.1);
+  wingR.rotation.y = 0.25;
+  g.add(body, head, snout, wingL, wingR);
+  g.userData.wings = [wingL, wingR];
+  g.scale.setScalar(1.5);
+  return g;
+}
+
+// 見張り塔(ドラゴンの島)
+function makeTower(colorHex) {
+  const g = new THREE.Group();
+  const stone = mat(0xb8bec7, { roughness: 0.85 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.095, 0.34, 8), stone);
+  body.position.y = 0.17;
+  body.castShadow = true;
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 8), stone);
+  top.position.y = 0.37;
+  const flag = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.12, 0.07),
+    new THREE.MeshBasicMaterial({ color: colorHex, side: THREE.DoubleSide }),
+  );
+  flag.position.set(0.06, 0.5, 0);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.16, 5), mat(0x5a4632));
+  pole.position.y = 0.46;
+  g.add(body, top, pole, flag);
+  return g;
+}
+
+// 炎(炎上ヘックス用)。tick でゆらめかせる
+function makeFlame() {
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(
+    new THREE.ConeGeometry(0.11, 0.34, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff8c28, transparent: true, opacity: 0.92 }),
+  );
+  core.position.y = 0.17;
+  const inner = new THREE.Mesh(
+    new THREE.ConeGeometry(0.055, 0.2, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.95 }),
+  );
+  inner.position.y = 0.12;
+  g.add(core, inner);
+  return g;
+}
+
 // ---- 3D ダイス ----
 
 function diePipTexture(n, bg = '#f5f2e8', fg = '#22242a') {
@@ -838,11 +917,18 @@ export class Board3D {
       this.pickGroup, this.diceGroup,
     );
 
-    // 盗賊は永続メッシュ(移動をアニメーションさせるため)
+    // 盗賊は永続メッシュ(移動をアニメーションさせるため)。ドラゴンの島では竜に差し替え
     this.robber = makeRobber();
     this.scene.add(this.robber);
+    this.dragonMesh = makeDragon();
+    this.dragonMesh.visible = false;
+    this.scene.add(this.dragonMesh);
     this.robberHex = null;
     this.robberAnim = null;
+    this.flameGroup = new THREE.Group();
+    this.scene.add(this.flameGroup);
+    this.flames = [];
+    this.flameKey = '';
 
     // 蛮族船(cak): トラックの前進とともに島へ近づく
     this.ship = makeBarbarianShip();
@@ -989,15 +1075,40 @@ export class Board3D {
   }
 
   _tickRobber(now) {
-    if (!this.robberAnim) return;
-    const { from, to, t0 } = this.robberAnim;
-    const k = Math.min((now - t0) / 650, 1);
-    const e = k * k * (3 - 2 * k); // smoothstep
-    this.robber.position.lerpVectors(from, to, e);
-    this.robber.position.y = from.y + Math.sin(e * Math.PI) * 1.3;
-    if (k >= 1) {
-      this.robber.position.copy(to);
-      this.robberAnim = null;
+    const isDragon = this.dragonMesh.visible;
+    const piece = isDragon ? this.dragonMesh : this.robber;
+    if (this.robberAnim) {
+      const { from, to, t0 } = this.robberAnim;
+      const dur = isDragon ? 1100 : 650;
+      const k = Math.min((now - t0) / dur, 1);
+      const e = k * k * (3 - 2 * k); // smoothstep
+      piece.position.lerpVectors(from, to, e);
+      piece.position.y = from.y + Math.sin(e * Math.PI) * (isDragon ? 2.4 : 1.3);
+      if (isDragon) {
+        // 飛ぶ方向を向く
+        const dir = to.clone().sub(from);
+        if (dir.lengthSq() > 0.01) piece.rotation.y = Math.atan2(dir.x, dir.z);
+      }
+      if (k >= 1) {
+        piece.position.copy(to);
+        this.robberAnim = null;
+      }
+    }
+    if (isDragon) {
+      // ホバリング + 羽ばたき
+      const flying = !!this.robberAnim;
+      const flap = Math.sin(now / (flying ? 90 : 260)) * (flying ? 0.9 : 0.35);
+      for (const [i, w] of this.dragonMesh.userData.wings.entries()) {
+        w.rotation.z = (i === 0 ? 1 : -1) * (0.35 + flap);
+      }
+      if (!flying) {
+        this.dragonMesh.position.y = TILE_TOP + 0.06 + Math.sin(now / 700) * 0.04;
+      }
+    }
+    // 炎のゆらめき
+    for (const [i, f] of this.flames.entries()) {
+      const k = 1 + 0.22 * Math.sin(now / 120 + i * 1.9);
+      f.scale.set(k, 1 / k + 0.15, k);
     }
   }
 
@@ -1263,6 +1374,9 @@ export class Board3D {
       this.merchantMesh = null;
     }
     this.merchantKey = null;
+    this.flameGroup.clear();
+    this.flames = [];
+    this.flameKey = '';
 
     // 海
     const sea = new THREE.Mesh(
@@ -1390,6 +1504,15 @@ export class Board3D {
       addPiece(`wall:${vid}`, w);
     }
 
+    // 見張り塔(ドラゴンの島): 建物の脇に立てる
+    for (const [vid, pid] of Object.entries(state.towers ?? {})) {
+      const t = makeTower(PLAYER_COLORS_3D[pid]);
+      t.position.copy(vpos(vid));
+      t.position.x += 0.2;
+      t.position.z -= 0.14;
+      addPiece(`tower:${vid}:${pid}`, t);
+    }
+
     for (const [vid, b] of Object.entries(state.buildings)) {
       const piece = b.type === 'city' ? makeCity(b.player) : makeSettlement(b.player);
       piece.position.copy(vpos(vid));
@@ -1468,11 +1591,15 @@ export class Board3D {
       this.merchantKey = mKey;
     }
 
-    // 盗賊: ヘックスが変わったらジャンプ移動
+    // 盗賊/ドラゴン: ヘックスが変わったらジャンプ/飛翔移動
+    const isDragon = state.mode === 'dragon';
+    this.dragonMesh.visible = isDragon;
+    this.robber.visible = !isDragon;
     if (this.robberHex !== state.board.robber) {
       const to = this._robberPos(state.board.robber);
       if (this.robberHex == null) {
         this.robber.position.copy(to);
+        this.dragonMesh.position.copy(to);
       } else {
         this.robberAnim = {
           from: this._robberPos(this.robberHex),
@@ -1481,6 +1608,26 @@ export class Board3D {
         };
       }
       this.robberHex = state.board.robber;
+    }
+
+    // 炎上ヘックス(ドラゴンの島): 燃えている集合が変わったら組み直す
+    const burning = Object.keys(state.burned ?? {})
+      .filter((h) => state.burned[h] > state.turn)
+      .sort();
+    const fkey = burning.join(',');
+    if (fkey !== this.flameKey) {
+      this.flameKey = fkey;
+      this.flameGroup.clear();
+      this.flames = [];
+      for (const hid of burning) {
+        const c = hexCenterOf(hid);
+        for (const [ox, oz] of [[-0.32, 0.15], [0.3, 0.22], [0.02, -0.3]]) {
+          const f = makeFlame();
+          f.position.set(c.x + ox, TILE_TOP, c.y + oz);
+          this.flameGroup.add(f);
+          this.flames.push(f);
+        }
+      }
     }
 
     this._updateHighlights(state, ui);

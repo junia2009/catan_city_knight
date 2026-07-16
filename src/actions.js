@@ -22,6 +22,7 @@ import {
   totalResources,
 } from './rules/build.js';
 import { rollTwoDice, rollEventDie, distributeForRoll } from './rules/dice.js';
+import { TOWER_COST, canBuildTower, resolveRampage } from './rules/dragon.js';
 import { stealableTargets, applyRobberMove } from './rules/robber.js';
 import { tradeRate } from './rules/trade.js';
 import {
@@ -297,6 +298,13 @@ export function validateAction(state, action) {
       return canBuyImprovement(state, pid, action.track);
     }
 
+    case 'BUILD_TOWER': {
+      if (state.mode !== 'dragon') return 'ドラゴンの島モードではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      if (!canAfford(p, TOWER_COST)) return '資源が足りません(木材1・レンガ1・鉱石1)';
+      return canBuildTower(state, pid, action.vertexId);
+    }
+
     case 'PLAY_PROGRESS_CARD': {
       if (state.mode !== 'cak') return '都市と騎士モードではありません';
       const card = p.progressCards[action.index];
@@ -507,6 +515,8 @@ function applyAction(state, action) {
       }
 
       processRollTotal(state, pid, total);
+      // ドラゴンの島: ゾロ目でドラゴンが暴走(分配の後に解決。ゾロ目は偶数なので7と重ならない)
+      if (state.mode === 'dragon' && a === b) resolveRampage(state);
       break;
     }
 
@@ -722,6 +732,12 @@ function applyAction(state, action) {
 
     case 'BUY_IMPROVEMENT':
       applyImprovement(state, pid, action.track);
+      break;
+
+    case 'BUILD_TOWER':
+      payCost(state, pid, TOWER_COST);
+      state.towers[action.vertexId] = pid;
+      addLog(state, `🗼 ${p.name}が見張り塔を建設しました(隣接ヘックスの襲撃を撃退)`);
       break;
 
     case 'PLAY_PROGRESS_CARD': {

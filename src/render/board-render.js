@@ -491,6 +491,97 @@ function drawMerchant(ctx, view, merchant) {
   ctx.restore();
 }
 
+// ドラゴン(ドラゴンの島): 赤い翼のシルエット
+function drawDragon(ctx, view, hid) {
+  const c = hexCenterOf(hid);
+  const [px, py] = toPixel(view, c.x, c.y - 0.05);
+  const s = view.scale * 0.2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(px, py + s * 1.1, s * 1.2, s * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const g = ctx.createLinearGradient(px, py - s * 1.5, px, py + s);
+  g.addColorStop(0, '#a8322a');
+  g.addColorStop(1, '#5e130f');
+  ctx.fillStyle = g;
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.lineWidth = Math.max(1, s * 0.08);
+  // 翼(左右)
+  ctx.beginPath();
+  ctx.moveTo(px - s * 0.2, py);
+  ctx.quadraticCurveTo(px - s * 1.5, py - s * 1.3, px - s * 1.7, py - s * 0.1);
+  ctx.quadraticCurveTo(px - s * 1.0, py - s * 0.25, px - s * 0.2, py + s * 0.35);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(px + s * 0.2, py);
+  ctx.quadraticCurveTo(px + s * 1.5, py - s * 1.3, px + s * 1.7, py - s * 0.1);
+  ctx.quadraticCurveTo(px + s * 1.0, py - s * 0.25, px + s * 0.2, py + s * 0.35);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // 胴体と頭
+  ctx.beginPath();
+  ctx.ellipse(px, py + s * 0.25, s * 0.42, s * 0.75, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(px, py - s * 0.75, s * 0.3, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // 目
+  ctx.fillStyle = '#ffd24a';
+  ctx.beginPath();
+  ctx.arc(px - s * 0.12, py - s * 0.8, s * 0.06, 0, Math.PI * 2);
+  ctx.arc(px + s * 0.12, py - s * 0.8, s * 0.06, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// 炎上ヘックス(ドラゴンの島): ゆらめく炎
+function drawFlames(ctx, view, hid, time = 0) {
+  const c = hexCenterOf(hid);
+  ctx.save();
+  for (let i = 0; i < 3; i++) {
+    const ox = [-0.32, 0.3, 0][i];
+    const oy = [0.12, 0.2, -0.3][i];
+    const [px, py] = toPixel(view, c.x + ox, c.y + oy);
+    const flick = 1 + 0.16 * Math.sin(time / 130 + i * 2.1);
+    const s = view.scale * 0.14 * flick;
+    const g = ctx.createLinearGradient(px, py - s * 1.6, px, py + s * 0.4);
+    g.addColorStop(0, 'rgba(255,214,64,0.95)');
+    g.addColorStop(0.6, 'rgba(255,120,30,0.9)');
+    g.addColorStop(1, 'rgba(180,40,10,0.8)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(px - s * 0.55, py + s * 0.35);
+    ctx.quadraticCurveTo(px - s * 0.7, py - s * 0.5, px, py - s * 1.55);
+    ctx.quadraticCurveTo(px + s * 0.7, py - s * 0.5, px + s * 0.55, py + s * 0.35);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 見張り塔(ドラゴンの島): 建物の隣に立つ石の塔
+function drawTower(ctx, view, vid, pid) {
+  const v = LAYOUT.vertices[vid];
+  const [px, py] = toPixel(view, v.x + 0.16, v.y - 0.14);
+  const s = view.scale * 0.09;
+  ctx.save();
+  ctx.fillStyle = '#b8bec7';
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 1.4;
+  ctx.fillRect(px - s * 0.55, py - s * 1.6, s * 1.1, s * 2.1);
+  ctx.strokeRect(px - s * 0.55, py - s * 1.6, s * 1.1, s * 2.1);
+  // 狭間(上端のギザギザ)
+  ctx.fillRect(px - s * 0.75, py - s * 1.95, s * 0.4, s * 0.42);
+  ctx.fillRect(px - s * 0.2, py - s * 1.95, s * 0.4, s * 0.42);
+  ctx.fillRect(px + s * 0.36, py - s * 1.95, s * 0.4, s * 0.42);
+  // 持ち主の旗
+  ctx.fillStyle = PLAYER_COLORS[pid];
+  ctx.fillRect(px - s * 0.2, py - s * 0.6, s * 0.4, s * 0.55);
+  ctx.restore();
+}
+
 function drawRobber(ctx, view, hid) {
   const c = hexCenterOf(hid);
   const [px, py] = toPixel(view, c.x, c.y - 0.02);
@@ -741,7 +832,14 @@ export function drawBoard(ctx, width, height, state, ui, time = 0) {
   const staticLayer = getStaticLayer(state, width, height, dpr);
   ctx.drawImage(staticLayer, 0, 0, width, height);
 
-  drawRobber(ctx, view, state.board.robber);
+  if (state.mode === 'dragon') {
+    for (const hid of Object.keys(state.burned ?? {})) {
+      if (state.burned[hid] > state.turn) drawFlames(ctx, view, hid, time);
+    }
+    drawDragon(ctx, view, state.board.robber);
+  } else {
+    drawRobber(ctx, view, state.board.robber);
+  }
   if (state.merchant) drawMerchant(ctx, view, state.merchant);
 
   for (const [eid, road] of Object.entries(state.roads)) {
@@ -752,6 +850,9 @@ export function drawBoard(ctx, width, height, state, ui, time = 0) {
   }
   for (const vid of Object.keys(state.walls ?? {})) {
     drawWall(ctx, view, vid);
+  }
+  for (const [vid, pid] of Object.entries(state.towers ?? {})) {
+    drawTower(ctx, view, vid, pid);
   }
   for (const [vid, b] of Object.entries(state.buildings)) {
     drawBuilding(ctx, view, vid, b.player, b.type);

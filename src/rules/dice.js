@@ -34,6 +34,8 @@ export function distributeForRoll(state, total) {
   for (const hid of LAYOUT.hexIds) {
     const hex = state.board.hexes[hid];
     if (hex.token !== total || state.board.robber === hid) continue;
+    // ドラゴンの島: 炎上中のヘックスは産出しない
+    if ((state.burned?.[hid] ?? 0) > state.turn) continue;
     const res = TERRAIN_RESOURCE[hex.terrain];
     if (!res) continue;
     const commodity = cak ? TERRAIN_COMMODITY[hex.terrain] : null;

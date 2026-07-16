@@ -11,6 +11,7 @@ import { stealableTargets } from '../rules/robber.js';
 import { tradeRate } from '../rules/trade.js';
 import { RESOURCES } from '../state.js';
 import { KNIGHT_COSTS, canPlaceKnight } from '../rules/cak/knights.js';
+import { TOWER_COST } from '../rules/dragon.js';
 import { knightContribution, razableCities } from '../rules/cak/barbarians.js';
 import { TRACKS, TRACK_COMMODITY, canBuyImprovement } from '../rules/cak/improvements.js';
 import { COMMODITIES, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
@@ -22,7 +23,7 @@ import {
   legalSettlementVertices,
   legalSetupEdges,
 } from './legal-moves.js';
-import { missingFor, robberHexValue, vertexValue } from './evaluator.js';
+import { missingFor, pipsOfVertex, robberHexValue, vertexValue } from './evaluator.js';
 
 function valid(state, action) {
   return action && validateAction(state, action) === null ? action : null;
@@ -462,6 +463,17 @@ export function chooseAction(state, pid) {
   // 3'. 基本: 発展カード使用
   const dev = tryPlayDevCard(state, pid);
   if (dev) return dev;
+
+  // 3''. ドラゴンの島: 産出の高い自分の建物に見張り塔(撃退で財宝+1点)
+  if (state.mode === 'dragon' && canAfford(p, TOWER_COST)) {
+    const vids = Object.keys(state.buildings).filter(
+      (v) => validateAction(state, { type: 'BUILD_TOWER', player: pid, vertexId: v }) === null,
+    );
+    const vid = best(vids, (v) => pipsOfVertex(state, v));
+    if (vid && pipsOfVertex(state, vid) >= 7) {
+      return { type: 'BUILD_TOWER', player: pid, vertexId: vid };
+    }
+  }
 
   // 4. 入植先がないなら道で拡張(資源を貯めすぎない範囲で)
   const hasSpot = legalSettlementVertices(state, pid).length > 0;

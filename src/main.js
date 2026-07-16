@@ -56,7 +56,7 @@ function renderSelectPanel() {
       .join('')}</div>`;
   panel.innerHTML = `
     <h3>⬡ ゲーム設定</h3>
-    <div class="srow"><span>ルール</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本']], settings.mode)}</div>
+    <div class="srow"><span>ルール</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本'], ['dragon', '🐉ドラゴン']], settings.mode)}</div>
     <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(settings.cpuCount))}</div>
     <div class="srow"><span>強さ</span>${seg('set-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], settings.difficulty)}</div>
     <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${settings.seed}"></div>
@@ -235,6 +235,13 @@ function computeHighlights() {
     };
   }
   if (m === 'raze-city') return { vertices: razableCities(state, HUMAN) };
+  if (m === 'build-tower') {
+    return {
+      vertices: Object.keys(state.buildings).filter(
+        (v) => validateAction(state, { type: 'BUILD_TOWER', player: HUMAN, vertexId: v }) === null,
+      ),
+    };
+  }
 
   // ---- 進歩カード(対象を validate 総当たりでハイライト)----
   const progAct = (params) =>
@@ -658,7 +665,7 @@ function boardClick(pick) {
   } else if (m === 'play-road-building') {
     const eid = pick('edge', ui.highlights.edges ?? []);
     if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
-  } else if (['build-knight', 'build-wall', 'move-knight', 'raze-city'].includes(m)) {
+  } else if (['build-knight', 'build-wall', 'build-tower', 'move-knight', 'raze-city'].includes(m)) {
     const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid) ui.pending = { vertexId: vid };
   } else if (m === 'prog-hex') {
@@ -747,6 +754,8 @@ function confirmPending() {
     doAction({ type: 'BUILD_KNIGHT', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'build-wall' && ui.pending?.vertexId) {
     doAction({ type: 'BUILD_WALL', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'build-tower' && ui.pending?.vertexId) {
+    doAction({ type: 'BUILD_TOWER', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'move-knight' && ui.knightFrom && ui.pending?.vertexId) {
     doAction({
       type: 'MOVE_KNIGHT', player: HUMAN,
@@ -789,7 +798,7 @@ function cancelMode() {
     ui.pending = null;
   } else if ([
     'build-road', 'build-settlement', 'build-city', 'play-road-building',
-    'build-knight', 'build-wall', 'move-knight',
+    'build-knight', 'build-wall', 'build-tower', 'move-knight',
     'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads',
   ].includes(ui.mode)) {
     ui.mode = 'idle';

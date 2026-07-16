@@ -5,9 +5,12 @@ import { addLog } from '../state.js';
 
 export const VICTORY_POINTS_TO_WIN = 10;
 export const VICTORY_POINTS_TO_WIN_CAK = 13;
+export const VICTORY_POINTS_TO_WIN_DRAGON = 12;
 
 export function pointsToWin(state) {
-  return state.mode === 'cak' ? VICTORY_POINTS_TO_WIN_CAK : VICTORY_POINTS_TO_WIN;
+  if (state.mode === 'cak') return VICTORY_POINTS_TO_WIN_CAK;
+  if (state.mode === 'dragon') return VICTORY_POINTS_TO_WIN_DRAGON;
+  return VICTORY_POINTS_TO_WIN;
 }
 
 // pid の最長交易路(辺の本数)。敵の建物がある頂点は通り抜けられない。
@@ -106,6 +109,7 @@ export function computePoints(state, pid, { includeHidden = false } = {}) {
     if (state.merchant?.player === pid) pts += 1; // 商人の保持者
   } else {
     if (state.largestArmy.player === pid) pts += 2;
+    pts += state.players[pid].treasures ?? 0; // ドラゴンの島: 財宝=+1点
     if (includeHidden) {
       pts += state.players[pid].devCards.filter((c) => c.type === 'vp').length;
     }

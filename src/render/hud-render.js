@@ -6,6 +6,7 @@ import { COSTS, WALL_COST, canAfford, totalCards } from '../rules/build.js';
 import { computePoints, pointsToWin } from '../rules/victory.js';
 import { tradeRate } from '../rules/trade.js';
 import { KNIGHT_COSTS } from '../rules/cak/knights.js';
+import { TOWER_COST } from '../rules/dragon.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
 import {
   TRACKS, TRACK_JP, TRACK_COMMODITY, MAX_IMPROVEMENT,
@@ -47,6 +48,7 @@ function renderPlayers(state, ui) {
         !cak && state.largestArmy.player === p.id ? '<span class="badge">⚔ 最大騎士力</span>' : '',
         metro > 0 ? `<span class="badge">🏙 メトロポリス×${metro}</span>` : '',
         cak && p.defenderPoints > 0 ? `<span class="badge">🛡×${p.defenderPoints}</span>` : '',
+        p.treasures > 0 ? `<span class="badge">💎×${p.treasures}</span>` : '',
       ].join('');
       const info = cak
         ? `<span title="手札">🂠 ${totalCards(p)}</span>
@@ -204,6 +206,9 @@ function renderControls(state, ui) {
   ];
   const devBtn = (label) =>
     btn('buy-dev', label, myTurn && rolled && canAfford(p, COSTS.devCard) && state.bank.devDeck.length > 0, '🐑1 🌾1 🪨1');
+  const dragonMode = state.mode === 'dragon';
+  const towerBtn = (label) =>
+    btn('mode:tower', label, myTurn && rolled && canAfford(p, TOWER_COST), '🪵1 🧱1 🪨1(隣接ヘックスの襲撃を撃退して財宝)');
 
   let list;
   if (mobile) {
@@ -214,14 +219,18 @@ function renderControls(state, ui) {
     list = [
       flow,
       ...buildBtns('🛤道', '🏠開拓', '🏰都市'),
-      ...(cak ? cakBtns('⚔️騎士', '🧱城壁', '🏙改良') : [devBtn('📜カード')]),
+      ...(cak ? cakBtns('⚔️騎士', '🧱城壁', '🏙改良')
+        : dragonMode ? [devBtn('📜カード'), towerBtn('🗼塔')]
+        : [devBtn('📜カード')]),
       btn('trade-open', '⚖️交易', myTurn && rolled),
     ];
   } else {
     list = [
       btn('roll', '🎲 ロール', myTurn && !rolled),
       ...buildBtns('🛤️ 道', '🏠 開拓地', '🏰 都市'),
-      ...(cak ? cakBtns('⚔️ 騎士', '🧱 城壁', '🏙 改良') : [devBtn('📜 カード')]),
+      ...(cak ? cakBtns('⚔️ 騎士', '🧱 城壁', '🏙 改良')
+        : dragonMode ? [devBtn('📜 カード'), towerBtn('🗼 見張り塔')]
+        : [devBtn('📜 カード')]),
       btn('trade-open', '⚖️ 交易', myTurn && rolled),
       btn('end-turn', '⏭ ターン終了', myTurn && rolled),
     ];
@@ -244,7 +253,11 @@ function statusText(state, ui) {
     }
     if (aw.type === 'discard') return `🂠 手札を${aw.context.required[HUMAN]}枚捨ててください`;
     if (aw.type === 'aqueduct') return '💧 水道橋: もらう資源を選んでください';
-    if (aw.type === 'moveRobber') return '🥷 盗賊の移動先ヘックスを選んでください';
+    if (aw.type === 'moveRobber') {
+      return state.mode === 'dragon'
+        ? '🐉 ドラゴンの移動先ヘックスを選んでください'
+        : '🥷 盗賊の移動先ヘックスを選んでください';
+    }
     if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
   } else if (aw) {
     return `⏳ ${aw.players.map((i) => state.players[i].name).join('・')}の応答待ち...`;
@@ -255,6 +268,7 @@ function statusText(state, ui) {
     case 'build-city': return '🏰 都市に昇格する開拓地を選んでください';
     case 'build-knight': return '⚔️ 騎士を配置する頂点を選んでください(自分の道に接続)';
     case 'build-wall': return '🧱 城壁を建てる都市を選んでください';
+    case 'build-tower': return '🗼 見張り塔を建てる自分の建物を選んでください';
     case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
     case 'play-road-building': return `🛤️ 街道建設: 道をあと${2 - ui.pendingEdges.length}本選べます`;
     case 'prog-hex': case 'prog-vertex': case 'prog-edge': case 'prog-hex2': case 'prog-roads': {
@@ -563,7 +577,7 @@ function dialogHtml(state, ui) {
         .join('')}</div>`;
     return `<h3>⚙️ 設定</h3>
       <div class="srow"><span>表示</span>${seg('set-view', [['3d', '3D'], ['2d', '2D']], s.view)}</div>
-      <div class="srow"><span>モード</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本']], s.mode)}</div>
+      <div class="srow"><span>モード</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本'], ['dragon', '🐉ドラゴン']], s.mode)}</div>
       <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(s.cpuCount))}</div>
       <div class="srow"><span>BGM</span>${seg('set-bgm', [['on', '🔊 オン'], ['off', '🔇 オフ']], s.bgm ? 'on' : 'off')}</div>
       <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${s.seed}"></div>
