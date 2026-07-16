@@ -292,12 +292,16 @@ export function validateAction(state, action) {
 
     case 'PLAY_PROGRESS_CARD': {
       if (state.mode !== 'cak') return '都市と騎士モードではありません';
-      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
       const card = p.progressCards[action.index];
       if (!card) return 'そのカードを持っていません';
       if (card.boughtTurn >= state.turn) return '獲得したターンには使えません';
       const def = PROGRESS_CARDS[card.id];
       if (!def) return '不明なカードです';
+      if (def.preRoll) {
+        if (state.turnFlags.rolled) return 'ロール前にのみ使えます';
+      } else if (!state.turnFlags.rolled) {
+        return '先にダイスを振ってください';
+      }
       return def.validate(state, pid, action.params);
     }
 
@@ -390,7 +394,7 @@ function processRollTotal(state, pid, total) {
     }
     const waiting = Object.keys(required).map(Number);
     if (waiting.length > 0) {
-      state.awaiting = { type: 'discard', players: waiting, context: { required } };
+      state.awaiting = { type: 'discard', players: waiting, context: { required, cause: 'seven' } };
       addLog(state, `7! ${waiting.map((i) => state.players[i].name).join('・')}は手札の半分を捨てます`);
     } else {
       state.awaiting = { type: 'moveRobber', players: [pid], context: { cause: 'seven' } };
@@ -442,7 +446,14 @@ function applyAction(state, action) {
     }
 
     case 'ROLL_DICE': {
-      const [a, b] = rollTwoDice(state);
+      // 錬金術師: 赤・黄の出目を指定済みならそれを使う(イベントダイスは振る)
+      let a, b;
+      if (state.turnFlags.alchemist) {
+        [a, b] = state.turnFlags.alchemist;
+        delete state.turnFlags.alchemist;
+      } else {
+        [a, b] = rollTwoDice(state);
+      }
       const total = a + b;
       state.dice = [a, b];
       state.turnFlags.rolled = true;
@@ -494,11 +505,14 @@ function applyAction(state, action) {
       addLog(state, `${p.name}が${sumRes(action.resources)}枚捨てました`);
       state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
       if (state.awaiting.players.length === 0) {
-        state.awaiting = {
-          type: 'moveRobber',
-          players: [state.currentPlayer],
-          context: { cause: 'seven' },
-        };
+        // 破壊工作員による捨て札は盗賊移動に進まない
+        state.awaiting = state.awaiting.context.cause === 'saboteur'
+          ? null
+          : {
+              type: 'moveRobber',
+              players: [state.currentPlayer],
+              context: { cause: 'seven' },
+            };
       }
       break;
     }

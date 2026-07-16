@@ -12,6 +12,7 @@ import {
   improvementCost, canBuyImprovement,
 } from '../rules/cak/improvements.js';
 import { COMMODITIES, COM_JP, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
+import { validateAction } from '../actions.js';
 import { PLAYER_COLORS } from './board-render.js';
 
 const HUMAN = 0;
@@ -140,9 +141,11 @@ function renderHand(state, ui) {
     extra = p.progressCards
       .map((c, i) => {
         const def = PROGRESS_CARDS[c.id];
-        const playable = isMyTurn && state.turnFlags.rolled && c.boughtTurn < state.turn;
+        // 錬金術師はロール前のみ、他はロール後のみ使える
+        const timing = def.preRoll ? !state.turnFlags.rolled : state.turnFlags.rolled;
+        const playable = isMyTurn && timing && c.boughtTurn < state.turn;
         return `<button class="card dev ${playable ? '' : 'dim'}" data-act="play-prog:${i}"
-          ${playable ? '' : 'disabled'} title="進歩カード">
+          ${playable ? '' : 'disabled'} title="${def.desc ?? '進歩カード'}">
           <div class="icon">${def.icon}</div>
           <div class="label">${def.name}</div></button>`;
       })
@@ -243,8 +246,17 @@ function statusText(state, ui) {
     case 'build-knight': return '⚔️ 騎士を配置する頂点を選んでください(自分の道に接続)';
     case 'build-wall': return '🧱 城壁を建てる都市を選んでください';
     case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
-    case 'play-bishop': return '⛪ 司教: 盗賊の移動先ヘックスを選んでください';
     case 'play-road-building': return `🛤️ 街道建設: 道をあと${2 - ui.pendingEdges.length}本選べます`;
+    case 'prog-hex': case 'prog-vertex': case 'prog-edge': case 'prog-hex2': case 'prog-roads': {
+      const card = state.players[HUMAN].progressCards[ui.progIndex];
+      const def = card ? PROGRESS_CARDS[card.id] : null;
+      const label = def ? `${def.icon} ${def.name}` : '進歩カード';
+      if (ui.mode === 'prog-hex') return `${label}: 対象のヘックスを選んでください`;
+      if (ui.mode === 'prog-vertex') return `${label}: 対象の頂点を選んでください`;
+      if (ui.mode === 'prog-edge') return `${label}: 取り除く道を選んでください`;
+      if (ui.mode === 'prog-hex2') return `${label}: 交換する数字を選択(${ui.pendingHexes.length}/2)`;
+      return `${label}: 道をあと${2 - ui.pendingEdges.length}本選べます`;
+    }
     default:
       if (state.phase === 'main') {
         return state.currentPlayer === HUMAN
@@ -258,11 +270,13 @@ function statusText(state, ui) {
 function renderStatus(state, ui) {
   const cancellable = [
     'build-road', 'build-settlement', 'build-city', 'play-road-building',
-    'build-knight', 'build-wall', 'move-knight', 'play-bishop',
+    'build-knight', 'build-wall', 'move-knight',
+    'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads',
   ].includes(ui.mode) || (ui.mode === 'setup-road');
   const confirmable =
     (ui.pending != null) ||
-    (ui.mode === 'play-road-building' && ui.pendingEdges.length >= 1);
+    (['play-road-building', 'prog-roads'].includes(ui.mode) && ui.pendingEdges.length >= 1) ||
+    (ui.mode === 'prog-hex2' && ui.pendingHexes.length === 2);
   el('status').innerHTML = `
     <span class="msg">${statusText(state, ui)}</span>
     ${confirmable ? '<button class="primary" data-act="confirm">✓ 確定</button>' : ''}
@@ -368,7 +382,7 @@ function dialogHtml(state, ui) {
       const lv = p.improvements[t];
       const next = lv + 1;
       const com = TRACK_COMMODITY[t];
-      const cost = lv >= MAX_IMPROVEMENT ? null : improvementCost(next);
+      const cost = lv >= MAX_IMPROVEMENT ? null : improvementCost(next, state);
       const err = canBuyImprovement(state, HUMAN, t);
       const cells = Array.from({ length: MAX_IMPROVEMENT }, (_, i) =>
         `<span class="lvcell ${i < lv ? 'on' : ''}"></span>`,
@@ -407,29 +421,62 @@ function dialogHtml(state, ui) {
       <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
   }
 
-  if (d.type === 'prog-harvest') {
-    const btns = RESOURCES.map((r) => {
-      const n = d.picks.filter((x) => x === r).length;
-      const ok = d.picks.length < 2 && state.bank.resources[r] > n;
-      return `<button class="pick ${n ? 'sel' : ''}" data-act="ph:${r}" ${ok ? '' : 'disabled'}>
-        <span class="picon">${RES_ICON[r]}</span>${RES_JP[r]}${n ? `<small>×${n}</small>` : ''}</button>`;
-    }).join('');
-    return `<h3>🧺 収穫祭: 資源を2つ選んでください(${d.picks.length}/2)</h3>
-      <div class="row">${btns}</div>
-      <div class="row end">
-        <button class="primary" data-act="ph-confirm" ${d.picks.length === 2 ? '' : 'disabled'}>獲得</button>
-        <button data-act="dialog-cancel">やめる</button>
-      </div>`;
-  }
+  // 進歩カードのパラメータ選択ダイアログ(カード名は index から引く)
+  if (['prog-commodity', 'prog-resource', 'prog-cardkey', 'prog-player', 'prog-dice'].includes(d.type)) {
+    const card = p.progressCards[d.index];
+    const def = card ? PROGRESS_CARDS[card.id] : null;
+    if (!def) return '';
+    const head = `<h3>${def.icon} ${def.name}</h3><p>${def.desc}</p>`;
+    const cancel = '<button data-act="dialog-cancel">やめる</button>';
+    const progValid = (params) =>
+      validateAction(state, { type: 'PLAY_PROGRESS_CARD', player: HUMAN, index: d.index, params });
 
-  if (d.type === 'prog-commodity') {
-    const btns = COMMODITIES.map(
-      (c) => `<button class="pick" data-act="pc:${c}" ${state.bank.commodities[c] > 0 ? '' : 'disabled'}>
-        <span class="picon">${COM_ICON[c]}</span>${COM_JP[c]}</button>`,
-    ).join('');
-    return `<h3>📦 商品倉庫: 商品を1つ選んでください</h3>
-      <div class="row">${btns}</div>
-      <div class="row end"><button data-act="dialog-cancel">やめる</button></div>`;
+    if (d.type === 'prog-commodity') {
+      const btns = COMMODITIES.map(
+        (c) => `<button class="pick" data-act="pc:${c}" ${progValid({ commodity: c }) ? 'disabled' : ''}>
+          <span class="picon">${COM_ICON[c]}</span>${COM_JP[c]}</button>`,
+      ).join('');
+      return `${head}<div class="row">${btns}</div><div class="row end">${cancel}</div>`;
+    }
+    if (d.type === 'prog-resource') {
+      const btns = RESOURCES.map(
+        (r) => `<button class="pick" data-act="pres:${r}" ${progValid({ resource: r }) ? 'disabled' : ''}>
+          <span class="picon">${RES_ICON[r]}</span>${RES_JP[r]}</button>`,
+      ).join('');
+      return `${head}<div class="row">${btns}</div><div class="row end">${cancel}</div>`;
+    }
+    if (d.type === 'prog-cardkey') {
+      const keys = [...RESOURCES, ...COMMODITIES];
+      const btns = keys.map(
+        (k) => `<button class="pick" data-act="pkey:${k}" ${progValid({ key: k }) ? 'disabled' : ''}>
+          <span class="picon">${RES_ICON[k] ?? COM_ICON[k]}</span>${RES_JP[k] ?? COM_JP[k]}</button>`,
+      ).join('');
+      return `${head}<div class="row">${btns}</div><div class="row end">${cancel}</div>`;
+    }
+    if (d.type === 'prog-player') {
+      const btns = state.players
+        .filter((o) => o.id !== HUMAN)
+        .map((o) => {
+          const err = progValid({ target: o.id });
+          return `<button class="pick" data-act="pplayer:${o.id}" style="--pc:${PLAYER_COLORS[o.id]}"
+            ${err ? 'disabled' : ''} title="${err ?? ''}">
+            ${o.name}<small>${totalCards(o)}枚</small></button>`;
+        })
+        .join('');
+      return `${head}<div class="row">${btns}</div><div class="row end">${cancel}</div>`;
+    }
+    if (d.type === 'prog-dice') {
+      const dieRow = (act, sel, cls) => [1, 2, 3, 4, 5, 6]
+        .map((n) => `<button class="pick ${cls} ${sel === n ? 'sel' : ''}" data-act="${act}:${n}">${n}</button>`)
+        .join('');
+      return `${head}
+        <p>🔴 赤ダイス(小さいほど進歩カードが出やすい)</p><div class="row">${dieRow('pdice-r', d.red, 'die-red')}</div>
+        <p>🟡 黄ダイス</p><div class="row">${dieRow('pdice-y', d.yellow, 'die-yellow')}</div>
+        <div class="row end">
+          <button class="primary" data-act="pdice-confirm" ${d.red && d.yellow ? '' : 'disabled'}>この出目にする</button>
+          ${cancel}
+        </div>`;
+    }
   }
 
   if (d.type === 'discard') {

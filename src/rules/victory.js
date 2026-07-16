@@ -103,6 +103,7 @@ export function computePoints(state, pid, { includeHidden = false } = {}) {
     }
     const p = state.players[pid];
     pts += p.defenderPoints + p.progressVP;
+    if (state.merchant?.player === pid) pts += 1; // 商人の保持者
   } else {
     if (state.largestArmy.player === pid) pts += 2;
     if (includeHidden) {

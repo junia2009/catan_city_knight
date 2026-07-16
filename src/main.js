@@ -33,7 +33,7 @@ let renderer3d = null;
 let renderer3dFailed = false;
 
 // 設定(⚙️シートから編集。新しいゲーム開始時に反映)
-const settings = { view: '3d', mode: 'cak', cpuCount: 3, seed: '' };
+const settings = { view: '3d', mode: 'cak', cpuCount: 3, seed: '', difficulty: 'normal' };
 
 // 画面フロー: title(タイトル) → select(ルール選択) → game(ゲーム)
 let screen = 'title';
@@ -56,6 +56,7 @@ function renderSelectPanel() {
     <h3>⬡ ゲーム設定</h3>
     <div class="srow"><span>ルール</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本']], settings.mode)}</div>
     <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(settings.cpuCount))}</div>
+    <div class="srow"><span>強さ</span>${seg('set-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], settings.difficulty)}</div>
     <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${settings.seed}"></div>
     <div class="row end">
       <button data-act="goto-title">← タイトル</button>
@@ -84,6 +85,7 @@ function freshUi() {
     pending: null, // { vertexId } | { edgeId } | { hexId }
     pendingVertex: null, // 初期配置で選んだ開拓地
     pendingEdges: [], // 街道建設カード
+    pendingHexes: [], // 発明家(数字トークン交換)
     knightFrom: null, // 騎士の移動元
     progIndex: null, // 使用中の進歩カード
     dialog: null,
@@ -104,6 +106,7 @@ function newGame() {
     playerCount: Number(settings.cpuCount) + 1,
     humanIndex: HUMAN,
     mode: settings.mode,
+    difficulty: settings.difficulty,
   });
   ui = freshUi();
   refresh();
@@ -200,7 +203,49 @@ function computeHighlights() {
     };
   }
   if (m === 'raze-city') return { vertices: razableCities(state, HUMAN) };
-  if (m === 'play-bishop') return { hexes: legalRobberHexes(state) };
+
+  // ---- 進歩カード(対象を validate 総当たりでハイライト)----
+  const progAct = (params) =>
+    ({ type: 'PLAY_PROGRESS_CARD', player: HUMAN, index: ui.progIndex, params });
+  if (m === 'prog-hex') {
+    return {
+      hexes: LAYOUT.hexIds.filter((h) => validateAction(state, progAct({ hexId: h })) === null),
+    };
+  }
+  if (m === 'prog-vertex') {
+    return {
+      vertices: Object.keys(LAYOUT.vertices).filter(
+        (v) => validateAction(state, progAct({ vertexId: v })) === null,
+      ),
+    };
+  }
+  if (m === 'prog-edge') {
+    return {
+      edges: Object.keys(state.roads).filter(
+        (e) => validateAction(state, progAct({ edgeId: e })) === null,
+      ),
+    };
+  }
+  if (m === 'prog-hex2') {
+    if (ui.pendingHexes.length === 0) {
+      return {
+        hexes: LAYOUT.hexIds.filter((h) => {
+          const t = state.board.hexes[h].token;
+          return t && ![2, 6, 8, 12].includes(t);
+        }),
+      };
+    }
+    return {
+      hexes: LAYOUT.hexIds.filter(
+        (h) => validateAction(state, progAct({ a: ui.pendingHexes[0], b: h })) === null,
+      ),
+    };
+  }
+  if (m === 'prog-roads') {
+    const extra = {};
+    for (const e of ui.pendingEdges) extra[e] = true;
+    return { edges: legalRoadEdges(state, HUMAN, { extraRoads: extra }) };
+  }
   return {};
 }
 
@@ -409,6 +454,7 @@ function doAction(action) {
   ui.pending = null;
   ui.pendingVertex = null;
   ui.pendingEdges = [];
+  ui.pendingHexes = [];
   ui.knightFrom = null;
   ui.progIndex = null;
   ui.dialog = null;
@@ -501,9 +547,23 @@ function boardClick(pick) {
   } else if (['build-knight', 'build-wall', 'move-knight', 'raze-city'].includes(m)) {
     const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid) ui.pending = { vertexId: vid };
-  } else if (m === 'play-bishop') {
+  } else if (m === 'prog-hex') {
     const hid = pick('hex', ui.highlights.hexes ?? []);
     if (hid) ui.pending = { hexId: hid };
+  } else if (m === 'prog-vertex') {
+    const vid = pick('vertex', ui.highlights.vertices ?? []);
+    if (vid) ui.pending = { vertexId: vid };
+  } else if (m === 'prog-edge') {
+    const eid = pick('edge', ui.highlights.edges ?? []);
+    if (eid) ui.pending = { edgeId: eid };
+  } else if (m === 'prog-hex2') {
+    const hid = pick('hex', ui.highlights.hexes ?? []);
+    if (hid && ui.pendingHexes.length < 2 && !ui.pendingHexes.includes(hid)) {
+      ui.pendingHexes.push(hid);
+    }
+  } else if (m === 'prog-roads') {
+    const eid = pick('edge', ui.highlights.edges ?? []);
+    if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
   } else if (m === 'idle' && state.mode === 'cak') {
     // 自分の騎士をクリック → 行動メニュー
     const myKnights = Object.keys(state.knights).filter(
@@ -580,10 +640,30 @@ function confirmPending() {
     });
   } else if (m === 'raze-city' && ui.pending?.vertexId) {
     doAction({ type: 'RAZE_CITY', player: HUMAN, vertexId: ui.pending.vertexId });
-  } else if (m === 'play-bishop' && ui.pending?.hexId && ui.progIndex != null) {
+  } else if (m === 'prog-hex' && ui.pending?.hexId && ui.progIndex != null) {
     doAction({
       type: 'PLAY_PROGRESS_CARD', player: HUMAN,
       index: ui.progIndex, params: { hexId: ui.pending.hexId },
+    });
+  } else if (m === 'prog-vertex' && ui.pending?.vertexId && ui.progIndex != null) {
+    doAction({
+      type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+      index: ui.progIndex, params: { vertexId: ui.pending.vertexId },
+    });
+  } else if (m === 'prog-edge' && ui.pending?.edgeId && ui.progIndex != null) {
+    doAction({
+      type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+      index: ui.progIndex, params: { edgeId: ui.pending.edgeId },
+    });
+  } else if (m === 'prog-hex2' && ui.pendingHexes.length === 2 && ui.progIndex != null) {
+    doAction({
+      type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+      index: ui.progIndex, params: { a: ui.pendingHexes[0], b: ui.pendingHexes[1] },
+    });
+  } else if (m === 'prog-roads' && ui.pendingEdges.length >= 1 && ui.progIndex != null) {
+    doAction({
+      type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+      index: ui.progIndex, params: { edges: [...ui.pendingEdges] },
     });
   }
 }
@@ -595,11 +675,13 @@ function cancelMode() {
     ui.pending = null;
   } else if ([
     'build-road', 'build-settlement', 'build-city', 'play-road-building',
-    'build-knight', 'build-wall', 'move-knight', 'play-bishop',
+    'build-knight', 'build-wall', 'move-knight',
+    'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads',
   ].includes(ui.mode)) {
     ui.mode = 'idle';
     ui.pending = null;
     ui.pendingEdges = [];
+    ui.pendingHexes = [];
     ui.knightFrom = null;
     ui.progIndex = null;
   }
@@ -645,6 +727,7 @@ document.addEventListener('click', (e) => {
     }
     case 'set-mode': settings.mode = arg; refresh(); return;
     case 'set-cpu': settings.cpuCount = Number(arg); refresh(); return;
+    case 'set-diff': settings.difficulty = arg; refresh(); return;
 
     case 'pexpand':
       ui.expandedPlayer = ui.expandedPlayer === Number(arg) ? null : Number(arg);
@@ -806,16 +889,31 @@ document.addEventListener('click', (e) => {
       const card = state.players[HUMAN].progressCards[index];
       if (!card) return;
       const def = PROGRESS_CARDS[card.id];
-      if (def.needsParams === 'resources2') {
-        ui.dialog = { type: 'prog-harvest', picks: [], index };
+      const boardMode = {
+        hex: 'prog-hex', vertex: 'prog-vertex', edge: 'prog-edge',
+        hex2: 'prog-hex2', edges: 'prog-roads',
+      }[def.needsParams];
+      if (boardMode) {
+        ui.mode = boardMode;
+        ui.progIndex = index;
+        ui.pending = null;
+        ui.pendingHexes = [];
+        ui.pendingEdges = [];
         refresh();
       } else if (def.needsParams === 'commodity') {
         ui.dialog = { type: 'prog-commodity', index };
         refresh();
-      } else if (def.needsParams === 'hex') {
-        ui.mode = 'play-bishop';
-        ui.progIndex = index;
-        ui.pending = null;
+      } else if (def.needsParams === 'resource') {
+        ui.dialog = { type: 'prog-resource', index };
+        refresh();
+      } else if (def.needsParams === 'cardKey') {
+        ui.dialog = { type: 'prog-cardkey', index };
+        refresh();
+      } else if (def.needsParams === 'player') {
+        ui.dialog = { type: 'prog-player', index };
+        refresh();
+      } else if (def.needsParams === 'dice') {
+        ui.dialog = { type: 'prog-dice', index, red: null, yellow: null };
         refresh();
       } else {
         doAction({ type: 'PLAY_PROGRESS_CARD', player: HUMAN, index, params: null });
@@ -823,20 +921,36 @@ document.addEventListener('click', (e) => {
       return;
     }
 
-    case 'ph':
-      ui.dialog.picks.push(arg);
-      refresh();
-      return;
-    case 'ph-confirm':
-      doAction({
-        type: 'PLAY_PROGRESS_CARD', player: HUMAN,
-        index: ui.dialog.index, params: { resources: [...ui.dialog.picks] },
-      });
-      return;
     case 'pc':
       doAction({
         type: 'PLAY_PROGRESS_CARD', player: HUMAN,
         index: ui.dialog.index, params: { commodity: arg },
+      });
+      return;
+    case 'pres':
+      doAction({
+        type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+        index: ui.dialog.index, params: { resource: arg },
+      });
+      return;
+    case 'pkey':
+      doAction({
+        type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+        index: ui.dialog.index, params: { key: arg },
+      });
+      return;
+    case 'pplayer':
+      doAction({
+        type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+        index: ui.dialog.index, params: { target: Number(arg) },
+      });
+      return;
+    case 'pdice-r': ui.dialog.red = Number(arg); refresh(); return;
+    case 'pdice-y': ui.dialog.yellow = Number(arg); refresh(); return;
+    case 'pdice-confirm':
+      doAction({
+        type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+        index: ui.dialog.index, params: { red: ui.dialog.red, yellow: ui.dialog.yellow },
       });
       return;
   }

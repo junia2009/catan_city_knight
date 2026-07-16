@@ -6,6 +6,26 @@ import { RESOURCES } from '../state.js';
 // わずかな資源希少度の重み(小麦・鉱石を優先)
 const RES_WEIGHT = { wood: 1.0, brick: 1.0, sheep: 0.9, wheat: 1.15, ore: 1.1 };
 
+// 難易度 = 評価関数のノイズ量(設計書 §7.4: 強はノイズ0、弱は大きなランダム項)。
+// 乱数状態を消費しない決定的ノイズ(シード・ターン・対象キーのハッシュ)。
+export function evalNoiseAmp(state) {
+  if (state.difficulty === 'easy') return 3.0;
+  if (state.difficulty === 'normal') return 0.9;
+  return 0; // 'hard'(既定)= ノイズなし
+}
+
+export function evalNoise(state, key) {
+  const amp = evalNoiseAmp(state);
+  if (!amp) return 0;
+  let h = 2166136261 >>> 0;
+  const s = `${state.seed}|${state.turn}|${key}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return ((h % 1000) / 1000 - 0.5) * 2 * amp;
+}
+
 // 頂点に接するヘックスの出目確率合計(pips)
 export function pipsOfVertex(state, vid) {
   let sum = 0;
@@ -51,7 +71,7 @@ export function vertexValue(state, pid, vid) {
       value += port.type === '3:1' ? 1.5 : 2;
     }
   }
-  return value;
+  return value + evalNoise(state, `v${vid}`);
 }
 
 // 盗賊の置き先としての価値: 相手の産出を最も阻害する(自分に隣接しない)
@@ -65,7 +85,7 @@ export function robberHexValue(state, pid, hid) {
     if (b.player === pid) return -100; // 自分のヘックスは避ける
     value += PIPS[hex.token] * (b.type === 'city' ? 2 : 1);
   }
-  return value;
+  return value + evalNoise(state, `r${hid}`);
 }
 
 // 目標に対する不足資源

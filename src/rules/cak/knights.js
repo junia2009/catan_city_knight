@@ -97,8 +97,8 @@ export function canMoveKnight(state, pid, from, to) {
   return null;
 }
 
-// 追い出された騎士の再配置先(自分の道網で到達できる空き頂点、なければ除去)
-function autoRelocate(state, vid) {
+// 追い出された騎士の再配置(自分の道網で到達できる空き頂点、なければ除去)
+export function displaceKnight(state, vid) {
   const k = state.knights[vid];
   const spots = reachableVertices(state, k.player, vid).filter(
     (v) => !state.buildings[v] && !state.knights[v],
@@ -115,7 +115,7 @@ function autoRelocate(state, vid) {
 // 移動の適用(追い出し込み)。移動した騎士は不活性化する。
 export function applyKnightMove(state, pid, from, to) {
   const k = state.knights[from];
-  if (state.knights[to]) autoRelocate(state, to);
+  if (state.knights[to]) displaceKnight(state, to);
   delete state.knights[from];
   state.knights[to] = { ...k, active: false };
 }

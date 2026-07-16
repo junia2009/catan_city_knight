@@ -425,7 +425,8 @@ function drawPorts(ctx, view, state) {
 let staticCache = { key: null, canvas: null };
 
 function getStaticLayer(state, width, height, dpr) {
-  const key = `${state.seed}:${width}x${height}@${dpr}`;
+  // board.version は発明家(数字トークン交換)で進む
+  const key = `${state.seed}:${state.board.version ?? 0}:${width}x${height}@${dpr}`;
   if (staticCache.key === key) return staticCache.canvas;
 
   const off = document.createElement('canvas');
@@ -462,6 +463,33 @@ function getStaticLayer(state, width, height, dpr) {
 }
 
 // ---- 動的レイヤー ----
+
+// 商人(進歩カード): 持ち主の色のテント型マーカー
+function drawMerchant(ctx, view, merchant) {
+  const c = hexCenterOf(merchant.hexId);
+  const [px, py] = toPixel(view, c.x + 0.45, c.y - 0.35);
+  const s = view.scale * 0.13;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(px, py + s * 0.95, s * 0.95, s * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = PLAYER_COLORS[merchant.player];
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = Math.max(1, s * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(px - s, py + s * 0.9);
+  ctx.quadraticCurveTo(px, py - s * 1.6, px + s, py + s * 0.9);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = `800 ${Math.round(s * 1.1)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('⚖', px, py + s * 0.25);
+  ctx.restore();
+}
 
 function drawRobber(ctx, view, hid) {
   const c = hexCenterOf(hid);
@@ -714,6 +742,7 @@ export function drawBoard(ctx, width, height, state, ui, time = 0) {
   ctx.drawImage(staticLayer, 0, 0, width, height);
 
   drawRobber(ctx, view, state.board.robber);
+  if (state.merchant) drawMerchant(ctx, view, state.merchant);
 
   for (const [eid, road] of Object.entries(state.roads)) {
     drawRoad(ctx, view, eid, road.player);

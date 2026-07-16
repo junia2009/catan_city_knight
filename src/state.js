@@ -34,6 +34,7 @@ export function zeroResources() {
 // mode: 'base'(基本カタン) | 'cak'(都市と騎士)
 export function createGame({
   seed = 1, playerCount = 4, humanIndex = 0, names = null, mode = 'base',
+  difficulty = 'hard', // CPU難易度: 'easy' | 'normal' | 'hard'(評価ノイズ量)
 } = {}) {
   let rng = makeRng(seed);
   let board;
@@ -77,6 +78,7 @@ export function createGame({
   return {
     seed,
     mode,
+    difficulty,
     rng,
     phase: 'setup', // 'setup' | 'main' | 'ended'
     turn: 0,
@@ -100,6 +102,7 @@ export function createGame({
     largestArmy: { player: null, count: 0 }, // 都市と騎士では廃止(設計書 §9.1)
     // --- 都市と騎士 ---
     knights: {}, // vertexId -> { player, level, active, activatedTurn }
+    merchant: null, // { hexId, player } 商人(進歩カード)。保持者は+1点
     walls: {}, // vertexId(都市) -> player
     barbarians: { position: 0 },
     metropolis: { trade: null, politics: null, science: null }, // vertexId

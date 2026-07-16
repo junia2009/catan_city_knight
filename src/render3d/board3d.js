@@ -545,6 +545,29 @@ function makeRobber() {
   return g;
 }
 
+// 商人(進歩カード): 持ち主の色のテント
+function makeMerchant(colorHex) {
+  const g = new THREE.Group();
+  const tent = new THREE.Mesh(
+    new THREE.ConeGeometry(0.2, 0.3, 6),
+    mat(colorHex, { roughness: 0.6 }),
+  );
+  tent.position.y = 0.15;
+  tent.castShadow = true;
+  const poleM = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 0.2, 6),
+    mat(0x8a6f4d),
+  );
+  poleM.position.y = 0.38;
+  const flag = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.12, 0.07),
+    new THREE.MeshBasicMaterial({ color: 0xffd97d, side: THREE.DoubleSide }),
+  );
+  flag.position.set(0.06, 0.44, 0);
+  g.add(tent, poleM, flag);
+  return g;
+}
+
 // ---- 3D ダイス ----
 
 function diePipTexture(n, bg = '#f5f2e8', fg = '#22242a') {
@@ -1111,7 +1134,8 @@ export class Board3D {
   // ---- 静的レイヤー ----
 
   setGame(state) {
-    const key = `${state.seed}:${state.mode}`;
+    // board.version は発明家(数字トークン交換)で進む
+    const key = `${state.seed}:${state.mode}:${state.board.version ?? 0}`;
     if (this.gameKey === key) return;
     this.gameKey = key;
     this.staticGroup.clear();
@@ -1124,6 +1148,11 @@ export class Board3D {
     this.robberAnim = null;
     this.barbPos = null;
     this.shipAnim = null;
+    if (this.merchantMesh) {
+      this.scene.remove(this.merchantMesh);
+      this.merchantMesh = null;
+    }
+    this.merchantKey = null;
 
     // 海
     const sea = new THREE.Mesh(
@@ -1309,6 +1338,22 @@ export class Board3D {
       }
     } else {
       this.ship.visible = false;
+    }
+
+    // 商人(進歩カード): 保持者の色のテントをヘックス脇に置く
+    const mKey = state.merchant ? `${state.merchant.hexId}:${state.merchant.player}` : null;
+    if (this.merchantKey !== mKey) {
+      if (this.merchantMesh) {
+        this.scene.remove(this.merchantMesh);
+        this.merchantMesh = null;
+      }
+      if (state.merchant) {
+        this.merchantMesh = makeMerchant(PLAYER_COLORS_3D[state.merchant.player]);
+        const c = hexCenterOf(state.merchant.hexId);
+        this.merchantMesh.position.set(c.x + 0.45, TILE_TOP, c.y + 0.3);
+        this.scene.add(this.merchantMesh);
+      }
+      this.merchantKey = mKey;
     }
 
     // 盗賊: ヘックスが変わったらジャンプ移動

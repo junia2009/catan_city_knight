@@ -14,6 +14,7 @@ import { KNIGHT_COSTS, canPlaceKnight } from '../rules/cak/knights.js';
 import { knightContribution, razableCities } from '../rules/cak/barbarians.js';
 import { TRACKS, TRACK_COMMODITY, canBuyImprovement } from '../rules/cak/improvements.js';
 import { COMMODITIES, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
+import { pickProgressPlay, pickAlchemist } from './progress-ai.js';
 import {
   legalCityVertices,
   legalRoadEdges,
@@ -184,7 +185,9 @@ export function cpuAcceptsTrade(state, pid, incoming, outgoing) {
   // 枚数差が大きすぎる取引は数量で損(手札上限・柔軟性)
   const countDiff = Object.values(outgoing).reduce((a, b) => a + b, 0) -
     Object.values(incoming).reduce((a, b) => a + b, 0);
-  return inValue >= outValue + 0.5 + Math.max(0, countDiff) * 0.3;
+  // 弱いCPUは多少不利な取引にも応じる
+  const margin = state.difficulty === 'easy' ? 0.1 : state.difficulty === 'normal' ? 0.35 : 0.5;
+  return inValue >= outValue + margin + Math.max(0, countDiff) * 0.3;
 }
 
 // CPU が他の CPU に 1:1 交易を持ちかける(不足資源 ⇄ 余剰資源)
@@ -361,44 +364,9 @@ function tryImprovement(state, pid) {
   return null;
 }
 
+// カード別の評価プラグイン(ai/progress-ai.js)に委譲
 function tryPlayProgressCard(state, pid) {
-  const p = state.players[pid];
-  for (let i = 0; i < p.progressCards.length; i++) {
-    const card = p.progressCards[i];
-    if (card.boughtTurn >= state.turn) continue;
-    const def = PROGRESS_CARDS[card.id];
-    let params = null;
-    if (card.id === 'harvest') {
-      const goal = nextGoal(state, pid);
-      const missing = goal ? missingFor(p, goal.cost) : {};
-      const list = [];
-      for (const [r, n] of Object.entries(missing)) {
-        for (let k = 0; k < n && list.length < 2; k++) list.push(r);
-      }
-      while (list.length < 2) list.push('wheat');
-      params = { resources: list };
-    } else if (card.id === 'commodityCache') {
-      const track = best(TRACKS, (t) => p.improvements[t]);
-      params = { commodity: TRACK_COMMODITY[track] };
-    } else if (card.id === 'bishop') {
-      const hid = best(legalRobberHexes(state), (h) => robberHexValue(state, pid, h));
-      params = { hexId: hid };
-    } else if (card.id === 'irrigation' || card.id === 'mining') {
-      // 対象地形に隣接していなければ温存
-      const terrain = card.id === 'irrigation' ? 'field' : 'mountain';
-      const touches = LAYOUT.hexIds.some(
-        (h) =>
-          state.board.hexes[h].terrain === terrain &&
-          LAYOUT.hexVertices[h].some((v) => state.buildings[v]?.player === pid),
-      );
-      if (!touches) continue;
-    }
-    const a = valid(state, {
-      type: 'PLAY_PROGRESS_CARD', player: pid, index: i, params,
-    });
-    if (a) return a;
-  }
-  return null;
+  return pickProgressPlay(state, pid);
 }
 
 function tryChaseRobber(state, pid) {
@@ -443,6 +411,10 @@ export function chooseAction(state, pid) {
   const cak = state.mode === 'cak';
 
   if (!state.turnFlags.rolled) {
+    if (cak) {
+      const alch = pickAlchemist(state, pid);
+      if (alch) return alch;
+    }
     return tryPlayDevCard(state, pid) ?? { type: 'ROLL_DICE', player: pid };
   }
 

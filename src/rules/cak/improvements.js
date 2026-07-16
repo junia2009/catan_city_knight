@@ -7,9 +7,9 @@ export const TRACK_JP = { trade: '交易', politics: '政治', science: '科学'
 export const TRACK_COMMODITY = { trade: 'cloth', politics: 'coin', science: 'paper' };
 export const MAX_IMPROVEMENT = 5;
 
-// 次のレベルのコスト(Lv n へは商品 n 枚)
-export function improvementCost(level) {
-  return level; // Lv1=1枚, Lv2=2枚, ... Lv5=5枚
+// 次のレベルのコスト(Lv n へは商品 n 枚)。クレーン使用ターンは1枚引き。
+export function improvementCost(level, state = null) {
+  return Math.max(0, level - (state?.turnFlags?.crane ? 1 : 0));
 }
 
 export function canBuyImprovement(state, pid, track) {
@@ -21,7 +21,7 @@ export function canBuyImprovement(state, pid, track) {
     (b) => b.player === pid && b.type === 'city',
   );
   if (!hasCity) return '都市が必要です';
-  const cost = improvementCost(lv + 1);
+  const cost = improvementCost(lv + 1, state);
   const com = TRACK_COMMODITY[track];
   if (p.commodities[com] < cost) return `${TRACK_JP[track]}Lv${lv + 1}には商品が${cost}枚必要です`;
   return null;
@@ -39,7 +39,8 @@ function eligibleMetroCities(state, pid) {
 export function applyImprovement(state, pid, track) {
   const p = state.players[pid];
   const lv = p.improvements[track] + 1;
-  const cost = improvementCost(lv);
+  const cost = improvementCost(lv, state);
+  if (state.turnFlags?.crane) delete state.turnFlags.crane; // クレーンは1回で消費
   const com = TRACK_COMMODITY[track];
   p.commodities[com] -= cost;
   state.bank.commodities[com] += cost;
