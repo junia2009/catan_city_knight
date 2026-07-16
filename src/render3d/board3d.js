@@ -217,19 +217,27 @@ function portSprite(type) {
 
 // ---- 地形の装飾(ローポリ)----
 
-function makeTree(rng) {
+function makeTree(rng, sizeMul = 1) {
   const g = new THREE.Group();
   const trunk = new THREE.Mesh(GEO.trunk, mat(0x5d4025));
   trunk.position.y = 0.05;
   g.add(trunk);
-  const c1 = new THREE.Mesh(GEO.cone, mat(0x2c6b3c));
+  // 色味とサイズに個体差をつける(2色の樹冠ペアからランダム)
+  const palettes = [
+    [0x2c6b3c, 0x1e5230],
+    [0x37784a, 0x27603a],
+    [0x24593a, 0x1a472e],
+  ];
+  const [top, bottom] = palettes[Math.floor(rng() * palettes.length)];
+  const c1 = new THREE.Mesh(GEO.cone, mat(top));
   c1.scale.set(0.13, 0.2, 0.13);
   c1.position.y = 0.17;
-  const c2 = new THREE.Mesh(GEO.cone, mat(0x1e5230));
+  const c2 = new THREE.Mesh(GEO.cone, mat(bottom));
   c2.scale.set(0.1, 0.16, 0.1);
   c2.position.y = 0.28;
   g.add(c1, c2);
   g.rotation.y = rng() * Math.PI * 2;
+  g.scale.setScalar((0.85 + rng() * 0.4) * sizeMul);
   g.traverse((o) => { o.castShadow = true; });
   return g;
 }
@@ -319,6 +327,88 @@ function makeDune() {
   return d;
 }
 
+// ---- 地形の起伏(タイル上面に重ねる低ポリ地表)----
+// 中心(数字トークン)と縁(建物・道)は平らなまま、中間リングだけ盛り上げる。
+// セクター境界の頂点は座標ハッシュで同じ高さ・同じ色になるため継ぎ目は出ない。
+const CAP_PARAMS = {
+  forest: { amp: 0.042, freq: 5.2, jitter: 0.10, tint: 0x3f8152 },
+  pasture: { amp: 0.03, freq: 4.2, jitter: 0.08, tint: 0x93c258 },
+  field: { amp: 0.02, freq: 6.5, jitter: 0.07, tint: 0xe6c04c },
+  hill: { amp: 0.06, freq: 4.6, jitter: 0.11, tint: 0xbd7043 },
+  mountain: { amp: 0.10, freq: 5.8, jitter: 0.14, tint: 0x93a0b2 },
+  desert: { amp: 0.05, freq: 2.6, jitter: 0.06, tint: 0xe6d7a6 },
+};
+
+function coordHash(x, z) {
+  const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function makeTerrainCap(hid, terrain) {
+  const prm = CAP_PARAMS[terrain];
+  if (!prm) return null;
+  const c = hexCenterOf(hid);
+  const phase = (hashStr(hid) % 628) / 100;
+  // 角オフセット(全ヘックス同形なので先頭ヘックスから取る)
+  const first = LAYOUT.hexIds[0];
+  const fc = hexCenterOf(first);
+  const corners = LAYOUT.hexVertices[first].map((vid) => [
+    (LAYOUT.vertices[vid].x - fc.x) * 0.955,
+    (LAYOUT.vertices[vid].y - fc.y) * 0.955,
+  ]);
+
+  const N = 4; // セクター内の分割数
+  const positions = [];
+  const colors = [];
+  const base = new THREE.Color(prm.tint);
+  const heightAt = (x, z, t) => {
+    // 中心と縁で0、中間で最大のプロファイル
+    const profile = Math.pow(Math.sin(Math.PI * Math.min(t, 1)), 1.3);
+    const n =
+      0.55 + 0.45 * Math.sin(x * prm.freq + phase) * Math.cos(z * (prm.freq * 0.8) - phase);
+    const j = coordHash(x + c.x, z + c.y) * 0.5;
+    return 0.004 + prm.amp * profile * (n * 0.7 + j * 0.6);
+  };
+  const pushVert = (x, z, t) => {
+    positions.push(x, heightAt(x, z, t), z);
+    const shade = 1 + (coordHash(x + c.x + 9.7, z + c.y - 3.1) - 0.5) * 2 * prm.jitter;
+    colors.push(base.r * shade, base.g * shade, base.b * shade);
+  };
+  // 各セクター(中心・角A・角B の三角形)をバリセントリック分割し、非インデックスで積む
+  for (let s = 0; s < 6; s++) {
+    const A = corners[s];
+    const B = corners[(s + 1) % 6];
+    const P = (i, j) => [(A[0] * i + B[0] * j) / N, (A[1] * i + B[1] * j) / N, (i + j) / N];
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j < N - i; j++) {
+        const p0 = P(i, j);
+        const p1 = P(i + 1, j);
+        const p2 = P(i, j + 1);
+        pushVert(p0[0], p0[1], p0[2]);
+        pushVert(p2[0], p2[1], p2[2]);
+        pushVert(p1[0], p1[1], p1[2]);
+        if (i + j < N - 1) {
+          const p3 = P(i + 1, j + 1);
+          pushVert(p1[0], p1[1], p1[2]);
+          pushVert(p2[0], p2[1], p2[2]);
+          pushVert(p3[0], p3[1], p3[2]);
+        }
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }),
+  );
+  mesh.position.set(c.x, TILE_TOP, c.y);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
 function decorateHex(group, hid, terrain) {
   const rng = localRng(hashStr(hid + terrain));
   const c = hexCenterOf(hid);
@@ -330,27 +420,74 @@ function decorateHex(group, hid, terrain) {
   };
 
   if (terrain === 'forest') {
-    for (const [dx, dz] of ringPositions(rng, 6, 0.4, 0.66)) add(makeTree(rng), dx, dz);
+    // 大小・色違いの木を2重リングで(森の密度)
+    for (const [dx, dz] of ringPositions(rng, 6, 0.42, 0.68)) add(makeTree(rng), dx, dz);
+    for (const [dx, dz] of ringPositions(rng, 3, 0.24, 0.36)) add(makeTree(rng, 0.75), dx, dz);
   } else if (terrain === 'pasture') {
     for (const [dx, dz] of ringPositions(rng, 2, 0.42, 0.58)) add(makeSheep(rng), dx, dz);
-    for (const [dx, dz] of ringPositions(rng, 5, 0.36, 0.66)) {
-      const tuft = new THREE.Mesh(GEO.cone, mat(0x6f9d3d));
-      tuft.scale.set(0.035, 0.07, 0.035);
-      tuft.position.y = 0.035;
+    for (const [dx, dz] of ringPositions(rng, 7, 0.3, 0.68)) {
+      const tuft = new THREE.Mesh(GEO.cone, mat(rng() < 0.5 ? 0x6f9d3d : 0x7fae49));
+      const s = 0.03 + rng() * 0.015;
+      tuft.scale.set(s, s * 2.1, s);
+      tuft.position.y = s;
       add(tuft, dx, dz);
     }
+    // 白い花
+    for (const [dx, dz] of ringPositions(rng, 3, 0.3, 0.6)) {
+      const flower = new THREE.Mesh(GEO.sphere, mat(0xf3f0e2, { roughness: 1 }));
+      flower.scale.setScalar(0.018);
+      flower.position.y = 0.03;
+      add(flower, dx, dz);
+    }
   } else if (terrain === 'field') {
+    // 畝(平行な畑の列)+ 麦束
+    const rowRot = rng() * Math.PI;
+    for (let i = -1; i <= 1; i++) {
+      const furrow = new THREE.Mesh(GEO.box, mat(0xcda437, { roughness: 1 }));
+      furrow.scale.set(1.05 - Math.abs(i) * 0.22, 0.02, 0.1);
+      furrow.rotation.y = rowRot;
+      furrow.position.set(
+        Math.sin(rowRot) * i * 0.28, 0.012, Math.cos(rowRot) * i * 0.28,
+      );
+      add(furrow, 0, 0);
+    }
     for (const [dx, dz] of ringPositions(rng, 6, 0.38, 0.64)) add(makeWheatBundle(rng), dx, dz);
   } else if (terrain === 'hill') {
     for (const [dx, dz] of ringPositions(rng, 3, 0.42, 0.6)) add(makeBricks(rng), dx, dz);
+    // 粘土の塚
+    for (const [dx, dz] of ringPositions(rng, 3, 0.28, 0.55)) {
+      const mound = new THREE.Mesh(GEO.sphere, mat(0xa3562e, { roughness: 1 }));
+      mound.scale.set(0.12 + rng() * 0.05, 0.05 + rng() * 0.03, 0.1 + rng() * 0.05);
+      mound.position.y = 0.02;
+      add(mound, dx, dz);
+    }
   } else if (terrain === 'mountain') {
-    add(makePeak(rng, 1.1), -0.3, 0.38);
+    add(makePeak(rng, 1.15), -0.3, 0.38);
     add(makePeak(rng), 0.36, 0.32);
     add(makePeak(rng, 0.85), 0.05, 0.55);
     add(makePeak(rng, 0.9), -0.15, -0.5);
+    // 麓の岩くず
+    for (const [dx, dz] of ringPositions(rng, 4, 0.5, 0.72)) {
+      const rock = new THREE.Mesh(GEO.rock, mat(0x6e7887, { roughness: 1 }));
+      const s = 0.04 + rng() * 0.05;
+      rock.scale.set(s, s * 1.2, s);
+      rock.position.y = s * 0.5;
+      rock.rotation.y = rng() * 3;
+      add(rock, dx, dz);
+    }
   } else if (terrain === 'desert') {
     for (const [dx, dz] of ringPositions(rng, 3, 0.35, 0.6)) add(makeDune(), dx, dz);
     add(makeCactus(rng), 0.42, -0.38);
+    add(makeCactus(rng), -0.5, 0.2);
+    // 風化した岩
+    for (const [dx, dz] of ringPositions(rng, 2, 0.5, 0.7)) {
+      const rock = new THREE.Mesh(GEO.rock, mat(0xcbb98a, { roughness: 1 }));
+      const s = 0.05 + rng() * 0.04;
+      rock.scale.set(s, s * 0.8, s);
+      rock.position.y = s * 0.4;
+      rock.rotation.y = rng() * 3;
+      add(rock, dx, dz);
+    }
   }
 }
 
@@ -1698,6 +1835,8 @@ export class Board3D {
       hexPicker.userData = { kind: 'hex', id: hid };
       this.pickGroup.add(hexPicker);
 
+      const cap = makeTerrainCap(hid, hex.terrain);
+      if (cap) this.staticGroup.add(cap);
       decorateHex(this.staticGroup, hid, hex.terrain);
 
       if (hex.token) {
