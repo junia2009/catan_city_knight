@@ -630,42 +630,127 @@ function drawShipBadge(sp, text) {
 // ドラゴン(ドラゴンの島): 羽ばたく赤竜
 function makeDragon() {
   const g = new THREE.Group();
-  const bodyMat = mat(0x8f2620, { roughness: 0.55 });
-  const body = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.62, 8), bodyMat);
-  body.rotation.x = Math.PI / 2; // 尾を後ろへ
-  body.position.y = 0.34;
-  body.castShadow = true;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), bodyMat);
-  head.position.set(0, 0.42, 0.36);
-  head.castShadow = true;
-  const snout = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.18, 6), bodyMat);
-  snout.rotation.x = Math.PI / 2;
-  snout.position.set(0, 0.4, 0.5);
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffd24a });
-  for (const sx of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.022, 6, 6), eyeMat);
-    eye.position.set(sx * 0.055, 0.47, 0.44);
-    g.add(eye);
+  const bodyMat = mat(0x9c2b22, { roughness: 0.45 });
+  const darkMat = mat(0x5e1512, { roughness: 0.55 });
+  const boneMat = mat(0xe8d3a4, { roughness: 0.6 });
+
+  // S字の背骨に沿って体節を密に重ねる(尾の先→胸→首)。
+  // 間隔 < 半径×係数 になるようにして、数珠ではなく1本の胴に見せる
+  const spine = [];
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16; // 0=尾の先, 1=首の付け根
+    const z = -0.76 + t * 1.05;
+    const y = 0.30 + 0.06 * Math.max(0, t - 0.35) / 0.65 + 0.18 * Math.max(0, t - 0.82) / 0.18;
+    const x = 0.05 * Math.sin((1 - t) * 2.2) * (1 - t); // 尾を軽くくねらせる
+    const r = 0.028 + 0.115 * Math.sin(Math.min(t * 1.25, 1) * Math.PI * 0.62);
+    spine.push([x, y, z, r]);
   }
+  for (const [x, y, z, r] of spine) {
+    const seg = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), bodyMat);
+    seg.position.set(x, y, z);
+    seg.scale.set(1, 0.95, 1.5);
+    seg.castShadow = true;
+    g.add(seg);
+  }
+  // 胸当て(明るい腹側)
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.115, 9, 7), mat(0xd9a05e, { roughness: 0.55 }));
+  chest.position.set(0, 0.36, 0.17);
+  chest.scale.set(0.85, 0.9, 0.9);
+  g.add(chest);
+
+  // 背びれ(胸から尾へ小さくなる棘。1つおきに立てる)
+  for (let i = 2; i < spine.length - 1; i += 2) {
+    const [x, y, z, r] = spine[i];
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(r * 0.3, r * 1.05, 4), darkMat);
+    spike.position.set(x, y + r * 0.92, z);
+    spike.rotation.x = -0.5; // 後ろへ流す
+    g.add(spike);
+  }
+  // 尾の先の刃(菱形)
+  const spade = new THREE.Mesh(new THREE.OctahedronGeometry(0.075), darkMat);
+  spade.position.set(spine[0][0], spine[0][1], -0.83);
+  spade.scale.set(0.45, 1.1, 1.5);
+  g.add(spade);
+
+  // ---- 頭部 ----
+  const head = new THREE.Group();
+  head.position.set(0, 0.72, 0.42);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.085, 9, 7), bodyMat);
+  skull.scale.set(1, 0.82, 1.05);
+  skull.castShadow = true;
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.05, 0.17), bodyMat);
+  snout.position.set(0, -0.015, 0.11);
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.028, 0.14), darkMat);
+  jaw.position.set(0, -0.055, 0.09);
+  jaw.rotation.x = 0.18; // わずかに開いた口
+  // 角(後方へ反る2本)
+  for (const sx of [-1, 1]) {
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.16, 5), boneMat);
+    horn.position.set(sx * 0.05, 0.07, -0.05);
+    horn.rotation.x = -2.35;
+    horn.rotation.z = sx * 0.25;
+    head.add(horn);
+    // 目(発光)
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.018, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffcc33 }),
+    );
+    eye.position.set(sx * 0.055, 0.015, 0.055);
+    head.add(eye);
+  }
+  // 口元の熾火(かすかな光)
+  const ember = new THREE.Mesh(
+    new THREE.SphereGeometry(0.016, 6, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff6a22, transparent: true, opacity: 0.9 }),
+  );
+  ember.position.set(0, -0.04, 0.17);
+  head.add(skull, snout, jaw, ember);
+  head.rotation.x = 0.15; // わずかに下を睨む
+  g.add(head);
+
+  // ---- 翼(コウモリ型の膜 + 指骨)----
   const wingShape = new THREE.Shape();
   wingShape.moveTo(0, 0);
-  wingShape.quadraticCurveTo(0.28, 0.3, 0.62, 0.16);
-  wingShape.quadraticCurveTo(0.34, 0.02, 0.3, -0.12);
+  wingShape.quadraticCurveTo(0.10, 0.24, 0.32, 0.30); // 上腕→手首
+  wingShape.quadraticCurveTo(0.55, 0.40, 0.82, 0.36); // 第1指の先
+  wingShape.quadraticCurveTo(0.60, 0.16, 0.84, 0.04); // 膜の谷 → 第2指の先
+  wingShape.quadraticCurveTo(0.55, -0.04, 0.68, -0.20); // 谷 → 第3指の先
+  wingShape.quadraticCurveTo(0.38, -0.16, 0.16, -0.10); // 後縁の膜
+  wingShape.quadraticCurveTo(0.05, -0.05, 0, 0);
   wingShape.closePath();
-  const wingGeo = new THREE.ShapeGeometry(wingShape);
+  const wingGeo = new THREE.ShapeGeometry(wingShape, 6);
   const wingMat = new THREE.MeshStandardMaterial({
-    color: 0xb0453a, roughness: 0.6, side: THREE.DoubleSide, flatShading: true,
+    color: 0x7a1c16, roughness: 0.55, side: THREE.DoubleSide, flatShading: true,
+    emissive: 0x1a0300,
   });
-  const wingL = new THREE.Mesh(wingGeo, wingMat);
-  wingL.position.set(0.06, 0.42, 0.1);
-  wingL.rotation.y = -0.25;
-  const wingR = new THREE.Mesh(wingGeo, wingMat);
-  wingR.scale.x = -1;
-  wingR.position.set(-0.06, 0.42, 0.1);
-  wingR.rotation.y = 0.25;
-  g.add(body, head, snout, wingL, wingR);
+  const boneBar = (from, to) => {
+    const dir = new THREE.Vector3(to[0] - from[0], to[1] - from[1], 0);
+    const len = dir.length();
+    const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.008, len, 5), darkMat);
+    bone.position.set((from[0] + to[0]) / 2, (from[1] + to[1]) / 2, 0.004);
+    bone.rotation.z = Math.atan2(dir.y, dir.x) - Math.PI / 2;
+    return bone;
+  };
+  const makeWing = (side) => {
+    const w = new THREE.Group();
+    const membrane = new THREE.Mesh(wingGeo, wingMat);
+    w.add(membrane);
+    w.add(boneBar([0, 0], [0.32, 0.30])); // 上腕
+    w.add(boneBar([0.32, 0.30], [0.82, 0.36])); // 第1指
+    w.add(boneBar([0.32, 0.30], [0.84, 0.04])); // 第2指
+    if (side < 0) w.scale.x = -1;
+    w.position.set(side * 0.07, 0.52, 0.16);
+    // 膜面をほぼ水平に広げ、少し後退角をつける
+    w.rotation.order = 'ZXY';
+    w.rotation.x = -Math.PI * 0.42;
+    w.rotation.y = side * 0.35;
+    return w;
+  };
+  const wingL = makeWing(1);
+  const wingR = makeWing(-1);
+  g.add(wingL, wingR);
   g.userData.wings = [wingL, wingR];
-  g.scale.setScalar(1.5);
+  g.scale.setScalar(1.7);
   return g;
 }
 
