@@ -565,6 +565,7 @@ function dialogHtml(state, ui) {
       <div class="srow"><span>表示</span>${seg('set-view', [['3d', '3D'], ['2d', '2D']], s.view)}</div>
       <div class="srow"><span>モード</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本']], s.mode)}</div>
       <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(s.cpuCount))}</div>
+      <div class="srow"><span>BGM</span>${seg('set-bgm', [['on', '🔊 オン'], ['off', '🔇 オフ']], s.bgm ? 'on' : 'off')}</div>
       <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${s.seed}"></div>
       <p>モード・CPU・シードは「新しいゲーム」開始時に反映されます</p>
       <div class="row end">

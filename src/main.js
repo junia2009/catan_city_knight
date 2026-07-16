@@ -18,6 +18,7 @@ import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
 import { drawBoard } from './render/board-render.js';
 import { renderHUD, RES_ICON, COM_ICON } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
+import { Bgm } from './audio/bgm.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 
 const HUMAN = 0;
@@ -34,7 +35,7 @@ let renderer3d = null;
 let renderer3dFailed = false;
 
 // 設定(⚙️シートから編集。新しいゲーム開始時に反映)
-const settings = { view: '3d', mode: 'cak', cpuCount: 3, seed: '', difficulty: 'normal' };
+const settings = { view: '3d', mode: 'cak', cpuCount: 3, seed: '', difficulty: 'normal', bgm: true };
 
 // 画面フロー: title(タイトル) → select(ルール選択) → game(ゲーム)
 let screen = 'title';
@@ -64,6 +65,24 @@ function renderSelectPanel() {
       <button class="primary" data-act="start-game">ゲーム開始</button>
     </div>`;
 }
+
+// BGM(Web Audio 生成)。iOSの自動再生制限のため初回タップで開始する
+const bgm = new Bgm();
+settings.bgm = bgm.enabled;
+function syncBgmButtons() {
+  for (const b of document.querySelectorAll('[data-act="bgm-toggle"]')) {
+    b.textContent = bgm.enabled ? '🔊 BGM オン' : '🔇 BGM オフ';
+  }
+}
+document.addEventListener(
+  'pointerdown',
+  () => bgm.start(),
+  { once: true, capture: true },
+);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) bgm.ctx?.suspend();
+  else if (bgm.enabled && bgm.running) bgm.ctx?.resume();
+});
 
 // 説明書画面(タイトルから遷移)
 let rulesTab = 'basic';
@@ -798,6 +817,18 @@ document.addEventListener('click', (e) => {
     case 'goto-select': setScreen('select'); return;
     case 'goto-title': setScreen('title'); return;
     case 'goto-rules': setScreen('rules'); return;
+    case 'bgm-toggle':
+      bgm.setEnabled(!bgm.enabled);
+      settings.bgm = bgm.enabled;
+      syncBgmButtons();
+      refresh();
+      return;
+    case 'set-bgm':
+      bgm.setEnabled(arg === 'on');
+      settings.bgm = bgm.enabled;
+      syncBgmButtons();
+      refresh();
+      return;
     case 'rules-back': setScreen('title'); return;
     case 'rules-tab':
       if (ui?.dialog?.type === 'rules') ui.dialog.tab = arg;
@@ -1071,6 +1102,7 @@ window.catanDebug = {
   getUi: () => ui,
   screenPos: (kind, id) => (renderer3d ? renderer3d.screenPos(kind, id) : null),
   getRenderer: () => renderer3d,
+  getBgm: () => bgm,
   getViewState: () => ({ viewMode, has3d: !!renderer3d, failed: renderer3dFailed, screen }),
 };
 
@@ -1096,5 +1128,6 @@ state = createGame({
   mode: 'cak',
 });
 ui = freshUi();
+syncBgmButtons();
 refresh();
 if (viewMode === '3d') ensureRenderer3d().then(() => state && refresh());
