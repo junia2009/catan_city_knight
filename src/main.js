@@ -16,7 +16,7 @@ import { LAYOUT } from './rules/board.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
 import { drawBoard } from './render/board-render.js';
-import { renderHUD, RES_ICON } from './render/hud-render.js';
+import { renderHUD, RES_ICON, COM_ICON } from './render/hud-render.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 
 const HUMAN = 0;
@@ -143,13 +143,16 @@ function syncUi() {
         counts: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
       };
     }
+    if (aw.type === 'tradeOffer' && ui.dialog?.type !== 'tradeOffer') {
+      ui.dialog = { type: 'tradeOffer' };
+    }
   } else {
     if (forced) {
       ui.mode = 'idle';
       ui.pending = null;
       ui.pendingVertex = null;
     }
-    if (['discard', 'steal'].includes(ui.dialog?.type)) ui.dialog = null;
+    if (['discard', 'steal', 'tradeOffer'].includes(ui.dialog?.type)) ui.dialog = null;
   }
 }
 
@@ -334,6 +337,42 @@ function showGainFx(before) {
   }
 }
 
+// 交易成立の目立つバナー(誰が何を渡し何を得たか)
+function showTradeFx(aName, bName, give, receive) {
+  const fxEl = document.getElementById('fx');
+  const items = (obj) =>
+    Object.entries(obj)
+      .map(([r, n]) => `${RES_ICON[r] ?? COM_ICON[r]}×${n}`)
+      .join(' ');
+  const div = document.createElement('div');
+  div.className = 'tradefx';
+  div.innerHTML = `
+    <div class="tf-title">🤝 交易成立!</div>
+    <div class="tf-line"><b>${aName}</b><span class="tf-items">${items(give)}</span><span class="tf-arrow">➜</span><b>${bName}</b></div>
+    <div class="tf-line"><b>${aName}</b><span class="tf-arrow">⬅</span><span class="tf-items">${items(receive)}</span><b>${bName}</b></div>`;
+  fxEl.appendChild(div);
+  setTimeout(() => div.classList.add('out'), 2100);
+  setTimeout(() => div.remove(), 2600);
+}
+
+// 成立した交易アクションならバナーを出す(人間・CPUどちらの取引でも)
+function maybeTradeFx(action, prevAwaiting) {
+  if (action.type === 'TRADE_PLAYERS') {
+    showTradeFx(
+      state.players[action.player].name, state.players[action.partner].name,
+      action.give, action.receive,
+    );
+  } else if (action.type === 'RESPOND_TRADE' && action.accept) {
+    const ctx = prevAwaiting?.type === 'tradeOffer' ? prevAwaiting.context : null;
+    if (ctx) {
+      showTradeFx(
+        state.players[ctx.from].name, state.players[action.player].name,
+        ctx.give, ctx.receive,
+      );
+    }
+  }
+}
+
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
@@ -351,6 +390,7 @@ function doAction(action) {
   ui.toast = null;
   const before =
     action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
+  const prevAwaiting = state.awaiting;
   try {
     state = dispatch(state, action);
   } catch (e) {
@@ -358,6 +398,7 @@ function doAction(action) {
     refresh();
     return false;
   }
+  maybeTradeFx(action, prevAwaiting);
   if (before) {
     showGainFx(before);
     if (viewMode === '3d' && renderer3d && state.dice) {
@@ -398,8 +439,10 @@ function scheduleCpu() {
     if (!action) return;
     const before =
       action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
+    const prevAwaiting = state.awaiting;
     try {
       state = dispatch(state, action);
+      maybeTradeFx(action, prevAwaiting);
       if (before) {
         showGainFx(before);
         if (viewMode === '3d' && renderer3d && state.dice) {
@@ -686,6 +729,13 @@ document.addEventListener('click', (e) => {
       refresh();
       return;
     }
+    case 'offer-accept':
+      doAction({ type: 'RESPOND_TRADE', player: HUMAN, accept: true });
+      return;
+    case 'offer-decline':
+      doAction({ type: 'RESPOND_TRADE', player: HUMAN, accept: false });
+      return;
+
     case 'trade-give': ui.dialog.give = arg; if (ui.dialog.receive === arg) ui.dialog.receive = null; refresh(); return;
     case 'trade-receive': ui.dialog.receive = arg; refresh(); return;
     case 'trade-confirm':

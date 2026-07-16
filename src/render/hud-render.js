@@ -340,6 +340,29 @@ function dialogHtml(state, ui) {
       </div>`;
   }
 
+  if (d.type === 'tradeOffer') {
+    const aw = state.awaiting;
+    if (aw?.type !== 'tradeOffer') return '';
+    const from = state.players[aw.context.from];
+    const chips = (obj) =>
+      Object.entries(obj)
+        .map(
+          ([r, n]) => `<span class="pick tchip sel">
+            <span class="picon">${RES_ICON[r] ?? COM_ICON[r]}</span>${RES_JP[r] ?? COM_JP[r]}<small>×${n}</small></span>`,
+        )
+        .join('');
+    const short = Object.entries(aw.context.receive).some(
+      ([r, n]) => (RES_ICON[r] ? p.resources[r] : p.commodities[r]) < n,
+    );
+    return `<h3>💬 ${from.name}からの交易提案</h3>
+      <p>もらえるもの</p><div class="row">${chips(aw.context.give)}</div>
+      <p>渡すもの${short ? '(手札が足りません)' : ''}</p><div class="row">${chips(aw.context.receive)}</div>
+      <div class="row end">
+        <button class="primary" data-act="offer-accept" ${short ? 'disabled' : ''}>🤝 交換する</button>
+        <button data-act="offer-decline">断る</button>
+      </div>`;
+  }
+
   if (d.type === 'improve') {
     const rows = TRACKS.map((t) => {
       const lv = p.improvements[t];

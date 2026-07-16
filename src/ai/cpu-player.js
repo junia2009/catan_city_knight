@@ -198,17 +198,28 @@ function tryTradeWithPlayers(state, pid, goal) {
   const surpluses = RESOURCES.filter(
     (r) => p.resources[r] - (goal.cost[r] ?? 0) >= 2 && !missing[r],
   );
+  // CPU同士は即時成立、人間には提案(応答待ち割り込み)を送る
+  const others = [...state.players].filter((o) => o.id !== pid);
+  others.sort((a, b) => Number(b.isCPU) - Number(a.isCPU)); // まずCPUと当たる
   for (const want of missingRes) {
     for (const give of surpluses) {
-      for (const other of state.players) {
-        if (other.id === pid || !other.isCPU) continue; // 人間には割り込めないためCPU同士のみ
+      for (const other of others) {
         if (cardCountOf(other, want) < 1) continue;
-        if (!cpuAcceptsTrade(state, other.id, { [give]: 1 }, { [want]: 1 })) continue;
-        const action = {
-          type: 'TRADE_PLAYERS', player: pid, partner: other.id,
-          give: { [give]: 1 }, receive: { [want]: 1 },
-        };
-        if (valid(state, action)) return action;
+        if (other.isCPU) {
+          if (!cpuAcceptsTrade(state, other.id, { [give]: 1 }, { [want]: 1 })) continue;
+          const action = {
+            type: 'TRADE_PLAYERS', player: pid, partner: other.id,
+            give: { [give]: 1 }, receive: { [want]: 1 },
+          };
+          if (valid(state, action)) return action;
+        } else {
+          if ((p.offerCooldownTurn ?? 0) > state.turn) continue; // 直近で断られた
+          const action = {
+            type: 'OFFER_TRADE', player: pid, partner: other.id,
+            give: { [give]: 1 }, receive: { [want]: 1 },
+          };
+          if (valid(state, action)) return action;
+        }
       }
     }
   }
@@ -416,6 +427,14 @@ export function chooseAction(state, pid) {
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
     if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
+    if (aw.type === 'tradeOffer') {
+      const { give, receive } = aw.context;
+      const accept = cpuAcceptsTrade(state, pid, give, receive);
+      return (
+        valid(state, { type: 'RESPOND_TRADE', player: pid, accept }) ??
+        { type: 'RESPOND_TRADE', player: pid, accept: false }
+      );
+    }
     return null;
   }
 

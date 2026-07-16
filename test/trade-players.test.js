@@ -90,6 +90,85 @@ test('cpuAcceptsTrade: 不足資源がもらえる得な取引は受け、不利
   assert.equal(cpuAcceptsTrade(s, 1, { wood: 1 }, { ore: 5 }), false);
 });
 
+test('OFFER_TRADE → RESPOND_TRADE(承諾): 割り込みが立ち、承諾で交換される', () => {
+  let s = finishSetup(createGame({ seed: 5, humanIndex: -1 }));
+  s.turnFlags.rolled = true;
+  clearHands(s);
+  s.players[0].resources.wood = 2;
+  s.players[1].resources.wheat = 1;
+  s = dispatch(s, {
+    type: 'OFFER_TRADE', player: 0, partner: 1,
+    give: { wood: 1 }, receive: { wheat: 1 },
+  });
+  assert.equal(s.awaiting?.type, 'tradeOffer');
+  assert.deepEqual(s.awaiting.players, [1]);
+  assert.equal(s.turnFlags.offeredTrade, true);
+  // 応答待ち中は他のアクションは通らない
+  assert.match(
+    validateAction(s, { type: 'BUILD_ROAD', player: 0, edgeId: 'x' }),
+    /応答待ち/,
+  );
+  s = dispatch(s, { type: 'RESPOND_TRADE', player: 1, accept: true });
+  assert.equal(s.awaiting, null);
+  assert.equal(s.players[0].resources.wood, 1);
+  assert.equal(s.players[0].resources.wheat, 1);
+  assert.equal(s.players[1].resources.wood, 1);
+  assert.equal(s.players[1].resources.wheat, 0);
+  assert.ok(s.log.some((l) => l.startsWith('🤝')));
+});
+
+test('OFFER_TRADE → RESPOND_TRADE(拒否): 交換されず、同ターンの再提案も不可', () => {
+  let s = finishSetup(createGame({ seed: 5, humanIndex: -1 }));
+  s.turnFlags.rolled = true;
+  clearHands(s);
+  s.players[0].resources.wood = 2;
+  s.players[1].resources.wheat = 1;
+  s = dispatch(s, {
+    type: 'OFFER_TRADE', player: 0, partner: 1,
+    give: { wood: 1 }, receive: { wheat: 1 },
+  });
+  s = dispatch(s, { type: 'RESPOND_TRADE', player: 1, accept: false });
+  assert.equal(s.awaiting, null);
+  assert.equal(s.players[0].resources.wood, 2);
+  assert.equal(s.players[1].resources.wheat, 1);
+  assert.ok(s.players[0].offerCooldownTurn > s.turn);
+  assert.match(
+    validateAction(s, {
+      type: 'OFFER_TRADE', player: 0, partner: 1,
+      give: { wood: 1 }, receive: { wheat: 1 },
+    }),
+    /すでに交易を提案しました/,
+  );
+  // 割り込みがないときの RESPOND_TRADE は不正
+  assert.notEqual(validateAction(s, { type: 'RESPOND_TRADE', player: 0, accept: true }), null);
+});
+
+test('chooseAction: 提案を受けたCPUは損得で応答し、CPUは人間にも提案する', () => {
+  let s = finishSetup(createGame({ seed: 5, humanIndex: 0 }));
+  s.turnFlags.rolled = true;
+  clearHands(s);
+
+  // CPU 1 が手番。木材2の余剰があり、目標の不足資源を人間だけが持っている
+  s.currentPlayer = 1;
+  s.players[1].resources.wood = 2;
+  const goal = nextGoal(s, 1);
+  const missing = Object.keys(goal.cost).find(
+    (r) => r !== 'wood' && (s.players[1].resources[r] ?? 0) < goal.cost[r],
+  );
+  assert.ok(missing);
+  s.players[0].resources[missing] = 1;
+
+  const offer = chooseAction(s, 1);
+  assert.equal(offer.type, 'OFFER_TRADE');
+  assert.equal(offer.partner, 0);
+  assert.deepEqual(offer.receive, { [missing]: 1 });
+  s = dispatch(s, offer);
+
+  // 提案を受けた側がCPUなら chooseAction が応答を返す
+  const resp = chooseAction(s, 0);
+  assert.equal(resp.type, 'RESPOND_TRADE');
+});
+
 test('セルフプレイ: CPU同士の交易が発生しつつ完走する', () => {
   let traded = 0;
   for (let seed = 20; seed < 30; seed++) {
@@ -107,4 +186,23 @@ test('セルフプレイ: CPU同士の交易が発生しつつ完走する', () 
     }
   }
   assert.ok(traded > 0, `10ゲームで交易が一度も発生しなかった`);
+});
+
+test('セルフプレイ(人間枠あり): 提案割り込みを挟んでも完走し保存則が成り立つ', () => {
+  let offers = 0;
+  for (let seed = 40; seed < 46; seed++) {
+    let state = createGame({ seed, playerCount: 3, humanIndex: 0, mode: 'cak' });
+    let n = 0;
+    while (state.phase !== 'ended') {
+      if (++n > 9000) throw new Error(`seed=${seed}: 無限ループ`);
+      const pid = state.awaiting ? state.awaiting.players[0] : state.currentPlayer;
+      state = dispatch(state, chooseAction(state, pid));
+    }
+    offers += state.log.filter((l) => l.startsWith('💬')).length;
+    for (const r of RESOURCES) {
+      const total = state.bank.resources[r] + state.players.reduce((a, p) => a + p.resources[r], 0);
+      assert.equal(total, 19, `seed=${seed}: ${r}保存則`);
+    }
+  }
+  assert.ok(offers > 0, '6ゲームで人間への交易提案が一度も発生しなかった');
 });

@@ -63,13 +63,61 @@ function cardCount(player, key) {
   return RESOURCES.includes(key) ? player.resources[key] : player.commodities[key];
 }
 
+function fmtCards(obj) {
+  return Object.entries(obj)
+    .map(([r, n]) => `${RES_JP[r] ?? COM_JP[r]}×${n}`)
+    .join(' ');
+}
+
+// a が give を渡し b から receive を受け取る
+function applyPlayerTrade(state, aPid, bPid, give, receive) {
+  const a = state.players[aPid];
+  const b = state.players[bPid];
+  const transfer = (from, to, obj) => {
+    for (const [r, n] of Object.entries(obj)) {
+      if (RESOURCES.includes(r)) {
+        from.resources[r] -= n;
+        to.resources[r] += n;
+      } else {
+        from.commodities[r] -= n;
+        to.commodities[r] += n;
+      }
+    }
+  };
+  transfer(a, b, give);
+  transfer(b, a, receive);
+  addLog(state, `🤝 ${a.name} ⇄ ${b.name}: ${fmtCards(give)} ⇄ ${fmtCards(receive)}`);
+}
+
 // 割り込み(awaiting)中に許可されるアクション種別
 const AWAITING_ACTIONS = {
   setupPlacement: 'PLACE_INITIAL',
   discard: 'DISCARD',
   moveRobber: 'MOVE_ROBBER',
   barbarianDefense: 'RAZE_CITY',
+  tradeOffer: 'RESPOND_TRADE',
 };
+
+// プレイヤー間交易の内容チェック(giver が give を、receiver が receive を差し出せるか)
+function validateTradeContents(state, giver, receiver, give, receive) {
+  const keys = state.mode === 'cak' ? ALL_CARD_KEYS : RESOURCES;
+  const validObj = (obj) =>
+    obj != null &&
+    Object.entries(obj).every(
+      ([k, n]) => keys.includes(k) && Number.isInteger(n) && n > 0,
+    );
+  if (!validObj(give) || !validObj(receive)) return '交易内容が不正です';
+  if (sumRes(give) === 0 || sumRes(receive) === 0) {
+    return '渡すものともらうものを両方選んでください';
+  }
+  for (const [r, n] of Object.entries(give)) {
+    if (cardCount(giver, r) < n) return '手札が足りません';
+  }
+  for (const [r, n] of Object.entries(receive)) {
+    if (cardCount(receiver, r) < n) return '相手の手札が足りません';
+  }
+  return null;
+}
 
 export function validateAction(state, action) {
   if (state.phase === 'ended') return 'ゲームは終了しています';
@@ -172,23 +220,23 @@ export function validateAction(state, action) {
       if (!state.turnFlags.rolled) return '先にダイスを振ってください';
       const partner = state.players[action.partner];
       if (!partner || action.partner === pid) return '交易相手が不正です';
-      const keys = state.mode === 'cak' ? ALL_CARD_KEYS : RESOURCES;
-      const validObj = (obj) =>
-        obj != null &&
-        Object.entries(obj).every(
-          ([k, n]) => keys.includes(k) && Number.isInteger(n) && n > 0,
-        );
-      if (!validObj(action.give) || !validObj(action.receive)) return '交易内容が不正です';
-      if (sumRes(action.give) === 0 || sumRes(action.receive) === 0) {
-        return '渡すものともらうものを両方選んでください';
-      }
-      for (const [r, n] of Object.entries(action.give)) {
-        if (cardCount(p, r) < n) return '手札が足りません';
-      }
-      for (const [r, n] of Object.entries(action.receive)) {
-        if (cardCount(partner, r) < n) return '相手の手札が足りません';
-      }
-      return null;
+      return validateTradeContents(state, p, partner, action.give, action.receive);
+    }
+
+    case 'OFFER_TRADE': {
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      if (state.turnFlags.offeredTrade) return 'このターンはすでに交易を提案しました';
+      const partner = state.players[action.partner];
+      if (!partner || action.partner === pid) return '交易相手が不正です';
+      return validateTradeContents(state, p, partner, action.give, action.receive);
+    }
+
+    case 'RESPOND_TRADE': {
+      if (aw?.type !== 'tradeOffer') return '交易提案はありません';
+      if (!action.accept) return null;
+      const { from, give, receive } = aw.context;
+      // 受諾時は提案者が give を、応答者(自分)が receive を差し出す
+      return validateTradeContents(state, state.players[from], p, give, receive);
     }
 
     // ---- 都市と騎士(設計書 §9)----
@@ -555,26 +603,35 @@ function applyAction(state, action) {
       break;
     }
 
-    case 'TRADE_PLAYERS': {
+    case 'TRADE_PLAYERS':
+      applyPlayerTrade(state, pid, action.partner, action.give, action.receive);
+      break;
+
+    case 'OFFER_TRADE': {
       const partner = state.players[action.partner];
-      const transfer = (from, to, obj) => {
-        for (const [r, n] of Object.entries(obj)) {
-          if (RESOURCES.includes(r)) {
-            from.resources[r] -= n;
-            to.resources[r] += n;
-          } else {
-            from.commodities[r] -= n;
-            to.commodities[r] += n;
-          }
-        }
+      state.turnFlags.offeredTrade = true;
+      state.awaiting = {
+        type: 'tradeOffer',
+        players: [action.partner],
+        context: { from: pid, give: action.give, receive: action.receive },
       };
-      transfer(p, partner, action.give);
-      transfer(partner, p, action.receive);
-      const fmt = (obj) =>
-        Object.entries(obj)
-          .map(([r, n]) => `${RES_JP[r] ?? COM_JP[r]}×${n}`)
-          .join(' ');
-      addLog(state, `🤝 ${p.name} ⇄ ${partner.name}: ${fmt(action.give)} ⇄ ${fmt(action.receive)}`);
+      addLog(
+        state,
+        `💬 ${p.name}が${partner.name}に交易を提案: ${fmtCards(action.give)} ⇄ ${fmtCards(action.receive)}`,
+      );
+      break;
+    }
+
+    case 'RESPOND_TRADE': {
+      const { from, give, receive } = state.awaiting.context;
+      state.awaiting = null;
+      if (action.accept) {
+        applyPlayerTrade(state, from, pid, give, receive);
+      } else {
+        // 断られた提案者はしばらく同じ相手に持ちかけない
+        state.players[from].offerCooldownTurn = state.turn + 4;
+        addLog(state, `🚫 ${p.name}は${state.players[from].name}の提案を断りました`);
+      }
       break;
     }
 
