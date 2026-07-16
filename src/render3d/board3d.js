@@ -714,7 +714,7 @@ const SKY_PHASES = [
   // sun: 太陽光の色, sunI: 強さ, hemi: 半球光の強さ, night: 星の濃さ
   { t: 0.0, zenith: 0x2a5d94, horizon: 0x9cc4d8, sun: 0xfff2dd, sunI: 2.4, hemi: 1.05, night: 0 },
   { t: 0.35, zenith: 0x1c4173, horizon: 0xe8a35e, sun: 0xffc27a, sunI: 1.9, hemi: 0.85, night: 0 },
-  { t: 0.5, zenith: 0x0a1d3a, horizon: 0x35507a, sun: 0x9fb8ff, sunI: 0.9, hemi: 0.55, night: 1 },
+  { t: 0.5, zenith: 0x0a1d3a, horizon: 0x35507a, sun: 0x9fb8ff, sunI: 0.4, hemi: 0.72, night: 1 },
   { t: 0.65, zenith: 0x14355f, horizon: 0xd88a6a, sun: 0xffcf95, sunI: 1.7, hemi: 0.8, night: 0.15 },
   { t: 1.0, zenith: 0x2a5d94, horizon: 0x9cc4d8, sun: 0xfff2dd, sunI: 2.4, hemi: 1.05, night: 0 },
 ];
@@ -1623,6 +1623,10 @@ export class Board3D {
     this.scene.fog.color.copy(fogCol);
     this.scene.background.copy(fogCol);
     if (this.seaUniforms) this.seaUniforms.uBg.value.copy(fogCol);
+
+    // 影の濃さも時刻に連動(日が沈めば影は消える)
+    if (this.seaShadowMat) this.seaShadowMat.opacity = 0.03 + (1 - s.night) * 0.21;
+    this.renderer.shadowMap.enabled = true;
   }
 
   _tickRobber(now) {
@@ -1939,9 +1943,10 @@ export class Board3D {
     this.seaUniforms = sea.uniforms;
     this.staticGroup.add(sea.mesh);
     // ShaderMaterial は影を受けないため、透明な影受け面を重ねる
+    this.seaShadowMat = new THREE.ShadowMaterial({ opacity: 0.24 });
     const shadowCatcher = new THREE.Mesh(
       new THREE.CircleGeometry(34, 48),
-      new THREE.ShadowMaterial({ opacity: 0.24 }),
+      this.seaShadowMat,
     );
     shadowCatcher.rotation.x = -Math.PI / 2;
     shadowCatcher.position.y = SEA_Y + 0.005;
