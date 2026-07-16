@@ -17,6 +17,7 @@ import { razableCities } from './rules/cak/barbarians.js';
 import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
 import { drawBoard } from './render/board-render.js';
 import { renderHUD, RES_ICON, COM_ICON } from './render/hud-render.js';
+import { rulesHtml } from './render/rules-content.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 
 const HUMAN = 0;
@@ -62,6 +63,15 @@ function renderSelectPanel() {
       <button data-act="goto-title">← タイトル</button>
       <button class="primary" data-act="start-game">ゲーム開始</button>
     </div>`;
+}
+
+// 説明書画面(タイトルから遷移)
+let rulesTab = 'basic';
+function renderRulesPanel() {
+  const panel = document.getElementById('rules-panel');
+  if (!panel || screen !== 'rules') return;
+  panel.innerHTML = `<h3>📖 あそびかた</h3>${rulesHtml(rulesTab)}
+    <div class="row end rules-close"><button class="primary" data-act="rules-back">← タイトルへ</button></div>`;
 }
 
 // モバイル判定: レイアウトを body.mobile で切り替える
@@ -326,6 +336,7 @@ function refresh() {
     ui.highlights = {};
   }
   renderSelectPanel();
+  renderRulesPanel();
   // タイトル画面の読み込み状態表示
   const note = document.getElementById('load-note');
   if (note) {
@@ -475,6 +486,43 @@ function resizeCanvas() {
     canvas.height = Math.round(h * dpr);
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+// 進歩カードの使用開始: パラメータ種別に応じて盤面選択モードかダイアログへ
+function startProgressPlay(index) {
+  const card = state.players[HUMAN].progressCards[index];
+  if (!card) return;
+  const def = PROGRESS_CARDS[card.id];
+  const boardMode = {
+    hex: 'prog-hex', vertex: 'prog-vertex', edge: 'prog-edge',
+    hex2: 'prog-hex2', edges: 'prog-roads',
+  }[def.needsParams];
+  if (boardMode) {
+    ui.dialog = null;
+    ui.mode = boardMode;
+    ui.progIndex = index;
+    ui.pending = null;
+    ui.pendingHexes = [];
+    ui.pendingEdges = [];
+    refresh();
+  } else if (def.needsParams === 'commodity') {
+    ui.dialog = { type: 'prog-commodity', index };
+    refresh();
+  } else if (def.needsParams === 'resource') {
+    ui.dialog = { type: 'prog-resource', index };
+    refresh();
+  } else if (def.needsParams === 'cardKey') {
+    ui.dialog = { type: 'prog-cardkey', index };
+    refresh();
+  } else if (def.needsParams === 'player') {
+    ui.dialog = { type: 'prog-player', index };
+    refresh();
+  } else if (def.needsParams === 'dice') {
+    ui.dialog = { type: 'prog-dice', index, red: null, yellow: null };
+    refresh();
+  } else {
+    doAction({ type: 'PLAY_PROGRESS_CARD', player: HUMAN, index, params: null });
+  }
 }
 
 // ---- アクション実行 ----
@@ -746,6 +794,17 @@ document.addEventListener('click', (e) => {
     // ---- 画面フロー ----
     case 'goto-select': setScreen('select'); return;
     case 'goto-title': setScreen('title'); return;
+    case 'goto-rules': setScreen('rules'); return;
+    case 'rules-back': setScreen('title'); return;
+    case 'rules-tab':
+      if (ui?.dialog?.type === 'rules') ui.dialog.tab = arg;
+      else rulesTab = arg;
+      refresh();
+      return;
+    case 'rules-open':
+      ui.dialog = { type: 'rules', tab: 'basic' };
+      refresh();
+      return;
     case 'start-game':
       setScreen('game');
       newGame();
@@ -928,42 +987,18 @@ document.addEventListener('click', (e) => {
       doAction({ type: 'CHASE_ROBBER', player: HUMAN, vertexId: arg });
       return;
 
+    // 手札の進歩カードをタップ → まず説明ダイアログ(そこから「使う」)
     case 'play-prog': {
       const index = Number(arg);
-      const card = state.players[HUMAN].progressCards[index];
-      if (!card) return;
-      const def = PROGRESS_CARDS[card.id];
-      const boardMode = {
-        hex: 'prog-hex', vertex: 'prog-vertex', edge: 'prog-edge',
-        hex2: 'prog-hex2', edges: 'prog-roads',
-      }[def.needsParams];
-      if (boardMode) {
-        ui.mode = boardMode;
-        ui.progIndex = index;
-        ui.pending = null;
-        ui.pendingHexes = [];
-        ui.pendingEdges = [];
-        refresh();
-      } else if (def.needsParams === 'commodity') {
-        ui.dialog = { type: 'prog-commodity', index };
-        refresh();
-      } else if (def.needsParams === 'resource') {
-        ui.dialog = { type: 'prog-resource', index };
-        refresh();
-      } else if (def.needsParams === 'cardKey') {
-        ui.dialog = { type: 'prog-cardkey', index };
-        refresh();
-      } else if (def.needsParams === 'player') {
-        ui.dialog = { type: 'prog-player', index };
-        refresh();
-      } else if (def.needsParams === 'dice') {
-        ui.dialog = { type: 'prog-dice', index, red: null, yellow: null };
-        refresh();
-      } else {
-        doAction({ type: 'PLAY_PROGRESS_CARD', player: HUMAN, index, params: null });
-      }
+      if (!state.players[HUMAN].progressCards[index]) return;
+      ui.dialog = { type: 'prog-info', index };
+      refresh();
       return;
     }
+
+    case 'prog-use':
+      startProgressPlay(Number(arg));
+      return;
 
     case 'pc':
       doAction({

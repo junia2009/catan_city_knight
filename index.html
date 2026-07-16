@@ -399,6 +399,43 @@
   }
   body[data-screen="title"] #screen-title { display: flex; }
   body[data-screen="select"] #screen-select { display: flex; }
+  body[data-screen="rules"] #screen-rules { display: flex; }
+
+  /* ---------- 説明書 ---------- */
+  .rules-panel {
+    width: min(560px, 94vw);
+    max-height: 86dvh;
+    overflow-y: auto;
+    gap: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rules-tabs { position: sticky; top: -6px; z-index: 2; padding: 6px 0;
+    background: linear-gradient(180deg, #17334f 75%, transparent); }
+  .rules-body { display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
+  .rules-body h4 {
+    color: var(--accent2); font-size: 14.5px; margin-top: 10px;
+    border-bottom: 1px solid rgba(130,180,230,0.2); padding-bottom: 4px;
+  }
+  .rules-body p, .rules-body li { color: #cfdcea; line-height: 1.75; }
+  .rules-body ol { padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+  .rules-body b { color: #fff; }
+  .rrow {
+    display: flex; align-items: baseline; gap: 8px;
+    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 6px 10px;
+  }
+  .rrow b { white-space: nowrap; flex: none; }
+  .rrow .rcost { color: #cfdcea; margin-left: auto; text-align: right; line-height: 1.5; }
+  .ricon { font-size: 17px; flex: none; }
+  .rcard {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 10px;
+  }
+  .rcard .ricon { font-size: 22px; margin-top: 2px; }
+  .rcard small { color: var(--dim); margin-left: 8px; }
+  .rcard p { margin-top: 2px; font-size: 12.5px; }
+  .rules-close { margin-top: 8px; }
+  /* ダイアログ内で開いたとき */
+  .dialog .rules-body { max-height: 52dvh; overflow-y: auto; padding-right: 4px; }
   body:not([data-screen="game"]) #topbar,
   body:not([data-screen="game"]) #side,
   body:not([data-screen="game"]) #bottom,
@@ -607,11 +644,15 @@
       <h2 class="title-logo">カタン</h2>
       <div class="title-sub">CITIES & KNIGHTS</div>
       <button class="primary big" data-act="goto-select">はじめる</button>
+      <button class="big" data-act="goto-rules">📖 あそびかた</button>
       <div id="load-note"></div>
     </div>
   </div>
   <div id="screen-select" class="screen">
     <div class="select-panel" id="select-panel"></div>
+  </div>
+  <div id="screen-rules" class="screen">
+    <div class="select-panel rules-panel" id="rules-panel"></div>
   </div>
 
   <div id="dialog-root"></div>

@@ -13,6 +13,7 @@ import {
 } from '../rules/cak/improvements.js';
 import { COMMODITIES, COM_JP, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
 import { validateAction } from '../actions.js';
+import { rulesHtml } from './rules-content.js';
 import { PLAYER_COLORS } from './board-render.js';
 
 const HUMAN = 0;
@@ -112,6 +113,15 @@ function renderDice(state) {
     : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`;
 }
 
+// 進歩カードが「今」使えるか(手番・タイミング・獲得ターン)
+function progressPlayable(state, card) {
+  const def = PROGRESS_CARDS[card.id];
+  const isMyTurn =
+    state.phase === 'main' && state.currentPlayer === HUMAN && !state.awaiting;
+  const timing = def.preRoll ? !state.turnFlags.rolled : state.turnFlags.rolled;
+  return isMyTurn && timing && card.boughtTurn < state.turn;
+}
+
 function renderHand(state, ui) {
   const p = state.players[HUMAN];
   const cak = state.mode === 'cak';
@@ -141,11 +151,10 @@ function renderHand(state, ui) {
     extra = p.progressCards
       .map((c, i) => {
         const def = PROGRESS_CARDS[c.id];
-        // 錬金術師はロール前のみ、他はロール後のみ使える
-        const timing = def.preRoll ? !state.turnFlags.rolled : state.turnFlags.rolled;
-        const playable = isMyTurn && timing && c.boughtTurn < state.turn;
+        // 説明を見られるよう常にタップ可(使えないカードは薄く表示)
+        const playable = progressPlayable(state, c);
         return `<button class="card dev ${playable ? '' : 'dim'}" data-act="play-prog:${i}"
-          ${playable ? '' : 'disabled'} title="${def.desc ?? '進歩カード'}">
+          title="${def.desc ?? '進歩カード'}">
           <div class="icon">${def.icon}</div>
           <div class="label">${def.name}</div></button>`;
       })
@@ -541,8 +550,38 @@ function dialogHtml(state, ui) {
       <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${s.seed}"></div>
       <p>モード・CPU・シードは「新しいゲーム」開始時に反映されます</p>
       <div class="row end">
+        <button data-act="rules-open">📖 あそびかた</button>
         <button data-act="goto-title">🏝 ゲームをやめてタイトルへ</button>
         <button class="primary" data-act="new-game">🔄 新しいゲーム</button>
+        <button data-act="dialog-cancel">閉じる</button>
+      </div>`;
+  }
+
+  if (d.type === 'rules') {
+    return `<h3>📖 あそびかた</h3>
+      ${rulesHtml(d.tab)}
+      <div class="row end"><button class="primary" data-act="dialog-cancel">閉じる</button></div>`;
+  }
+
+  if (d.type === 'prog-info') {
+    const card = p.progressCards[d.index];
+    if (!card) return '';
+    const def = PROGRESS_CARDS[card.id];
+    const deckJp = { trade: '🧵 交易', politics: '🪙 政治', science: '📜 科学' };
+    const playable = progressPlayable(state, card);
+    const why = playable
+      ? ''
+      : card.boughtTurn >= state.turn
+        ? '獲得したターンには使えません'
+        : def.preRoll
+          ? 'ロールの前にだけ使えます'
+          : '自分の手番のロール後に使えます';
+    return `<h3>${def.icon} ${def.name}</h3>
+      <p><span class="badge">${deckJp[def.deck]}</span>${def.preRoll ? ' <span class="badge">ロール前</span>' : ''}</p>
+      <p>${def.desc}</p>
+      ${why ? `<p><small>⏳ ${why}</small></p>` : ''}
+      <div class="row end">
+        <button class="primary" data-act="prog-use:${d.index}" ${playable ? '' : 'disabled'}>✨ 使う</button>
         <button data-act="dialog-cancel">閉じる</button>
       </div>`;
   }
