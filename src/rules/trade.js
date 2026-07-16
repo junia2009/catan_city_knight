@@ -14,16 +14,15 @@ export function playerPorts(state, pid) {
   return types;
 }
 
-const TRACK_OF_COMMODITY = { cloth: 'trade', coin: 'politics', paper: 'science' };
+const COMMODITY_KEYS = ['cloth', 'coin', 'paper'];
 
 // give の交換レート。資源: 4:1 / 3:1港 / 2:1専用港。
-// 商品(cak): 該当系統の都市改良 Lv3 以上で 2:1、それ以外は 4:1(設計書 §9.4)
+// 商品(cak): 交易改良 Lv3(商館)で全商品が 2:1、それ以外は 4:1(公式ルール)
 export function tradeRate(state, pid, give) {
   // 商船隊(進歩カード): このターンの間、選んだ札を2:1
   if (state.turnFlags?.fleet === give && state.currentPlayer === pid) return 2;
-  const track = TRACK_OF_COMMODITY[give];
-  if (track) {
-    return state.players[pid].improvements[track] >= 3 ? 2 : 4;
+  if (COMMODITY_KEYS.includes(give)) {
+    return state.players[pid].improvements.trade >= 3 ? 2 : 4;
   }
   // 商人(進歩カード): 配置ヘックスの資源を2:1
   if (state.merchant?.player === pid) {

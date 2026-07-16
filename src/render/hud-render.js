@@ -243,6 +243,7 @@ function statusText(state, ui) {
         : `🏠 初期配置(${aw.context.round}巡目): 開拓地の位置を選んでください`;
     }
     if (aw.type === 'discard') return `🂠 手札を${aw.context.required[HUMAN]}枚捨ててください`;
+    if (aw.type === 'aqueduct') return '💧 水道橋: もらう資源を選んでください';
     if (aw.type === 'moveRobber') return '🥷 盗賊の移動先ヘックスを選んでください';
     if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
   } else if (aw) {
@@ -363,6 +364,16 @@ function dialogHtml(state, ui) {
       </div>`;
   }
 
+  if (d.type === 'aqueduct') {
+    const btns = RESOURCES.map(
+      (r) => `<button class="pick" data-act="aq:${r}" ${state.bank.resources[r] > 0 ? '' : 'disabled'}>
+        <span class="picon">${RES_ICON[r]}</span>${RES_JP[r]}</button>`,
+    ).join('');
+    return `<h3>💧 水道橋(科学Lv3)</h3>
+      <p>出目で資源がもらえなかったので、好きな資源を1枚もらえます</p>
+      <div class="row">${btns}</div>`;
+  }
+
   if (d.type === 'tradeOffer') {
     const aw = state.awaiting;
     if (aw?.type !== 'tradeOffer') return '';
@@ -387,6 +398,12 @@ function dialogHtml(state, ui) {
   }
 
   if (d.type === 'improve') {
+    // 公式ルール: Lv3ごとの特殊能力は系統で異なる
+    const TRACK_ABILITY = {
+      trade: '商館: 商品すべてを2:1交易',
+      politics: '要塞: 騎士をLv3に昇格可',
+      science: '水道橋: 収入0のとき資源1枚',
+    };
     const rows = TRACKS.map((t) => {
       const lv = p.improvements[t];
       const next = lv + 1;
@@ -401,8 +418,9 @@ function dialogHtml(state, ui) {
         metroVid != null
           ? `<small>🏙 ${state.players[state.buildings[metroVid]?.player]?.name ?? ''}</small>`
           : '';
-      return `<div class="drow">
-        <span>${TRACK_ICON[t]} ${TRACK_JP[t]} <b>Lv${lv}</b> ${cells} ${metroMark}</span>
+      return `<div class="drow improve">
+        <span>${TRACK_ICON[t]} ${TRACK_JP[t]} <b>Lv${lv}</b> ${cells} ${metroMark}
+          <small class="ability ${lv >= 3 ? 'on' : ''}">Lv3 ${TRACK_ABILITY[t]}</small></span>
         ${cost != null
           ? `<button data-act="improve-buy:${t}" ${err ? 'disabled' : ''}
               title="${err ?? ''}">${COM_ICON[com]}×${cost}で改良</button>`
@@ -410,7 +428,7 @@ function dialogHtml(state, ui) {
       </div>`;
     }).join('');
     return `<h3>🏙 都市改良</h3>
-      <p>Lv3で商品の2:1交易解禁、各系統で最初にLv4到達でメトロポリス(+2点)</p>
+      <p>各系統で最初にLv4到達でメトロポリス(+2点)。Lv3で系統ごとの特殊能力が解禁</p>
       ${rows}
       <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
   }

@@ -395,6 +395,15 @@ export function chooseAction(state, pid) {
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
     if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
+    if (aw.type === 'aqueduct') {
+      // 目標に足りない資源を優先、なければ在庫のあるものを選ぶ
+      const goal = nextGoal(state, pid);
+      const missing = goal ? Object.keys(missingFor(state.players[pid], goal.cost)) : [];
+      const pick = [...missing, ...RESOURCES].find(
+        (r) => state.bank.resources[r] > 0,
+      );
+      return { type: 'PICK_AQUEDUCT', player: pid, resource: pick };
+    }
     if (aw.type === 'tradeOffer') {
       const { give, receive } = aw.context;
       const accept = cpuAcceptsTrade(state, pid, give, receive);

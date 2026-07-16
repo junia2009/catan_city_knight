@@ -159,13 +159,16 @@ function syncUi() {
     if (aw.type === 'tradeOffer' && ui.dialog?.type !== 'tradeOffer') {
       ui.dialog = { type: 'tradeOffer' };
     }
+    if (aw.type === 'aqueduct' && ui.dialog?.type !== 'aqueduct') {
+      ui.dialog = { type: 'aqueduct' };
+    }
   } else {
     if (forced) {
       ui.mode = 'idle';
       ui.pending = null;
       ui.pendingVertex = null;
     }
-    if (['discard', 'steal', 'tradeOffer'].includes(ui.dialog?.type)) ui.dialog = null;
+    if (['discard', 'steal', 'tradeOffer', 'aqueduct'].includes(ui.dialog?.type)) ui.dialog = null;
   }
 }
 
@@ -915,6 +918,10 @@ document.addEventListener('click', (e) => {
       refresh();
       return;
     }
+    case 'aq':
+      doAction({ type: 'PICK_AQUEDUCT', player: HUMAN, resource: arg });
+      return;
+
     case 'offer-accept':
       doAction({ type: 'RESPOND_TRADE', player: HUMAN, accept: true });
       return;

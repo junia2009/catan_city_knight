@@ -122,12 +122,65 @@ test('cak: 都市改良のコストとメトロポリス獲得/移動', () => {
   assert.equal(s.buildings[s.metropolis.trade].player, 1);
 });
 
-test('cak: 商品2:1交易は該当系統Lv3から', () => {
+test('cak: 商館(交易Lv3)で全商品が2:1になる(公式ルール)', () => {
   let s = newCak();
   assert.equal(tradeRate(s, 0, 'cloth'), 4);
+  // 政治・科学のLv3では商品レートは変わらない
+  s.players[0].improvements.politics = 3;
+  s.players[0].improvements.science = 3;
+  assert.equal(tradeRate(s, 0, 'coin'), 4);
+  assert.equal(tradeRate(s, 0, 'paper'), 4);
+  // 交易Lv3(商館)で布・コイン・紙すべて2:1
   s.players[0].improvements.trade = 3;
   assert.equal(tradeRate(s, 0, 'cloth'), 2);
-  assert.equal(tradeRate(s, 0, 'coin'), 4); // 別系統は変わらず
+  assert.equal(tradeRate(s, 0, 'coin'), 2);
+  assert.equal(tradeRate(s, 0, 'paper'), 2);
+});
+
+test('cak: 水道橋(科学Lv3)は収入0のとき好きな資源を1枚もらえる', () => {
+  let s = finishSetup(newCak());
+  s.players[0].improvements.science = 3;
+  // player0 が何ももらえない出目を探す(7以外)
+  const myTotals = new Set();
+  for (const hid of LAYOUT.hexIds) {
+    const t = s.board.hexes[hid].token;
+    if (t && LAYOUT.hexVertices[hid].some((v) => s.buildings[v]?.player === 0)) {
+      myTotals.add(t);
+    }
+  }
+  const total = [2, 3, 4, 5, 6, 8, 9, 10, 11, 12].find((t) => !myTotals.has(t));
+  assert.ok(total != null);
+  const red = Math.max(1, total - 6);
+  s.turnFlags.alchemist = [red, total - red]; // 出目を固定してロール
+  s = dispatch(s, { type: 'ROLL_DICE', player: 0 });
+
+  assert.equal(s.awaiting?.type, 'aqueduct');
+  assert.ok(s.awaiting.players.includes(0));
+  // CPU応答も PICK_AQUEDUCT を返す
+  const a = chooseAction(s, s.awaiting.players[0]);
+  assert.equal(a.type, 'PICK_AQUEDUCT');
+
+  const wood = s.players[0].resources.wood;
+  s = dispatch(s, { type: 'PICK_AQUEDUCT', player: 0, resource: 'wood' });
+  assert.equal(s.players[0].resources.wood, wood + 1);
+  assert.ok(!s.awaiting || s.awaiting.type !== 'aqueduct' || !s.awaiting.players.includes(0));
+});
+
+test('cak: 水道橋は科学Lv3未満や収入ありでは発動しない', () => {
+  let s = finishSetup(newCak());
+  // 科学Lv3なし → 誰も対象にならない出目でも awaiting は立たない
+  const myTotals = new Set();
+  for (const hid of LAYOUT.hexIds) {
+    const t = s.board.hexes[hid].token;
+    if (t && LAYOUT.hexVertices[hid].some((v) => s.buildings[v]?.player === 0)) {
+      myTotals.add(t);
+    }
+  }
+  const total = [2, 3, 4, 5, 6, 8, 9, 10, 11, 12].find((t) => !myTotals.has(t));
+  const red = Math.max(1, total - 6);
+  s.turnFlags.alchemist = [red, total - red];
+  s = dispatch(s, { type: 'ROLL_DICE', player: 0 });
+  assert.notEqual(s.awaiting?.type, 'aqueduct');
 });
 
 test('cak: 騎士の建設・昇格・移動の判定', () => {

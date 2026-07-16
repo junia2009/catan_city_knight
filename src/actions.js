@@ -96,6 +96,7 @@ const AWAITING_ACTIONS = {
   moveRobber: 'MOVE_ROBBER',
   barbarianDefense: 'RAZE_CITY',
   tradeOffer: 'RESPOND_TRADE',
+  aqueduct: 'PICK_AQUEDUCT',
 };
 
 // プレイヤー間交易の内容チェック(giver が give を、receiver が receive を差し出せるか)
@@ -237,6 +238,12 @@ export function validateAction(state, action) {
       const { from, give, receive } = aw.context;
       // 受諾時は提案者が give を、応答者(自分)が receive を差し出す
       return validateTradeContents(state, state.players[from], p, give, receive);
+    }
+
+    case 'PICK_AQUEDUCT': {
+      if (!RESOURCES.includes(action.resource)) return '資源を選んでください';
+      if (state.bank.resources[action.resource] < 1) return '銀行に在庫がありません';
+      return null;
     }
 
     // ---- 都市と騎士(設計書 §9)----
@@ -400,7 +407,19 @@ function processRollTotal(state, pid, total) {
       state.awaiting = { type: 'moveRobber', players: [pid], context: { cause: 'seven' } };
     }
   } else {
+    const before = state.players.map((pl) => totalCards(pl));
     distributeForRoll(state, total);
+    // 水道橋(科学Lv3): 何ももらえなかったプレイヤーは好きな資源を1枚(公式ルール)
+    if (state.mode === 'cak') {
+      const bankHasAny = RESOURCES.some((r) => state.bank.resources[r] > 0);
+      const dry = state.players
+        .filter((pl) => pl.improvements.science >= 3 && totalCards(pl) === before[pl.id])
+        .map((pl) => pl.id);
+      if (bankHasAny && dry.length > 0) {
+        state.awaiting = { type: 'aqueduct', players: dry, context: {} };
+        addLog(state, `💧 水道橋: ${dry.map((i) => state.players[i].name).join('・')}は資源を1枚選べます`);
+      }
+    }
   }
 }
 
@@ -633,6 +652,14 @@ function applyAction(state, action) {
         state,
         `💬 ${p.name}が${partner.name}に交易を提案: ${fmtCards(action.give)} ⇄ ${fmtCards(action.receive)}`,
       );
+      break;
+    }
+
+    case 'PICK_AQUEDUCT': {
+      grantResource(state, pid, action.resource, 1);
+      addLog(state, `💧 ${p.name}が水道橋で${RES_JP[action.resource]}を1枚獲得`);
+      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+      if (state.awaiting.players.length === 0) state.awaiting = null;
       break;
     }
 
