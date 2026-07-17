@@ -638,7 +638,7 @@ function makePlane() {
   prop.position.x = 0.43;
   g.add(body, nose, wing, tail, fin, prop);
   g.userData.prop = prop;
-  g.traverse((o) => { o.castShadow = true; });
+  // 高高度の影は太陽の角度で機体から大きく離れて落ちるため、影は出さない
   return g;
 }
 
@@ -712,11 +712,11 @@ const SKY_CYCLE_SEC = 300; // 1周の長さ
 const SKY_PHASES = [
   // t: サイクル内の位置, zenith: 天頂, horizon: 地平線,
   // sun: 太陽光の色, sunI: 強さ, hemi: 半球光の強さ, night: 星の濃さ
-  { t: 0.0, zenith: 0x2a5d94, horizon: 0x9cc4d8, sun: 0xfff2dd, sunI: 2.4, hemi: 1.05, night: 0 },
-  { t: 0.35, zenith: 0x1c4173, horizon: 0xe8a35e, sun: 0xffc27a, sunI: 1.9, hemi: 0.85, night: 0 },
-  { t: 0.5, zenith: 0x0a1d3a, horizon: 0x35507a, sun: 0x9fb8ff, sunI: 0.4, hemi: 0.72, night: 1 },
-  { t: 0.65, zenith: 0x14355f, horizon: 0xd88a6a, sun: 0xffcf95, sunI: 1.7, hemi: 0.8, night: 0.15 },
-  { t: 1.0, zenith: 0x2a5d94, horizon: 0x9cc4d8, sun: 0xfff2dd, sunI: 2.4, hemi: 1.05, night: 0 },
+  { t: 0.0, zenith: 0x2a5d94, horizon: 0x9cc4d8, sun: 0xfff2dd, sunI: 2.4, hemi: 1.05, hemiC: 0xcfe3ff, night: 0 },
+  { t: 0.35, zenith: 0x1c4173, horizon: 0xe8a35e, sun: 0xffc27a, sunI: 1.9, hemi: 0.85, hemiC: 0xe8d2b8, night: 0 },
+  { t: 0.5, zenith: 0x0a1d3a, horizon: 0x35507a, sun: 0x9fb8ff, sunI: 0.4, hemi: 0.62, hemiC: 0x7089b8, night: 1 },
+  { t: 0.65, zenith: 0x14355f, horizon: 0xd88a6a, sun: 0xffcf95, sunI: 1.7, hemi: 0.8, hemiC: 0xe0cdb8, night: 0.15 },
+  { t: 1.0, zenith: 0x2a5d94, horizon: 0x9cc4d8, sun: 0xfff2dd, sunI: 2.4, hemi: 1.05, hemiC: 0xcfe3ff, night: 0 },
 ];
 
 function skyAt(phase) {
@@ -736,6 +736,7 @@ function skyAt(phase) {
     zenith: lerpC(a.zenith, b.zenith),
     horizon: lerpC(a.horizon, b.horizon),
     sun: lerpC(a.sun, b.sun),
+    hemiC: lerpC(a.hemiC, b.hemiC),
     sunI: a.sunI + (b.sunI - a.sunI) * e,
     hemi: a.hemi + (b.hemi - a.hemi) * e,
     night: a.night + (b.night - a.night) * e,
@@ -1322,10 +1323,10 @@ export class Board3D {
     sun.position.set(7, 12, 5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -8;
-    sun.shadow.camera.right = 8;
-    sun.shadow.camera.top = 8;
-    sun.shadow.camera.bottom = -8;
+    sun.shadow.camera.left = -15;
+    sun.shadow.camera.right = 15;
+    sun.shadow.camera.top = 15;
+    sun.shadow.camera.bottom = -15;
     sun.shadow.bias = -0.0004;
     this.scene.add(sun);
 
@@ -1617,6 +1618,7 @@ export class Board3D {
     this.sun.color.copy(s.sun);
     this.sun.intensity = s.sunI;
     this.hemi.intensity = s.hemi;
+    this.hemi.color.copy(s.hemiC);
 
     // 霧・背景・海の縁も地平線の色へ寄せる(空との継ぎ目を消す)
     const fogCol = s.horizon.clone().lerp(s.zenith, 0.55);
