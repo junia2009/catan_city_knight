@@ -97,12 +97,13 @@
     transform: translateX(-2px);
   }
   .prow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  /* プレイヤーチップ = アバター(SVG)の容器 */
   .chip {
-    width: 13px; height: 13px; border-radius: 50%;
-    background: var(--pc);
-    box-shadow: inset 0 -2px 3px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.5);
-    display: inline-block; flex: none;
+    width: 24px; height: 24px; border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    display: inline-block; flex: none; vertical-align: middle;
   }
+  .chip .avatar { display: block; width: 100%; height: 100%; }
   .pname { font-weight: 700; font-size: 13.5px; }
   .ppts {
     margin-left: auto; color: var(--accent2); font-weight: 800; font-size: 17px;
@@ -530,11 +531,11 @@
   }
   body.mobile .player.active { transform: none; }
   body.mobile .player .prow { gap: 5px; flex-wrap: nowrap; justify-content: center; }
-  /* チップは色ドット+点数のみ(名前はタップ展開時に表示) */
+  /* チップはアバター+点数のみ(名前はタップ展開時に表示) */
   body.mobile .pname { display: none; font-size: 11px; }
   body.mobile .player.expanded .pname { display: block; }
   body.mobile .ppts { font-size: 15px; flex: none; margin-left: 0; }
-  body.mobile .chip { width: 12px; height: 12px; }
+  body.mobile .chip { width: 21px; height: 21px; }
   body.mobile .player .pinfo { display: none; }
   body.mobile .player.expanded .pinfo { display: flex; }
   body.mobile #barb {
