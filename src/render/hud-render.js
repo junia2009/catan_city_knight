@@ -16,6 +16,7 @@ import { COMMODITIES, COM_JP, PROGRESS_CARDS } from '../rules/cak/progress-cards
 import { validateAction } from '../actions.js';
 import { rulesHtml } from './rules-content.js';
 import { PLAYER_COLORS } from './board-render.js';
+import { avatarSvg } from './avatars.js';
 
 const HUMAN = 0;
 
@@ -64,7 +65,7 @@ function renderPlayers(state, ui) {
       <div class="player ${active ? 'active' : ''} ${expanded ? 'expanded' : ''}"
         style="--pc:${PLAYER_COLORS[p.id]}" data-act="pexpand:${p.id}">
         <div class="prow">
-          <span class="chip"></span>
+          <span class="chip">${avatarSvg(p.id)}</span>
           <span class="pname">${p.name}</span>
           <span class="ppts">${pts}<small>/${goal}</small></span>
         </div>
@@ -402,7 +403,7 @@ function dialogHtml(state, ui) {
     const short = Object.entries(aw.context.receive).some(
       ([r, n]) => (RES_ICON[r] ? p.resources[r] : p.commodities[r]) < n,
     );
-    return `<h3>💬 ${from.name}からの交易提案</h3>
+    return `<h3>💬 <span class="chip">${avatarSvg(from.id)}</span> ${from.name}からの交易提案</h3>
       <p>もらえるもの</p><div class="row">${chips(aw.context.give)}</div>
       <p>渡すもの${short ? '(手札が足りません)' : ''}</p><div class="row">${chips(aw.context.receive)}</div>
       <div class="row end">
@@ -501,7 +502,7 @@ function dialogHtml(state, ui) {
           const err = progValid({ target: o.id });
           return `<button class="pick" data-act="pplayer:${o.id}" style="--pc:${PLAYER_COLORS[o.id]}"
             ${err ? 'disabled' : ''} title="${err ?? ''}">
-            ${o.name}<small>${totalCards(o)}枚</small></button>`;
+            <span class="chip">${avatarSvg(o.id)}</span>${o.name}<small>${totalCards(o)}枚</small></button>`;
         })
         .join('');
       return `${head}<div class="row">${btns}</div><div class="row end">${cancel}</div>`;
@@ -546,7 +547,7 @@ function dialogHtml(state, ui) {
     const btns = d.targets.map((t) => {
       const tp = state.players[t];
       return `<button class="pick" data-act="steal:${t}" style="--pc:${PLAYER_COLORS[t]}">
-        <span class="chip"></span>${tp.name}<small>手札${totalCards(tp)}枚</small></button>`;
+        <span class="chip">${avatarSvg(t)}</span>${tp.name}<small>手札${totalCards(tp)}枚</small></button>`;
     }).join('');
     return `<h3>🥷 誰から奪いますか?</h3><div class="row">${btns}</div>`;
   }
@@ -635,7 +636,7 @@ function dialogHtml(state, ui) {
       .map((pl) => ({ pl, pts: computePoints(state, pl.id, { includeHidden: true }) }))
       .sort((a, b) => b.pts - a.pts)
       .map(({ pl, pts }, i) => `<div class="wrow" style="--pc:${PLAYER_COLORS[pl.id]}">
-        <span>${i === 0 ? '🏆' : `${i + 1}位`}</span><span class="chip"></span>
+        <span>${i === 0 ? '🏆' : `${i + 1}位`}</span><span class="chip">${avatarSvg(pl.id)}</span>
         <span class="pname">${pl.name}</span><b>${pts}点</b></div>`)
       .join('');
     return `<h3 class="win-title">🏆 ${state.players[state.winner].name}の勝利!</h3>
