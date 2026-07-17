@@ -172,7 +172,11 @@ function syncUi() {
     if (aw.type === 'discard' && ui.dialog?.type !== 'discard') {
       ui.dialog = {
         type: 'discard',
-        counts: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
+        // 都市と騎士では商品も捨て札の対象(手札上限に数えるため)
+        counts: {
+          wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0,
+          cloth: 0, coin: 0, paper: 0,
+        },
       };
     }
     if (aw.type === 'tradeOffer' && ui.dialog?.type !== 'tradeOffer') {

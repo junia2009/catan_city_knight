@@ -522,13 +522,18 @@ function dialogHtml(state, ui) {
 
   if (d.type === 'discard') {
     const need = state.awaiting?.context.required[HUMAN] ?? 0;
-    const sum = RESOURCES.reduce((s, r) => s + d.counts[r], 0);
-    const rows = RESOURCES.map(
+    // 都市と騎士では商品も手札上限に数えるため、捨て札の対象にする
+    const keys = state.mode === 'cak' ? [...RESOURCES, ...COMMODITIES] : RESOURCES;
+    const have = (k) => (RESOURCES.includes(k) ? p.resources[k] : p.commodities[k]);
+    const icon = (k) => RES_ICON[k] ?? COM_ICON[k];
+    const label = (k) => RES_JP[k] ?? COM_JP[k];
+    const sum = keys.reduce((s, k) => s + (d.counts[k] ?? 0), 0);
+    const rows = keys.map(
       (r) => `<div class="drow">
-        <span>${RES_ICON[r]} ${RES_JP[r]}(${p.resources[r]})</span>
-        <button data-act="discard-minus:${r}" ${d.counts[r] > 0 ? '' : 'disabled'}>−</button>
-        <b>${d.counts[r]}</b>
-        <button data-act="discard-plus:${r}" ${d.counts[r] < p.resources[r] && sum < need ? '' : 'disabled'}>+</button>
+        <span>${icon(r)} ${label(r)}(${have(r)})</span>
+        <button data-act="discard-minus:${r}" ${(d.counts[r] ?? 0) > 0 ? '' : 'disabled'}>−</button>
+        <b>${d.counts[r] ?? 0}</b>
+        <button data-act="discard-plus:${r}" ${(d.counts[r] ?? 0) < have(r) && sum < need ? '' : 'disabled'}>+</button>
       </div>`,
     ).join('');
     return `<h3>🂠 捨て札(${sum}/${need}枚)</h3>${rows}
