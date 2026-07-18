@@ -1394,6 +1394,7 @@ export class Board3D {
     this.boardYaw = 0; // 盤面構図の方位角(縦持ちでは 90°)
     this.tokenRot = 0; // トークンの数字が構図から正立して見える回転角(実測値)
     this.tokens = []; // 数字トークン(構図に合わせて向きを変える)
+    this.portSpots = []; // 港の看板位置(ダイスの着地回避に使う)
 
     this.raycaster = new THREE.Raycaster();
     this.pulseMats = [];
@@ -1441,11 +1442,6 @@ export class Board3D {
     if (dir.lengthSq() < 0.01) dir.set(0, 0, 1);
     dir.normalize();
     const side = new THREE.Vector3(-dir.z, 0, dir.x);
-    // 島の右手前の海上に着地させる(画面内に収まる位置)
-    const center = this.controls.target.clone()
-      .addScaledVector(dir, 4.2)
-      .addScaledVector(side, 2.6);
-    center.y = SEA_Y;
 
     const dice = values.map((v, i) => ({
       value: v,
@@ -1454,11 +1450,45 @@ export class Board3D {
     }));
     if (eventFace) dice.push({ value: eventFace, mats: mats.event, axis: EVENT_AXES[eventFace] });
 
+    // 三角形のコンパクトな配置(横一列だと画面端で切れる)。[side, dir] のオフセット
+    const offs = dice.length >= 3
+      ? [[-0.5, 0], [0.5, 0], [0, 0.85]]
+      : [[-0.5, 0], [0.5, 0]];
+    const landAt = (c, i) => c.clone()
+      .addScaledVector(side, offs[i][0])
+      .addScaledVector(dir, offs[i][1]);
+
+    // 手前の海上に着地させる。候補位置の中から港の看板に最も被らない場所を選ぶ
+    const candidates = [
+      [4.2, 2.2], [4.2, -2.2], [4.7, 1.3], [4.7, -1.3],
+      [4.5, 2.8], [4.5, -2.8], [5.0, 0],
+    ];
+    let center = null;
+    let bestScore = -Infinity;
+    for (const [f, s] of candidates) {
+      const c = this.controls.target.clone()
+        .addScaledVector(dir, f)
+        .addScaledVector(side, s);
+      let minD = Infinity;
+      for (let i = 0; i < dice.length; i++) {
+        const p = landAt(c, i);
+        for (const spot of this.portSpots) {
+          minD = Math.min(minD, p.distanceTo(spot));
+        }
+      }
+      const score = Math.min(minD, 1.5); // 1.5以上離れていれば十分(先頭候補を優先)
+      if (score > bestScore + 0.01) {
+        bestScore = score;
+        center = c;
+      }
+    }
+    center.y = SEA_Y;
+
     const now = performance.now();
     dice.forEach((d, i) => {
       const mesh = new THREE.Mesh(DIE_GEO, d.mats);
       mesh.castShadow = true;
-      const land = center.clone().addScaledVector(side, (i - (dice.length - 1) / 2) * 0.9);
+      const land = landAt(center, i);
       const start = land.clone()
         .addScaledVector(dir, -2.2)
         .addScaledVector(side, (Math.random() - 0.5) * 0.6);
@@ -1996,11 +2026,13 @@ export class Board3D {
     }
 
     // 港
+    this.portSpots = [];
     for (const port of state.board.ports) {
       const e = LAYOUT.edges[port.edgeId];
       const len = Math.hypot(e.x, e.y) || 1;
       const sx = e.x + (e.x / len) * 0.6;
       const sz = e.y + (e.y / len) * 0.6;
+      this.portSpots.push(new THREE.Vector3(sx, 0, sz));
       const pierMat = mat(0x8a6238);
       for (const vid of e.v) {
         const v = LAYOUT.vertices[vid];
