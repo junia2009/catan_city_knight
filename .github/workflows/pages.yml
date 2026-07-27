@@ -44,3 +44,22 @@ jobs:
           path: .
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      # 配信された実物を確認する。版が置換されないまま公開されると
+      # 「どの版が動いているか」が分からなくなり、不具合の切り分けができなくなる。
+      - name: 配信された版を確認
+        run: |
+          URL="${{ steps.deployment.outputs.page_url }}index.html"
+          echo "確認先: $URL"
+          for i in 1 2 3 4 5 6; do
+            TAG=$(curl -fsS --max-time 15 "$URL?_=$(date +%s)" 2>/dev/null \
+                  | grep -o 'id="build-tag">[^<]*' | head -1 || true)
+            echo "  ($i) ${TAG:-取得できず}"
+            case "$TAG" in
+              *BUILD_ID*) sleep 10 ;;
+              '') sleep 10 ;;
+              *) echo "✅ 版が正しく埋め込まれています"; exit 0 ;;
+            esac
+          done
+          echo "::error::配信された index.html の版が BUILD_ID のままです"
+          exit 1
