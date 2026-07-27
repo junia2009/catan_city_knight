@@ -32,6 +32,12 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # タイトル画面に版を刻む(端末が最新版を掴んでいるか目視で分かるように)
+      - name: 版を埋め込む
+        run: |
+          BUILD="$(git rev-parse --short HEAD) $(date -u +%m/%d\ %H:%M)"
+          sed -i "s|ver. BUILD_ID|ver. ${BUILD} UTC|" index.html
+          grep -o 'id="build-tag">[^<]*' index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

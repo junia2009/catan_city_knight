@@ -38,6 +38,26 @@ let viewMode = '3d'; // '2d' | '3d'
 let renderer3d = null;
 let renderer3dFailed = false;
 
+// 端末が古い版を掴んだまま(特にPWA)にならないよう、配信中の版と照合する。
+// タイトル画面でしか出さないので、対戦中に邪魔をすることはない。
+async function checkForUpdate() {
+  const tagEl = document.getElementById('build-tag');
+  if (!tagEl) return;
+  const current = tagEl.textContent.trim();
+  if (current.includes('BUILD_ID')) return; // ローカル開発時は版が埋まっていない
+  try {
+    const res = await fetch(`./index.html?_=${Date.now()}`, { cache: 'no-store' });
+    const latest = (await res.text()).match(/id="build-tag">([^<]*)</)?.[1]?.trim();
+    if (latest && latest !== current) {
+      tagEl.textContent = '🔄 新しい版があります — タップで更新';
+      tagEl.dataset.act = 'reload-app';
+      tagEl.classList.add('update');
+    }
+  } catch {
+    // オフライン等は黙って諦める(次回起動で再確認される)
+  }
+}
+
 // タイトル画面の背景に飾る盤面(全員CPUで、進行はしない)。
 // state は常に非 null に保つ ── null にすると入力処理が丸ごと止まる。
 function showTitleBoard() {
@@ -1089,6 +1109,7 @@ document.addEventListener('click', (e) => {
       else setScreen('title');
       return;
     case 'goto-rules': setScreen('rules'); return;
+    case 'reload-app': location.reload(); return;
 
     // ---- オンライン対戦 ----
     case 'goto-online':
@@ -1471,3 +1492,9 @@ showTitleBoard();
 syncBgmButtons();
 refresh();
 if (viewMode === '3d') ensureRenderer3d().then(() => state && refresh());
+
+// 起動時と、アプリを前面に戻したときに版を確認する(PWAは再読込されにくいため)
+checkForUpdate();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && screen === 'title') checkForUpdate();
+});
