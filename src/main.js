@@ -38,6 +38,19 @@ let viewMode = '3d'; // '2d' | '3d'
 let renderer3d = null;
 let renderer3dFailed = false;
 
+// タイトル画面の背景に飾る盤面(全員CPUで、進行はしない)。
+// state は常に非 null に保つ ── null にすると入力処理が丸ごと止まる。
+function showTitleBoard() {
+  clearTimeout(cpuTimer);
+  state = createGame({
+    seed: (Date.now() % 0x7fffffff) || 1,
+    playerCount: 4,
+    humanIndex: -1,
+    mode: 'cak',
+  });
+  ui = freshUi();
+}
+
 // 自分の席が変わったら描画側にも伝える(オンラインで席が 0 以外になる)
 function setSeat(seat) {
   HUMAN = seat;
@@ -271,7 +284,8 @@ function leaveNet(toTitle = true) {
   updateNetBadge();
   if (toTitle) {
     online.error = null;
-    state = null;
+    // state を null にすると入力処理が全て止まるので、飾り用の盤面に戻す
+    showTitleBoard();
     setScreen('title');
   }
   renderOnlinePanel();
@@ -1453,13 +1467,7 @@ if ('serviceWorker' in navigator) {
 
 // 起動: タイトル画面。背景用にCPUなしの盤面を1つ生成して飾る
 document.body.dataset.screen = screen;
-state = createGame({
-  seed: (Date.now() % 0x7fffffff) || 1,
-  playerCount: 4,
-  humanIndex: -1,
-  mode: 'cak',
-});
-ui = freshUi();
+showTitleBoard();
 syncBgmButtons();
 refresh();
 if (viewMode === '3d') ensureRenderer3d().then(() => state && refresh());
