@@ -32,6 +32,21 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      # Pages の配信元が「ブランチから」のままだと、GitHub 標準の Jekyll ビルドが
+      # リポジトリの生ファイルを別途デプロイし、このワークフローの成果物と競合する
+      # (後に終わった方が勝つため、版が埋め込まれていない生ファイルが公開されうる)。
+      - name: Pages の配信元を確認
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TYPE=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null || echo unknown)
+          echo "build_type: $TYPE"
+          if [ "$TYPE" = "legacy" ]; then
+            echo "::error::Pages の配信元が「ブランチから」になっています。標準の Jekyll ビルドと二重にデプロイされ、公開される内容が不定になります。リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」に変更してください"
+            exit 1
+          fi
+
       # タイトル画面に版を刻む(端末が最新版を掴んでいるか目視で分かるように)
       - name: 版を埋め込む
         run: |

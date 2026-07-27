@@ -1482,11 +1482,26 @@ window.catanDebug = {
 // updateViaCache: 'none' で sw.js の更新確認は常にネットワークへ。
 // SW はネットワーク優先なので、オンライン時は必ず最新バージョンが表示される。
 if ('serviceWorker' in navigator) {
+  // 初回インストールか、更新かを見分けるために先に控えておく
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // 新しい SW が主導権を取った = コードが入れ替わった。
+    // 読み込み済みの JS は古いままなので、一度だけ読み直す。
+    if (!hadController || reloading) return; // 初回インストール時は不要
+    reloading = true;
+    location.reload();
+  });
+
   navigator.serviceWorker
     .register('./sw.js', { updateViaCache: 'none' })
     .then((reg) => {
       reg.update();
-      setInterval(() => reg.update(), 60 * 60 * 1000); // 長時間開きっぱなし対策
+      setInterval(() => reg.update(), 30 * 60 * 1000); // 長時間開きっぱなし対策
+      // ホーム画面アプリは前面に戻っただけで再読込されないので、そこでも確認する
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) reg.update();
+      });
     })
     .catch((e) => console.warn('SW登録失敗:', e));
 }
