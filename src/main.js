@@ -281,8 +281,13 @@ function startNet(code, name) {
     onState: onNetState,
     onError: (msg, fatal) => {
       online.error = msg;
-      if (fatal) leaveNet(false);
-      else if (screen === 'game') {
+      if (fatal) {
+        // 復帰できない切断(放置による切断など)。理由を見せたまま
+        // 合言葉の画面に戻し、すぐ入り直せるようにする。
+        leaveNet(false);
+        showTitleBoard();
+        setScreen('online');
+      } else if (screen === 'game') {
         ui.toast = msg;
         refresh();
       }

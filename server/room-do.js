@@ -2,13 +2,21 @@
 // ゲームのロジックは RoomCore(トランスポート非依存)に閉じているので、
 // ここは「接続の管理」と「いつ誰に何を送るか」だけを担当する。
 
-import { RoomCore } from './room-core.js';
+import { RoomCore, IDLE_DISCONNECT_MS } from './room-core.js';
 
 // CPU / 切断中の席をサーバーが打つときの間合い(ローカル戦の演出と揃える)
 const AUTO_DELAY_MS = 650;
 const AUTO_DELAY_SETUP_MS = 450;
 // 全員切断のまま放置された部屋を畳むまで
 const IDLE_SWEEP_MS = 30 * 60 * 1000;
+
+// 切断理由に入れる時間の表記(「60分間」より「1時間」の方が伝わる)
+function humanDuration(ms) {
+  const mins = Math.max(1, Math.round(ms / 60000));
+  if (mins < 60) return `${mins}分間`;
+  const hours = mins / 60;
+  return Number.isInteger(hours) ? `${hours}時間` : `${mins}分間`;
+}
 
 export class RoomDO {
   constructor(ctx, env) {
@@ -17,6 +25,8 @@ export class RoomDO {
     this.room = null;
     this.sockets = new Map(); // WebSocket -> clientId
     this.autoTimer = null;
+    // 無操作で切断するまでの時間。テストで短くできるよう環境変数で上書き可能。
+    this.idleLimitMs = Number(env?.IDLE_DISCONNECT_MS) || IDLE_DISCONNECT_MS;
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get('room');
       if (saved) this.room = RoomCore.fromJSON(saved);
@@ -51,7 +61,18 @@ export class RoomDO {
     const [client, server] = Object.values(pair);
     server.accept();
     this.wire(server);
+    // 見張りの予約は hello(着席)後に行う。この時点ではまだ誰も席にいないため、
+    // ここで予約すると「無人の部屋」と見なされて遠い時刻になってしまう。
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // 次に様子を見る時刻を決める。接続があれば無操作の期限、
+  // 誰もいなければ部屋を畳む期限。
+  scheduleAlarm() {
+    if (!this.room) return;
+    const base = this.room.lastActivityAt;
+    const at = this.room.isDeserted() ? base + IDLE_SWEEP_MS : base + this.idleLimitMs;
+    return this.ctx.storage.setAlarm(at);
   }
 
   wire(ws) {
@@ -90,6 +111,7 @@ export class RoomDO {
       this.broadcastLobby();
       if (room.phase === 'playing') this.sendState(ws, res.seat, null);
       this.pumpAuto();
+      this.scheduleAlarm(); // 着席したので、ここから放置を見張る
       await this.save();
       return;
     }
@@ -141,18 +163,45 @@ export class RoomDO {
     this.broadcastLobby();
     this.pumpAuto(); // 切断した席はサーバーが肩代わりして進める
     this.save();
-    if (this.room.isDeserted()) {
-      this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
-    }
+    this.scheduleAlarm();
   }
 
-  // 誰も戻ってこなかった部屋を片付ける
+  // 放置の見張り。無操作が続いた部屋は切断し、
+  // 誰も戻ってこなければ片付ける(サーバーの常駐を止めて無料枠を守る)。
   async alarm() {
     await this.ready;
-    if (this.room && this.room.isDeserted()) {
-      await this.ctx.storage.deleteAll();
-      this.room = null;
+    if (!this.room) return;
+
+    if (this.room.isDeserted()) {
+      if (this.room.idleMs() >= IDLE_SWEEP_MS) {
+        await this.ctx.storage.deleteAll();
+        this.room = null;
+        return;
+      }
+      return this.scheduleAlarm();
     }
+
+    if (this.room.isIdle(Date.now(), this.idleLimitMs)) {
+      this.closeAll(`${humanDuration(this.idleLimitMs)}操作がなかったため切断しました`);
+      return this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
+    }
+    return this.scheduleAlarm();
+  }
+
+  // 全員に理由を伝えてから切断する。fatal を立てることで
+  // クライアントが自動再接続せず、部屋が復活しないようにする。
+  closeAll(reason) {
+    clearTimeout(this.autoTimer);
+    this.autoTimer = null;
+    for (const ws of [...this.sockets.keys()]) {
+      this.send(ws, { t: 'error', msg: reason, fatal: true });
+      this.sockets.delete(ws);
+      try {
+        ws.close(1000, reason);
+      } catch { /* 済 */ }
+    }
+    for (const s of this.room.seats) if (s) s.online = false;
+    this.save();
   }
 
   // ---- 自動進行 ----
@@ -162,6 +211,9 @@ export class RoomDO {
     if (this.autoTimer) return;
     const room = this.room;
     if (room.phase !== 'playing' || room.autoPlayer() == null) return;
+    // 誰も見ていない部屋で CPU だけが指し続けても無駄に常駐するだけ。
+    // 再接続したら pumpAuto が呼ばれて再開する。
+    if (room.isDeserted()) return;
     const delay = room.state.phase === 'setup' ? AUTO_DELAY_SETUP_MS : AUTO_DELAY_MS;
     this.autoTimer = setTimeout(() => {
       this.autoTimer = null;

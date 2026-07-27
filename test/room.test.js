@@ -259,3 +259,55 @@ test('room: 保存と復元で対戦を継続できる', () => {
   assert.equal(revived.seats[0].online, false);
   assert.equal(revived.join({ clientId: 'a', name: 'A' }).seat, 0);
 });
+
+// --- 放置された部屋の自動切断 ---
+
+test('room: 人の操作だけが「活動」として数えられる', () => {
+  const room = newRoom();
+  room.join({ clientId: 'a', name: 'A' });
+  room.join({ clientId: 'b', name: 'B' });
+  room.start('a');
+
+  // 2時間前に最後の操作があったことにする
+  const TWO_HOURS = 2 * 60 * 60 * 1000;
+  room.lastActivityAt = Date.now() - TWO_HOURS;
+  assert.ok(room.isIdle(), '2時間無操作なのに放置と判定されない');
+
+  // CPU の自動進行は「操作」ではない(放置判定を延命させない)
+  room.stepAuto();
+  assert.ok(room.isIdle(), 'CPUの自動進行で放置判定がリセットされた');
+
+  // 人が手を出したらリセットされる
+  const pid = room.state.awaiting ? room.state.awaiting.players[0] : room.state.currentPlayer;
+  const who = ['a', 'b'][pid];
+  if (who) {
+    room.submitAction(who, chooseAction(room.state, pid));
+    assert.ok(!room.isIdle(), '人の操作で放置判定が解除されない');
+  }
+});
+
+test('room: 参加・設定変更・開始も活動として数える', () => {
+  const room = newRoom();
+  const HOUR = 60 * 60 * 1000;
+
+  room.lastActivityAt = Date.now() - HOUR * 2;
+  room.join({ clientId: 'a', name: 'A' });
+  assert.ok(!room.isIdle(), '参加が活動として数えられていない');
+
+  room.lastActivityAt = Date.now() - HOUR * 2;
+  room.setSettings('a', { mode: 'base' });
+  assert.ok(!room.isIdle(), '設定変更が活動として数えられていない');
+
+  room.lastActivityAt = Date.now() - HOUR * 2;
+  room.start('a');
+  assert.ok(!room.isIdle(), '開始が活動として数えられていない');
+});
+
+test('room: 放置の判定時刻は保存・復元される', () => {
+  const room = newRoom();
+  room.join({ clientId: 'a', name: 'A' });
+  room.lastActivityAt = Date.now() - 90 * 60 * 1000;
+  const revived = RoomCore.fromJSON(JSON.parse(JSON.stringify(room.toJSON())));
+  assert.equal(revived.lastActivityAt, room.lastActivityAt);
+  assert.ok(revived.isIdle(), '復元後に放置判定が失われている');
+});

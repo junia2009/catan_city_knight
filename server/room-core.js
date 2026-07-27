@@ -11,6 +11,9 @@ import { chooseAction } from '../src/ai/cpu-player.js';
 
 export const MAX_SEATS = 4;
 export const MIN_PLAYERS = 2;
+// 無操作が続いた部屋を切断するまで。開いたままの部屋は
+// サーバーが常駐し続けて無料枠を食うため、放置を自動で畳む。
+export const IDLE_DISCONNECT_MS = 60 * 60 * 1000;
 // 紛らわしい文字(I/O/0/1)を除いた合言葉用の英字
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 export const CODE_LENGTH = 4;
@@ -44,6 +47,22 @@ export class RoomCore {
     this.state = null;
     this.version = 0; // 状態を配るたびに増える(クライアントの取りこぼし検出用)
     this.lastAction = null; // 直前に適用されたアクション(演出の再生用)
+    // 最後に「人が操作した」時刻。接続維持の ping や CPU の自動進行は含めない
+    // ── 放置された部屋を見分けるのが目的なので、人の意思がある操作だけを数える。
+    this.lastActivityAt = Date.now();
+  }
+
+  // 人の操作があったことを記録する
+  touch(now = Date.now()) {
+    this.lastActivityAt = now;
+  }
+
+  idleMs(now = Date.now()) {
+    return now - this.lastActivityAt;
+  }
+
+  isIdle(now = Date.now(), limit = IDLE_DISCONNECT_MS) {
+    return this.idleMs(now) >= limit;
   }
 
   // ---- 席 ----
@@ -59,6 +78,7 @@ export class RoomCore {
   // 参加(再接続なら元の席に戻る)
   join({ clientId, name }) {
     if (!clientId) return { error: '不正な参加者です' };
+    this.touch();
     const existing = this.seatOf(clientId);
     if (existing >= 0) {
       this.seats[existing].online = true;
@@ -108,6 +128,7 @@ export class RoomCore {
 
   setSettings(clientId, patch) {
     if (!this.isHost(clientId)) return { error: 'ホストのみ変更できます' };
+    this.touch();
     if (this.phase !== 'lobby') return { error: '対戦中は変更できません' };
     const next = { ...this.settings };
     if (['base', 'cak', 'dragon'].includes(patch?.mode)) next.mode = patch.mode;
@@ -119,6 +140,7 @@ export class RoomCore {
 
   start(clientId) {
     if (!this.isHost(clientId)) return { error: 'ホストのみ開始できます' };
+    this.touch();
     if (this.phase !== 'lobby') return { error: 'すでに始まっています' };
     const humans = this.occupiedSeats();
     if (humans < 1) return { error: '参加者がいません' };
@@ -167,6 +189,7 @@ export class RoomCore {
     if (seat < 0) return { error: '観戦者は操作できません' };
     if (!action || typeof action !== 'object') return { error: '不正なアクションです' };
     if (action.player !== seat) return { error: '他のプレイヤーの手は出せません' };
+    this.touch();
     return this._apply(action);
   }
 
@@ -271,6 +294,7 @@ export class RoomCore {
       settings: this.settings,
       state: this.state,
       version: this.version,
+      lastActivityAt: this.lastActivityAt,
     };
   }
 
@@ -282,6 +306,7 @@ export class RoomCore {
     room.settings = data.settings;
     room.state = data.state;
     room.version = data.version ?? 0;
+    room.lastActivityAt = data.lastActivityAt ?? Date.now();
     // 復元直後は全員切断扱い(再接続を待つ)
     for (const s of room.seats) if (s) s.online = false;
     return room;
