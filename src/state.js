@@ -52,6 +52,7 @@ export function createGame({
       resources: zeroResources(),
       devCards: [], // { type, boughtTurn }
       knightsPlayed: 0,
+      offerCooldown: {}, // 相手ID -> この手番まで交易を再提案しない(断られた相手ごと)
       // --- 都市と騎士(設計書 §9)---
       commodities: { cloth: 0, coin: 0, paper: 0 },
       improvements: { trade: 0, politics: 0, science: 0 },

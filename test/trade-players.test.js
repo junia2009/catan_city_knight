@@ -131,7 +131,7 @@ test('OFFER_TRADE → RESPOND_TRADE(拒否): 交換されず、同ターンの�
   assert.equal(s.awaiting, null);
   assert.equal(s.players[0].resources.wood, 2);
   assert.equal(s.players[1].resources.wheat, 1);
-  assert.ok(s.players[0].offerCooldownTurn > s.turn);
+  assert.ok(s.players[0].offerCooldown[1] > s.turn);
   assert.match(
     validateAction(s, {
       type: 'OFFER_TRADE', player: 0, partner: 1,
@@ -205,4 +205,70 @@ test('セルフプレイ(人間枠あり): 提案割り込みを挟んでも完�
     }
   }
   assert.ok(offers > 0, '6ゲームで人間への交易提案が一度も発生しなかった');
+});
+
+// --- オンライン対戦(人間が複数)での提案先の公平さ ---
+
+// 人間を複数にした状態を作る(オンライン対戦と同じ構成)
+function multiHuman(seed = 11, humanSeats = [0, 1]) {
+  const s = finishSetup(createGame({ seed, playerCount: 4, humanIndex: -1, mode: 'base' }));
+  for (const p of s.players) p.isCPU = !humanSeats.includes(p.id);
+  return s;
+}
+
+test('提案先: 人間が複数いるとき、席0にだけ偏らない', () => {
+  const targets = new Set();
+  // 手番を進めながら、CPU席2が誰に提案するかを集める
+  for (let turn = 1; turn <= 8; turn++) {
+    const s = multiHuman();
+    s.turn = turn;
+    s.currentPlayer = 2;
+    s.turnFlags = { rolled: true };
+    clearHands(s);
+    // CPU2 に余剰、両方の人間に不足資源を持たせる(どちらとも成立し得る状況)
+    s.players[2].resources.wood = 3;
+    const goal = nextGoal(s, 2);
+    const missing = Object.keys(goal.cost).find(
+      (r) => r !== 'wood' && (s.players[2].resources[r] ?? 0) < goal.cost[r],
+    );
+    if (!missing) continue;
+    s.players[0].resources[missing] = 1;
+    s.players[1].resources[missing] = 1;
+
+    const a = chooseAction(s, 2);
+    if (a?.type === 'OFFER_TRADE') targets.add(a.partner);
+  }
+  assert.ok(targets.size > 1, `提案先が偏っている(相手: ${[...targets].join(',')})`);
+});
+
+test('断られた待機は相手ごと: 席0に断られても席1には提案できる', () => {
+  let s = multiHuman();
+  s.turn = 3;
+  s.currentPlayer = 2;
+  s.turnFlags = { rolled: true };
+  clearHands(s);
+  s.players[2].resources.wood = 2;
+  s.players[0].resources.wheat = 1;
+  s.players[1].resources.wheat = 1;
+
+  // 席0が断る
+  s = dispatch(s, {
+    type: 'OFFER_TRADE', player: 2, partner: 0,
+    give: { wood: 1 }, receive: { wheat: 1 },
+  });
+  s = dispatch(s, { type: 'RESPOND_TRADE', player: 0, accept: false });
+  assert.ok(s.players[2].offerCooldown[0] > s.turn, '席0への待機が設定されていない');
+  assert.equal(s.players[2].offerCooldown[1] ?? 0, 0, '席1にも待機がかかっている');
+
+  // 次の手番なら席1へは提案できる(席0へはまだ不可)
+  s.turn += 1;
+  s.currentPlayer = 2;
+  s.turnFlags = { rolled: true };
+  assert.equal(
+    validateAction(s, {
+      type: 'OFFER_TRADE', player: 2, partner: 1,
+      give: { wood: 1 }, receive: { wheat: 1 },
+    }),
+    null,
+  );
 });
