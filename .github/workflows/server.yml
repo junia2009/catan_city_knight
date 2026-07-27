@@ -1,0 +1,51 @@
+name: Deploy game server (Cloudflare)
+
+# オンライン対戦サーバーを Cloudflare Workers へデプロイする。
+# ルールエンジン(src/)はサーバーも同じコードを取り込むため、
+# ルールを変更したときも再デプロイが必要 → paths に src/ を含めている。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - 'src/**'
+      - 'wrangler.toml'
+      - '.github/workflows/server.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 部屋のロジックを含む全テストを通してからデプロイする
+      - run: npm ci
+      - run: npm test
+
+      - name: Deploy to Cloudflare Workers
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: 接続先URLを表示
+        run: |
+          echo "### オンライン対戦サーバーをデプロイしました" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'この URL を `src/net/client.js` の `DEFAULT_SERVER` に設定してください:' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.deploy.outputs.deployment-url }}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
