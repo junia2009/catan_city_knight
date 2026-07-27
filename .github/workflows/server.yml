@@ -59,12 +59,43 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ steps.acct.outputs.id }}
 
-      - name: 接続先URLを表示
+      # 実際に動いているかを確認する(壊れたデプロイをここで止める)
+      - name: デプロイ後の疎通確認
+        env:
+          DEPLOYED: ${{ steps.deploy.outputs.deployment-url }}
         run: |
-          echo "### オンライン対戦サーバーをデプロイしました" >> $GITHUB_STEP_SUMMARY
-          echo '' >> $GITHUB_STEP_SUMMARY
-          echo 'この URL を `src/net/client.js` の `DEFAULT_SERVER` に設定してください:' >> $GITHUB_STEP_SUMMARY
-          echo '' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo '${{ steps.deploy.outputs.deployment-url }}' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          BASE="${DEPLOYED:-https://catan-web-server.uri-ryohei-0427.workers.dev}"
+          BASE="${BASE%/}"
+          echo "確認先: $BASE"
+
+          # 反映に数秒かかることがあるので待ちながら試す
+          OK=""
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 15 "$BASE/health" 2>/dev/null | grep -q '"ok":true'; then
+              OK=1; break
+            fi
+            echo "  応答待ち ($i/6)…"; sleep 5
+          done
+          if [ -z "$OK" ]; then
+            echo "::error::/health が応答しません($BASE)"
+            exit 1
+          fi
+          echo "✅ /health 応答あり"
+
+          # 部屋が作れるか(合言葉の発行 = Durable Object が動いている証拠)
+          CODE=$(curl -fsS --max-time 20 -X POST "$BASE/new" | sed -n 's/.*"code":"\([A-Z]*\)".*/\1/p')
+          if ! echo "$CODE" | grep -qE '^[A-Z]{4}$'; then
+            echo "::error::部屋を作成できませんでした(Durable Object の設定を確認してください)"
+            exit 1
+          fi
+          echo "✅ 部屋の作成に成功(合言葉: $CODE)"
+
+          {
+            echo "### ✅ オンライン対戦サーバー稼働中"
+            echo ''
+            echo "| 項目 | 結果 |"
+            echo "|---|---|"
+            echo "| 接続先 | \`$BASE\` |"
+            echo "| /health | 応答あり |"
+            echo "| 部屋の作成 | 成功(合言葉 \`$CODE\`) |"
+          } >> "$GITHUB_STEP_SUMMARY"
