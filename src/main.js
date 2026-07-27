@@ -141,6 +141,11 @@ function renderOnlinePanel() {
         <button data-act="net-join" ${online.busy ? 'disabled' : ''}>この部屋に入る</button>
       </div>
       ${err}
+      ${online.error ? `
+        <div class="net-note">サーバーの場所が違う場合はここで変更できます</div>
+        <div class="srow"><span>サーバー</span>
+          <input id="net-server" placeholder="https://....workers.dev" value="${serverBase()}"></div>
+        <div class="row end"><button data-act="net-server-save">接続先を保存</button></div>` : ''}
       <div class="row end"><button data-act="goto-title">← タイトル</button></div>`;
     restore();
     return;
@@ -1089,7 +1094,11 @@ document.addEventListener('click', (e) => {
         })
         .catch((e) => {
           online.busy = false;
-          online.error = `${e.message}(サーバー: ${serverBase()})`;
+          // fetch の失敗はブラウザ既定の英語メッセージなので言い換える
+          const why = /fetch|network|load failed/i.test(e.message)
+            ? 'サーバーに接続できませんでした'
+            : e.message;
+          online.error = `${why}(接続先: ${serverBase()})`;
           renderOnlinePanel();
         });
       return;
@@ -1105,6 +1114,22 @@ document.addEventListener('click', (e) => {
       }
       online.busy = false;
       startNet(code, name);
+      return;
+    }
+    case 'net-server-save': {
+      const url = document.getElementById('net-server')?.value.trim() ?? '';
+      if (url) localStorage.setItem('catan.server', url.replace(/\/$/, ''));
+      else localStorage.removeItem('catan.server');
+      // ?server= の一時指定より保存を優先させる(明示的な操作なので上書きしてよい)
+      const u = new URL(location.href);
+      if (u.searchParams.has('server')) {
+        u.searchParams.delete('server');
+        history.replaceState(null, '', u);
+      }
+      online.error = null;
+      ui.toast = `接続先を ${serverBase()} にしました`;
+      renderOnlinePanel();
+      refresh();
       return;
     }
     case 'net-mode': net?.setSettings({ mode: arg }); return;

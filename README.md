@@ -135,16 +135,28 @@ node scripts/dice-audit.mjs  # ダイス乱数の統計監査(χ²検定バッ�
 
 ### オンライン対戦サーバーのデプロイ
 
-静的サイトとは別に、一度だけ Cloudflare へ配置する(無料枠で動く):
+静的サイトとは別に、一度だけ Cloudflare へ配置する(無料枠で動く)。
+**GitHub Actions 経由なら、ブラウザだけで設定できる**(PCがなくても可):
+
+1. [Cloudflare ダッシュボード](https://dash.cloudflare.com/profile/api-tokens) で
+   API トークンを作る(テンプレート「**Edit Cloudflare Workers**」を使う)
+2. GitHub の `Settings → Secrets and variables → Actions` に登録する
+   - `CLOUDFLARE_API_TOKEN` … 1 で作ったトークン
+   - `CLOUDFLARE_ACCOUNT_ID` … Cloudflare のアカウントID
+3. `Actions → Deploy game server → Run workflow` を実行する
+
+以降は `server/` や `src/` を変更して `main` に push すると自動でデプロイされる
+(ルールエンジンはサーバーも同じコードを取り込むため、ルール変更時も再デプロイが要る)。
+
+手元にPCがある場合は以下でもよい:
 
 ```sh
-npx wrangler login       # 初回のみ。ブラウザで Cloudflare アカウントを認証
-npm run deploy:server    # → https://catan-web-server.<アカウント名>.workers.dev
+npx wrangler login       # ブラウザで Cloudflare アカウントを認証
+npm run deploy:server
 ```
 
-デプロイ後に出た URL を `src/net/client.js` の `DEFAULT_SERVER` に書いて push する。
-ルールエンジンを変更したときは、サーバーも同じコードを取り込んでいるため
-`npm run deploy:server` をやり直す。
+デプロイ後に出た URL を `src/net/client.js` の `DEFAULT_SERVER` に設定する。
+アプリの「🌐 オンライン対戦」画面でも、接続に失敗したときに接続先を変更・保存できる。
 
 ## プロジェクト構成
 
