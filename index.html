@@ -462,6 +462,14 @@
   button.big { font-size: 17px; padding: 15px 52px; border-radius: 12px; }
   #load-note { min-height: 18px; margin-top: 14px; font-size: 12px; color: var(--dim); }
   #load-note.pulse { animation: notePulse 1.2s ease-in-out infinite; }
+  #build-tag {
+    margin-top: 10px; font-size: 10.5px; letter-spacing: 0.4px;
+    color: rgba(160, 185, 210, 0.45);
+  }
+  #build-tag.update {
+    color: var(--accent2); font-size: 12.5px; cursor: pointer;
+    padding: 6px 12px; border: 1px solid rgba(242,176,61,0.5); border-radius: 999px;
+  }
   @keyframes notePulse { 50% { opacity: 0.45; } }
 
   .select-panel {
@@ -700,6 +708,9 @@
       <button class="big" data-act="goto-rules">📖 あそびかた</button>
       <button data-act="bgm-toggle">🔊 BGM オン</button>
       <div id="load-note"></div>
+      <!-- 版の表示。デプロイ時に BUILD_ID がコミットの短縮SHAへ置換される。
+           「手元の端末が最新版か」を目視で確認できるようにするため。 -->
+      <div id="build-tag">ver. BUILD_ID</div>
     </div>
   </div>
   <div id="screen-select" class="screen">
