@@ -64,9 +64,19 @@ jobs:
         env:
           DEPLOYED: ${{ steps.deploy.outputs.deployment-url }}
         run: |
-          BASE="${DEPLOYED:-https://catan-web-server.uri-ryohei-0427.workers.dev}"
+          BASE="${DEPLOYED:-https://catan-web-server.uriboo-dev.workers.dev}"
           BASE="${BASE%/}"
           echo "確認先: $BASE"
+
+          # アプリが見に行く先(DEFAULT_SERVER)と実際のデプロイ先の食い違いを検出する。
+          # ここがズレるとサーバーは正常でもブラウザから接続できない。
+          CLIENT_URL=$(sed -n "s/^const DEFAULT_SERVER = '\([^']*\)'.*/\1/p" src/net/client.js)
+          echo "アプリの接続先: $CLIENT_URL"
+          if [ "${CLIENT_URL%/}" != "$BASE" ]; then
+            echo "::error::src/net/client.js の DEFAULT_SERVER($CLIENT_URL)が実際のデプロイ先($BASE)と違います。ブラウザから接続できません"
+            exit 1
+          fi
+          echo "✅ アプリの接続先とデプロイ先が一致"
 
           # 反映に数秒かかることがあるので待ちながら試す
           OK=""
