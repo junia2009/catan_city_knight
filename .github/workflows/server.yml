@@ -90,6 +90,25 @@ jobs:
           fi
           echo "✅ 部屋の作成に成功(合言葉: $CODE)"
 
+          # ブラウザと同じ条件(Origin 付き)で CORS ヘッダが返るか
+          # ここが欠けると、サーバーが生きていてもブラウザからは接続できない
+          ORIGIN="https://junia2009.github.io"
+          ACAO=$(curl -fsS --max-time 20 -X POST -H "Origin: $ORIGIN" -D - -o /dev/null "$BASE/new" \
+                 | tr -d '\r' | sed -n 's/^[Aa]ccess-[Cc]ontrol-[Aa]llow-[Oo]rigin: *//p')
+          echo "Origin: $ORIGIN → Access-Control-Allow-Origin: ${ACAO:-(なし)}"
+          if [ "$ACAO" != "$ORIGIN" ] && [ "$ACAO" != "*" ]; then
+            echo "::error::CORS ヘッダが正しくありません。ブラウザから接続できません"
+            exit 1
+          fi
+          echo "✅ CORS OK"
+
+          # WebSocket のエンドポイントが生きているか(Upgrade なしなら 426 を返す設計)
+          WS_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE/room?code=$CODE")
+          echo "GET /room(Upgrade なし)→ HTTP $WS_CODE"
+          if [ "$WS_CODE" != "426" ]; then
+            echo "::warning::/room の応答が想定(426)と異なります: $WS_CODE"
+          fi
+
           {
             echo "### ✅ オンライン対戦サーバー稼働中"
             echo ''
