@@ -33,12 +33,31 @@ jobs:
       - run: npm ci
       - run: npm test
 
+      # アカウントIDは貼り間違い(空白混入・ゾーンIDと取り違え)が起きやすいので、
+      # 形を検査して、怪しければ空にしてトークンからの自動判定に任せる。
+      - name: アカウントIDを検査
+        id: acct
+        env:
+          RAW: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          ID="$(printf '%s' "$RAW" | tr -d '[:space:]')"
+          if [ -z "$ID" ]; then
+            echo "アカウントID未設定 → トークンから自動判定します"
+            echo "id=" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$ID" | grep -qE '^[0-9a-f]{32}$'; then
+            echo "アカウントIDの形式は正しいです(32桁の16進数)"
+            echo "id=$ID" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::CLOUDFLARE_ACCOUNT_ID の形式が不正です(長さ ${#ID} 文字)。32桁の 0-9a-f である必要があります。今回は自動判定に切り替えます"
+            echo "id=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy to Cloudflare Workers
         id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ steps.acct.outputs.id }}
 
       - name: 接続先URLを表示
         run: |
