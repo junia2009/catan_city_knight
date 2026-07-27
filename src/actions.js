@@ -679,8 +679,9 @@ function applyAction(state, action) {
       if (action.accept) {
         applyPlayerTrade(state, from, pid, give, receive);
       } else {
-        // 断られた提案者はしばらく同じ相手に持ちかけない
-        state.players[from].offerCooldownTurn = state.turn + 4;
+        // 断られた提案者はしばらく「この相手には」持ちかけない(他の人へは提案できる)
+        const offerer = state.players[from];
+        offerer.offerCooldown = { ...(offerer.offerCooldown ?? {}), [pid]: state.turn + 4 };
         addLog(state, `🚫 ${p.name}は${state.players[from].name}の提案を断りました`);
       }
       break;

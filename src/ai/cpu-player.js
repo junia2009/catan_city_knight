@@ -203,8 +203,16 @@ function tryTradeWithPlayers(state, pid, goal) {
     (r) => p.resources[r] - (goal.cost[r] ?? 0) >= 2 && !missing[r],
   );
   // CPU同士は即時成立、人間には提案(応答待ち割り込み)を送る
-  const others = [...state.players].filter((o) => o.id !== pid);
-  others.sort((a, b) => Number(b.isCPU) - Number(a.isCPU)); // まずCPUと当たる
+  const rest = state.players.filter((o) => o.id !== pid);
+  const cpus = rest.filter((o) => o.isCPU); // まずCPUと当たる(即時成立で手番が滞らない)
+  const humans = rest.filter((o) => !o.isCPU);
+  // 人間が複数いるとき、席順のままだと常に若い席にだけ提案が行ってしまう。
+  // 手番と提案者で回転させて、決定的なまま提案先が一巡するようにする。
+  if (humans.length > 1) {
+    const k = (state.turn + pid) % humans.length;
+    humans.push(...humans.splice(0, k));
+  }
+  const others = [...cpus, ...humans];
   for (const want of missingRes) {
     for (const give of surpluses) {
       for (const other of others) {
@@ -217,7 +225,7 @@ function tryTradeWithPlayers(state, pid, goal) {
           };
           if (valid(state, action)) return action;
         } else {
-          if ((p.offerCooldownTurn ?? 0) > state.turn) continue; // 直近で断られた
+          if ((p.offerCooldown?.[other.id] ?? 0) > state.turn) continue; // この相手に直近で断られた
           const action = {
             type: 'OFFER_TRADE', player: pid, partner: other.id,
             give: { [give]: 1 }, receive: { [want]: 1 },
