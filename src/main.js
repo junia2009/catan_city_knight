@@ -16,12 +16,16 @@ import { LAYOUT } from './rules/board.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
 import { drawBoard } from './render/board-render.js';
-import { renderHUD, RES_ICON, COM_ICON } from './render/hud-render.js';
+import { renderHUD, RES_ICON, COM_ICON, setHumanSeat } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
 import { Bgm } from './audio/bgm.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
+import {
+  NetClient, createRoom, clientId, savedName, saveName, serverBase,
+} from './net/client.js';
 
-const HUMAN = 0;
+// 自分の席番号。ローカル戦は常に 0、オンライン対戦ではサーバーが割り当てた席になる。
+let HUMAN = 0;
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const board3dWrap = document.getElementById('board3d');
@@ -34,11 +38,36 @@ let viewMode = '3d'; // '2d' | '3d'
 let renderer3d = null;
 let renderer3dFailed = false;
 
+// 自分の席が変わったら描画側にも伝える(オンラインで席が 0 以外になる)
+function setSeat(seat) {
+  HUMAN = seat;
+  setHumanSeat(seat);
+}
+
 // 設定(⚙️シートから編集。新しいゲーム開始時に反映)
 const settings = { view: '3d', mode: 'cak', cpuCount: 3, seed: '', difficulty: 'normal', bgm: true };
 
-// 画面フロー: title(タイトル) → select(ルール選択) → game(ゲーム)
+// 画面フロー: title(タイトル) → select(ルール選択) / online(合言葉・ロビー) → game(ゲーム)
 let screen = 'title';
+
+// オンライン対戦の状態(null ならローカル戦)
+let net = null;
+const online = {
+  code: null,
+  lobby: null, // サーバーから届く席・ホスト・設定
+  status: 'idle', // 'connecting' | 'online' | 'reconnecting' | 'closed'
+  error: null,
+  busy: false,
+};
+
+function isOnline() {
+  return net != null;
+}
+
+// 自分がこの部屋のホストか
+function isHost() {
+  return online.lobby?.host === clientId();
+}
 
 function setScreen(s) {
   screen = s;
@@ -64,6 +93,183 @@ function renderSelectPanel() {
       <button data-act="goto-title">← タイトル</button>
       <button class="primary" data-act="start-game">ゲーム開始</button>
     </div>`;
+}
+
+// ---- オンライン対戦の画面 ----
+
+const PLAYER_COLORS_CSS = ['#e04848', '#3d7dd8', '#f0973c', '#9d5fd8'];
+const STATUS_JP = {
+  idle: '未接続',
+  connecting: '接続中…',
+  online: '接続済み',
+  reconnecting: '再接続中…',
+  closed: '切断されました',
+};
+
+function renderOnlinePanel() {
+  const panel = document.getElementById('online-panel');
+  if (!panel || screen !== 'online') return;
+  const err = online.error ? `<div class="net-err">⚠️ ${online.error}</div>` : '';
+  // 再描画で入力中の文字が消えないように退避する
+  const typed = {
+    name: document.getElementById('net-name')?.value,
+    code: document.getElementById('net-code')?.value,
+    focus: document.activeElement?.id,
+  };
+  const restore = () => {
+    const n = document.getElementById('net-name');
+    const c = document.getElementById('net-code');
+    if (n && typed.name != null) n.value = typed.name;
+    if (c && typed.code != null) c.value = typed.code;
+    if (typed.focus) document.getElementById(typed.focus)?.focus();
+  };
+
+  // まだ部屋に入っていない: 作る/合言葉で入る
+  if (!online.lobby) {
+    panel.innerHTML = `
+      <h3>🌐 オンライン対戦</h3>
+      <div class="net-note">同じ合言葉を共有した友達と、最大4人で対戦できます。<br>
+        空いた席はCPUが埋めます。</div>
+      <div class="srow"><span>名前</span>
+        <input id="net-name" maxlength="12" placeholder="あなたの名前" value="${savedName()}"></div>
+      <div class="row end">
+        <button class="primary" data-act="net-create" ${online.busy ? 'disabled' : ''}>部屋を作る</button>
+      </div>
+      <div class="srow"><span>合言葉</span>
+        <input id="net-code" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"></div>
+      <div class="row end">
+        <button data-act="net-join" ${online.busy ? 'disabled' : ''}>この部屋に入る</button>
+      </div>
+      ${err}
+      <div class="row end"><button data-act="goto-title">← タイトル</button></div>`;
+    restore();
+    return;
+  }
+
+  // ロビー: 参加者を待ってホストが開始する
+  const lb = online.lobby;
+  const seg = (act, options, current, disabled) =>
+    `<div class="seg">${options
+      .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}" ${disabled ? 'disabled' : ''}>${label}</button>`)
+      .join('')}</div>`;
+  const seats = lb.seats.map((s) => {
+    if (!s.occupied) {
+      return `<div class="seat-row empty"><span>席${s.seat + 1}</span>
+        <span class="tag">${lb.settings.cpuFill ? 'CPUが入ります' : '空席'}</span></div>`;
+    }
+    const isMe = s.seat === net?.seat;
+    return `<div class="seat-row" style="--pc:${PLAYER_COLORS_CSS[s.seat]}">
+      <span>${s.name}${isMe ? '(あなた)' : ''}</span>
+      ${lb.hostSeat === s.seat ? '<span class="tag host">ホスト</span>' : ''}
+      ${s.online ? '' : '<span class="tag off">切断中</span>'}
+    </div>`;
+  }).join('');
+
+  const host = isHost();
+  panel.innerHTML = `
+    <h3>🌐 待機中</h3>
+    <div class="code-box">
+      <div class="code">${lb.code}</div>
+      <small>この合言葉を友達に伝えてください</small>
+    </div>
+    <div class="seat-list">${seats}</div>
+    <div class="srow"><span>ルール</span>${seg('net-mode', [['cak', '都市と騎士'], ['base', '基本'], ['dragon', '🐉ドラゴン']], lb.settings.mode, !host)}</div>
+    <div class="srow"><span>空席</span>${seg('net-fill', [['on', 'CPUで埋める'], ['off', '人だけ']], lb.settings.cpuFill ? 'on' : 'off', !host)}</div>
+    ${lb.settings.cpuFill ? `<div class="srow"><span>強さ</span>${seg('net-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], lb.settings.difficulty, !host)}</div>` : ''}
+    <div class="net-status ${online.status}"><span class="dot"></span>${STATUS_JP[online.status] ?? ''}</div>
+    ${err}
+    <div class="net-note">${host ? '全員そろったら開始してください' : 'ホストが開始するのを待っています…'}</div>
+    <div class="row end">
+      <button data-act="net-leave">← 退出</button>
+      ${host ? '<button class="primary" data-act="net-start">対戦開始</button>' : ''}
+    </div>`;
+}
+
+function updateNetBadge() {
+  const el = document.getElementById('netbadge');
+  if (!el) return;
+  el.className = isOnline() ? `show ${online.status}` : '';
+  if (isOnline()) {
+    const who = state?.players?.[HUMAN]?.name ?? '';
+    el.querySelector('.txt').textContent =
+      `${online.code} · ${who} · ${STATUS_JP[online.status] ?? ''}`;
+  }
+}
+
+// サーバーからの状態を反映する。ローカル戦と違い dispatch は一切しない。
+function onNetState(msg) {
+  const prev = state;
+  setSeat(msg.seat);
+  const first = !state;
+  state = msg.state;
+  if (!ui || first) ui = freshUi();
+  if (screen !== 'game') {
+    setScreen('game');
+    if (viewMode === '3d' && !renderer3d) ensureRenderer3d().then(() => refresh());
+  }
+  // 演出はローカル戦と同じフックを、サーバーが適用したアクションから再生する
+  const act = msg.action;
+  if (act && prev) {
+    if (act.type === 'ROLL_DICE') {
+      showGainFx(prev.players.map((p) => ({ ...p.resources })));
+      rollFx();
+    }
+    maybeTradeFx(act, prev.awaiting);
+  }
+  syncUi();
+  refresh();
+  updateNetBadge();
+}
+
+function onNetLobby(msg) {
+  online.lobby = msg;
+  online.code = msg.code;
+  if (msg.phase === 'lobby' && screen === 'game') setScreen('online');
+  renderOnlinePanel();
+  updateNetBadge();
+}
+
+function startNet(code, name) {
+  saveName(name);
+  online.code = code;
+  online.error = null;
+  net = new NetClient({
+    onStatus: (s) => {
+      online.status = s;
+      renderOnlinePanel();
+      updateNetBadge();
+    },
+    onLobby: onNetLobby,
+    onState: onNetState,
+    onError: (msg, fatal) => {
+      online.error = msg;
+      if (fatal) leaveNet(false);
+      else if (screen === 'game') {
+        ui.toast = msg;
+        refresh();
+      }
+      renderOnlinePanel();
+    },
+  });
+  net.connect(code, name);
+  setScreen('online');
+  renderOnlinePanel();
+}
+
+function leaveNet(toTitle = true) {
+  net?.close();
+  net = null;
+  online.lobby = null;
+  online.code = null;
+  online.status = 'idle';
+  setSeat(0);
+  updateNetBadge();
+  if (toTitle) {
+    online.error = null;
+    state = null;
+    setScreen('title');
+  }
+  renderOnlinePanel();
 }
 
 // BGM(Web Audio 生成)。iOSの自動再生制限のため初回タップで開始する
@@ -370,6 +576,7 @@ function refresh() {
   }
   renderSelectPanel();
   renderRulesPanel();
+  renderOnlinePanel();
   // タイトル画面の読み込み状態表示
   const note = document.getElementById('load-note');
   if (note) {
@@ -562,6 +769,26 @@ function startProgressPlay(index) {
 
 function doAction(action) {
   ui.toast = null;
+
+  // オンライン対戦ではサーバーが権威。手を送り、返ってきた状態で描画する。
+  if (isOnline()) {
+    const err = validateAction(state, action); // 手元でも弾いて無駄な往復を減らす
+    if (err) {
+      ui.toast = err;
+      refresh();
+      return false;
+    }
+    if (!net.action(action)) {
+      ui.toast = '接続が切れています。再接続を待っています…';
+      refresh();
+      return false;
+    }
+    // 入力状態だけ畳んで、盤面の更新はサーバーからの state を待つ
+    resetInputState();
+    refresh();
+    return true;
+  }
+
   const before =
     action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
   const prevAwaiting = state.awaiting;
@@ -577,6 +804,14 @@ function doAction(action) {
     showGainFx(before);
     rollFx();
   }
+  resetInputState();
+  refresh();
+  scheduleCpu();
+  return true;
+}
+
+// 手を出した後に入力途中の状態を畳む
+function resetInputState() {
   ui.mode = 'idle';
   ui.pending = null;
   ui.pendingVertex = null;
@@ -585,9 +820,6 @@ function doAction(action) {
   ui.knightFrom = null;
   ui.progIndex = null;
   ui.dialog = null;
-  refresh();
-  scheduleCpu();
-  return true;
 }
 
 // ---- CPU 駆動(設計書 §7.5) ----
@@ -603,6 +835,7 @@ function actingCpu() {
 
 function scheduleCpu() {
   clearTimeout(cpuTimer);
+  if (isOnline()) return; // オンラインでは CPU もサーバーが動かす
   if (screen !== 'game') return; // タイトル背景の盤面ではCPUを動かさない
   const pid = actingCpu();
   if (pid == null) return;
@@ -824,12 +1057,61 @@ document.addEventListener('click', (e) => {
   ui.toast = null;
 
   switch (act) {
-    case 'new-game': newGame(); return;
+    case 'new-game':
+      // オンラインでは勝手に盤面を作り直せない(サーバーが権威)
+      if (isOnline()) leaveNet(true);
+      else newGame();
+      return;
 
     // ---- 画面フロー ----
     case 'goto-select': setScreen('select'); return;
-    case 'goto-title': setScreen('title'); return;
+    case 'goto-title':
+      if (isOnline()) leaveNet(true);
+      else setScreen('title');
+      return;
     case 'goto-rules': setScreen('rules'); return;
+
+    // ---- オンライン対戦 ----
+    case 'goto-online':
+      online.error = null;
+      setScreen('online');
+      renderOnlinePanel();
+      return;
+    case 'net-create': {
+      const name = document.getElementById('net-name')?.value.trim() || 'プレイヤー';
+      online.busy = true;
+      online.error = null;
+      renderOnlinePanel();
+      createRoom()
+        .then((code) => {
+          online.busy = false;
+          startNet(code, name);
+        })
+        .catch((e) => {
+          online.busy = false;
+          online.error = `${e.message}(サーバー: ${serverBase()})`;
+          renderOnlinePanel();
+        });
+      return;
+    }
+    case 'net-join': {
+      const name = document.getElementById('net-name')?.value.trim() || 'プレイヤー';
+      const code = (document.getElementById('net-code')?.value ?? '')
+        .toUpperCase().replace(/[^A-Z]/g, '');
+      if (code.length !== 4) {
+        online.error = '合言葉は英字4文字です';
+        renderOnlinePanel();
+        return;
+      }
+      online.busy = false;
+      startNet(code, name);
+      return;
+    }
+    case 'net-mode': net?.setSettings({ mode: arg }); return;
+    case 'net-diff': net?.setSettings({ difficulty: arg }); return;
+    case 'net-fill': net?.setSettings({ cpuFill: arg === 'on' }); return;
+    case 'net-start': net?.start(); return;
+    case 'net-leave': leaveNet(true); return;
     case 'bgm-toggle':
       bgm.setEnabled(!bgm.enabled);
       settings.bgm = bgm.enabled;
@@ -1117,6 +1399,18 @@ window.catanDebug = {
   getRenderer: () => renderer3d,
   getBgm: () => bgm,
   getViewState: () => ({ viewMode, has3d: !!renderer3d, failed: renderer3dFailed, screen }),
+  // オンライン対戦(E2E用)
+  getNet: () => ({
+    connected: isOnline(),
+    seat: net?.seat ?? null,
+    status: online.status,
+    code: online.code,
+    lobby: online.lobby,
+    isHost: isHost(),
+  }),
+  netJoin: (code, name) => startNet(code, name),
+  netStart: () => net?.start(),
+  netLeave: () => leaveNet(true),
 };
 
 // PWA: Service Worker 登録。

@@ -18,7 +18,12 @@ import { rulesHtml } from './rules-content.js';
 import { PLAYER_COLORS } from './board-render.js';
 import { avatarSvg } from './avatars.js';
 
-const HUMAN = 0;
+// 自分の席番号。ローカル戦は常に 0、オンライン対戦ではサーバーが割り当てた席になる。
+let HUMAN = 0;
+
+export function setHumanSeat(seat) {
+  HUMAN = seat;
+}
 
 export const RES_ICON = { wood: '🪵', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '🪨' };
 export const COM_ICON = { cloth: '🧵', coin: '🪙', paper: '📜' };

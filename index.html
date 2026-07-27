@@ -401,6 +401,7 @@
   body[data-screen="title"] #screen-title { display: flex; }
   body[data-screen="select"] #screen-select { display: flex; }
   body[data-screen="rules"] #screen-rules { display: flex; }
+  body[data-screen="online"] #screen-online { display: flex; }
 
   /* ---------- 説明書 ---------- */
   .rules-panel {
@@ -487,6 +488,54 @@
     flex: 1; background: rgba(0,0,0,0.3); color: var(--text);
     border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font-size: 14px;
   }
+  /* ---------- オンライン対戦 ---------- */
+  .code-box {
+    text-align: center; background: rgba(0,0,0,0.32);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px 10px;
+  }
+  .code-box .code {
+    font-size: 34px; font-weight: 800; letter-spacing: 9px; color: var(--accent2);
+    text-shadow: 0 2px 8px rgba(0,0,0,0.6); padding-left: 9px;
+  }
+  .code-box small { display: block; color: var(--dim); font-size: 11.5px; margin-top: 2px; }
+  .seat-list { display: flex; flex-direction: column; gap: 6px; }
+  .seat-row {
+    display: flex; align-items: center; gap: 9px;
+    background: rgba(0,0,0,0.22); border: 1px solid var(--line);
+    border-left: 4px solid var(--pc, var(--line));
+    border-radius: 9px; padding: 8px 10px; font-size: 13.5px;
+  }
+  .seat-row.empty { color: var(--dim); font-style: italic; }
+  .seat-row .tag {
+    margin-left: auto; font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+    background: rgba(255,255,255,0.09); color: var(--dim); font-style: normal;
+  }
+  .seat-row .tag.host { background: linear-gradient(180deg, var(--accent2), var(--accent)); color: #4a2f00; }
+  .seat-row .tag.off { background: rgba(224,72,72,0.28); color: #ffc9c9; }
+  .net-status {
+    text-align: center; font-size: 12px; color: var(--dim);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .net-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #6d7f92; }
+  .net-status.online .dot { background: #46c46a; box-shadow: 0 0 7px #46c46a; }
+  .net-status.connecting .dot, .net-status.reconnecting .dot { background: var(--accent2); }
+  .net-note { font-size: 12px; color: var(--dim); text-align: center; line-height: 1.6; }
+  .net-err { font-size: 12.5px; color: #ffb4b4; text-align: center; }
+  /* 対戦中の接続バッジ(盤面の上) */
+  #netbadge {
+    position: fixed; top: env(safe-area-inset-top, 0px); left: 50%;
+    transform: translateX(-50%); z-index: 60;
+    background: rgba(11,26,43,0.92); border: 1px solid var(--line);
+    border-top: none; border-radius: 0 0 10px 10px;
+    padding: 4px 12px; font-size: 11.5px; color: var(--dim);
+    display: none; align-items: center; gap: 6px; pointer-events: none;
+  }
+  body[data-screen="game"] #netbadge.show { display: flex; }
+  #netbadge .dot { width: 7px; height: 7px; border-radius: 50%; background: #6d7f92; }
+  #netbadge.online .dot { background: #46c46a; box-shadow: 0 0 6px #46c46a; }
+  #netbadge.reconnecting .dot, #netbadge.connecting .dot { background: var(--accent2); }
+  #netbadge.closed .dot { background: #e04848; }
+
   .logsheet {
     max-height: 55dvh; overflow-y: auto; font-size: 12.5px; color: var(--dim);
     line-height: 1.8; padding-right: 4px;
@@ -647,6 +696,7 @@
       <h2 class="title-logo">カタン</h2>
       <div class="title-sub">CITIES & KNIGHTS</div>
       <button class="primary big" data-act="goto-select">はじめる</button>
+      <button class="big" data-act="goto-online">🌐 オンライン対戦</button>
       <button class="big" data-act="goto-rules">📖 あそびかた</button>
       <button data-act="bgm-toggle">🔊 BGM オン</button>
       <div id="load-note"></div>
@@ -658,7 +708,11 @@
   <div id="screen-rules" class="screen">
     <div class="select-panel rules-panel" id="rules-panel"></div>
   </div>
+  <div id="screen-online" class="screen">
+    <div class="select-panel" id="online-panel"></div>
+  </div>
 
+  <div id="netbadge"><span class="dot"></span><span class="txt"></span></div>
   <div id="dialog-root"></div>
   <script type="importmap">
   {

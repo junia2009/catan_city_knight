@@ -6,14 +6,17 @@
 ## コマンド
 
 ```sh
-npm run serve                 # ローカルサーバー(http://localhost:8000)
+npm run serve                 # 静的サーバー(http://localhost:8000)
 npm test                      # node --test test/(単体+セルフプレイ。ブラウザ不要)
 npm run selfplay              # セルフプレイゲート(scripts/selfplay.js 100)
 node scripts/selfplay.js 1000 # ゲーム数を指定して回す(モード引数も可)
 node scripts/dice-audit.mjs   # 乱数の統計監査(χ²バッテリー)
+npm run server                # オンライン対戦サーバー(wrangler dev, :8787)
+npm run deploy:server         # Cloudflare へデプロイ(要ログイン)
 ```
 
 ビルド工程はない。ES Modules を直接ブラウザが読む(Three.js は `vendor/` + importmap)。
+サーバーだけは wrangler が esbuild でバンドルする(`src/` のルールエンジンをそのまま取り込む)。
 
 ## 変更時の検証フロー
 
@@ -61,10 +64,38 @@ await page.waitForFunction(() => window.catanDebug, null, { timeout: 20000 });
 
 E2E スクリプトはリポジトリに入れず、セッションのスクラッチパッドに `check-*.mjs` として置く。
 
+## オンライン対戦の開発
+
+サーバーの設計は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#オンライン対戦-server) を参照。
+
+```sh
+npm run server        # 別ターミナルで wrangler dev(:8787)
+npm run serve         # 静的サイト(:8000)
+# ブラウザで http://localhost:8000/?server=http://127.0.0.1:8787
+```
+
+`localhost` では `?server=` なしでも自動でローカルサーバーを見る。
+本番の接続先は `src/net/client.js` の `DEFAULT_SERVER`。
+
+- **部屋のロジックは `server/room-core.js` に閉じる**。WebSocket に触るコードを
+  混ぜないこと(`node --test test/room.test.js` で直接検証できる価値を失う)。
+- **隠し情報を増やしたら `viewFor()` の伏せ処理も更新する**。
+  相手の手札を「枚数以外」で描画に使い始めると伏せ処理が破綻するので、
+  `render/` 側で `players[other].devCards[i].type` のような読み方をしない。
+- ブラウザ2つの E2E は `browser.newContext()` を2つ作り、
+  `addInitScript` で `localStorage['catan.clientId']` を固定すると再接続を再現できる。
+  SwiftShader で WebGL を2つ動かすと重いので、待ち時間は長めに取る。
+- `window.catanDebug.getNet() / netJoin() / netStart() / netLeave()` が E2E 用のフック。
+
 ## デプロイ
+
+静的サイト(GitHub Pages)とサーバー(Cloudflare)は**別々にデプロイする**。
 
 - 開発ブランチで作業し、動作確認後に `main` へマージして push
   (`main` push で `.github/workflows/pages.yml` が test → GitHub Pages deploy)。
+- サーバーを変更したら `npm run deploy:server`(GitHub Actions では動かない)。
+  ルールエンジン(`src/rules/`, `src/actions.js`)を変更した場合も、
+  サーバーが同じコードを取り込んでいるので**再デプロイが必要**。
 - デプロイ確認: GitHub MCP の `actions_list` でワークフロー実行を取得し、
   push した SHA の `"head_sha"` を持つ run の `conclusion` が `success` になるまで確認する
   (完了まで 60〜90 秒程度)。
