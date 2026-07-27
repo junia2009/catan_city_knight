@@ -1,9 +1,9 @@
 # catan-web — 3Dで遊ぶカタン(都市と騎士 + オリジナル拡張)
 
 Vanilla JavaScript + Three.js で 1 から作った、ブラウザで動くカタン。
-プレイヤー 1 人 vs CPU 2〜3 体で、基本カタンから拡張「都市と騎士」、
-さらにオリジナルルール「ドラゴンの島」まで遊べる。
-ビルド工程なし・外部サービスなし・依存はベンダリング済みの Three.js のみ。
+CPU 相手の 1 人プレイでも、合言葉を共有した友達との**オンライン対戦**でも遊べる。
+ルールは基本カタン・拡張「都市と騎士」・オリジナルの「ドラゴンの島」の3種類。
+ビルド工程なし・依存はベンダリング済みの Three.js のみ。
 
 **▶ 今すぐ遊ぶ:** https://junia2009.github.io/catan_city_knight/
 (スマホ推奨。PWA なのでホーム画面に追加すればアプリのように起動できる)
@@ -69,6 +69,17 @@ Vanilla JavaScript + Three.js で 1 から作った、ブラウザで動くカ�
   「候補をタップ → 確定」の2段階タップで誤操作を防ぐ
 - PWA 対応(Service Worker はネットワーク優先なので常に最新版で起動する)
 
+### オンライン対戦(合言葉で友達と)
+
+- タイトルの「🌐 オンライン対戦」から部屋を作ると **英字4文字の合言葉**が出る。
+  それを共有した友達が同じ部屋に入り、最大4人で対戦できる。空いた席は CPU が埋める
+- **サーバー権威型**: ルール判定も乱数もサーバー側で行うため、
+  クライアントを改造しても不正な手は通らない。相手の手札の中身も配信されない
+- 通信が切れても席は残り、**同じ端末で戻れば元の席に復帰**する。
+  切断中はサーバーがその席を肩代わりして進めるので、誰かが落ちてもゲームは止まらない
+- サーバーは Cloudflare Workers + Durable Objects(合言葉ごとに1部屋)。
+  ルールエンジンをそのまま `import` しているので、**ルール実装はクライアントと共通の1つだけ**
+
 ### 対戦相手として成立する CPU
 
 - 貪欲法 + 盤面評価で、建設・騎士運用・都市改良・進歩カード54枚の使いどころまで判断する
@@ -95,6 +106,15 @@ npm run serve   # または python3 -m http.server 8000
 
 インストールもビルドも不要(`npm install` すら要らない)。
 
+オンライン対戦も試す場合は、別ターミナルでサーバーを立てる:
+
+```sh
+npm install          # wrangler(開発用)を入れる
+npm run server       # http://127.0.0.1:8787
+```
+
+`localhost` で開いたページは自動でこのローカルサーバーを見る。
+
 ## 開発
 
 ```sh
@@ -107,11 +127,24 @@ node scripts/dice-audit.mjs  # ダイス乱数の統計監査(χ²検定バッ�
 最重要の不変条件は**保存則**(銀行+全手札 = 資源19×5・商品12×3)と、
 セルフプレイ数百ゲームの完走。
 
-- 設計の全体像・状態機械・AI・レンダラー構成は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- 設計の全体像・状態機械・AI・レンダラー・サーバー構成は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 実装ルールの正確な仕様は [docs/RULES.md](docs/RULES.md)
 - 作業手順・E2E レシピ・デバッグフックは [CLAUDE.md](CLAUDE.md)
 - `main` に push すると GitHub Actions がテストを通してから GitHub Pages にデプロイする
   (`.github/workflows/pages.yml`)
+
+### オンライン対戦サーバーのデプロイ
+
+静的サイトとは別に、一度だけ Cloudflare へ配置する(無料枠で動く):
+
+```sh
+npx wrangler login       # 初回のみ。ブラウザで Cloudflare アカウントを認証
+npm run deploy:server    # → https://catan-web-server.<アカウント名>.workers.dev
+```
+
+デプロイ後に出た URL を `src/net/client.js` の `DEFAULT_SERVER` に書いて push する。
+ルールエンジンを変更したときは、サーバーも同じコードを取り込んでいるため
+`npm run deploy:server` をやり直す。
 
 ## プロジェクト構成
 
@@ -130,8 +163,13 @@ src/
 ├── ai/                 # CPU(合法手列挙・評価関数・思考・カード別プラグイン)
 ├── render/             # 2D Canvas 描画 + DOM HUD + あそびかた
 ├── render3d/board3d.js # Three.js レンダラー(海・空・地形・コマ・演出)
+├── net/client.js       # オンライン対戦(WebSocket・再接続)
 └── audio/bgm.js        # ジェネレーティブBGM(Web Audio)
-test/                   # node --test(85テスト: ルール・統計・セルフプレイ)
+server/                 # オンライン対戦サーバー(Cloudflare Workers)
+├── room-core.js        # 部屋のロジック(席・伏せ処理・肩代わり。テスト可能)
+├── room-do.js          # Durable Object(合言葉ごとに1部屋)
+└── index.js            # Worker(合言葉の発行と振り分け)
+test/                   # node --test(99テスト: ルール・統計・セルフプレイ・部屋)
 scripts/                # セルフプレイゲート・乱数監査
 vendor/                 # Three.js(MIT)
 ```
@@ -144,7 +182,8 @@ vendor/                 # Three.js(MIT)
 | Phase 2 | 都市と騎士の盤面要素(商品・騎士・蛮族・都市改良) | セルフプレイ300ゲーム |
 | Phase 3 | 進歩カード全54枚 + カード別CPU判断 + 難易度 | セルフプレイ300ゲーム |
 | 独自拡張 | 🐉 ドラゴンの島 / プレイヤー間交易 / BGM / 海・空・島の描画強化 | 各機能ごとにE2E+セルフプレイ |
+| オンライン | 合言葉で最大4人の対戦(サーバー権威型・切断復帰) | 部屋ロジックの単体テスト+ブラウザ2つのE2E |
 
 ## スコープ外
 
-オンライン対戦 / 「航海者」等の他公式拡張 / クラウド同期
+公開マッチメイキング・ランキング / 「航海者」等の他公式拡張 / アカウント登録

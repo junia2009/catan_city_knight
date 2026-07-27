@@ -110,7 +110,13 @@ src/
 │   ├── hud-render.js    # DOM HUD・全ダイアログ・ステータス文
 │   └── rules-content.js # あそびかた(タブ構成、カード説明は定義から自動生成)
 ├── render3d/board3d.js  # Three.js レンダラー
+├── net/client.js        # オンライン対戦のクライアント(WebSocket・再接続)
 └── audio/bgm.js         # ジェネレーティブBGM(Web Audio)
+
+server/                  # オンライン対戦サーバー(Cloudflare Workers)
+├── room-core.js         # 部屋のロジック(トランスポート非依存 = テスト可能)
+├── room-do.js           # Durable Object(WebSocket ↔ RoomCore)
+└── index.js             # Worker(合言葉の発行と振り分け)
 ```
 
 ### 進歩カードのプラグイン構造
@@ -175,6 +181,68 @@ CPU 側も同じ思想で `progress-ai.js` の `SCORERS[id]` に「今使うと�
   3D ダイスの転がり、交易バナー等。演出中も state は既に確定済み
   (描画が後追いするだけで、ロジックは待たない)。
 
+## オンライン対戦(`server/`)
+
+合言葉(英字4文字)を共有した最大4人で遊ぶ。**サーバー権威型**で、
+クライアントはルール判定も乱数も持たない。
+
+```
+ブラウザ ──action──▶ Worker ──▶ Durable Object(合言葉ごとに1つ)
+   ▲                              │ RoomCore が dispatch() で適用
+   └──── 席ごとに伏せた state ─────┘
+```
+
+### なぜサーバーでも同じエンジンが動くのか
+
+`src/rules/` と `src/actions.js` は DOM 非依存の純粋関数なので、
+Durable Object がそのまま `import` して使える。**ルール実装は 1 つだけ**で、
+クライアントとサーバーで 実装の食い違いが起きない。
+
+| ファイル | 役割 |
+|---|---|
+| `server/room-core.js` | 部屋のロジック(席・ホスト・開始・アクション適用・伏せ処理・肩代わり)。**WebSocket に非依存**なので `node --test` で直接検証できる |
+| `server/room-do.js` | Durable Object。WebSocket 接続を RoomCore に繋ぎ、誰に何を送るかを決める |
+| `server/index.js` | Worker。`/new` で合言葉を発行し、`/room?code=` を DO へ振り分ける |
+| `src/net/client.js` | ブラウザ側。接続・再接続・端末IDの保持 |
+
+### メッセージ
+
+| 向き | 種類 | 内容 |
+|---|---|---|
+| C→S | `hello` | 端末IDと名前。席の割り当て(再接続なら元の席) |
+| C→S | `settings` / `start` | ホストのみ。ルール・空席のCPU補完・開始 |
+| C→S | `action` | 自分の席の手。`player` が自席と違えば拒否 |
+| C→S | `ping` | 接続維持(25秒ごと) |
+| S→C | `joined` / `lobby` | 席番号、参加者一覧、ホスト、設定 |
+| S→C | `state` | 版番号 + **その席から見た**状態 + 直前に適用されたアクション(演出の再生用) |
+| S→C | `error` | 却下理由。食い違い防止に正しい状態を送り直す |
+
+状態は 11KB 程度しかないので、差分同期はせず**毎手ごとに全状態を配る**。
+取りこぼしても次の手で必ず追いつく。
+
+### 隠し情報
+
+`viewFor(seat)` が席ごとに伏せた状態を作る。描画側は相手の手札を枚数でしか
+読まないため、中身を差し替えても表示は壊れない。
+
+- 他プレイヤーの `devCards` / `progressCards` → 同じ枚数の `hidden` に置換
+- `bank.devDeck` / `progressDecks` → 中身を `null` に(枚数は購入可否の判定に必要)
+- `state.rng` → `0`(未来の出目を予測させない)
+- **決着後は全公開**(隠し勝利点を含む最終得点を正しく出すため)
+
+### 切断と再接続
+
+端末IDを localStorage に持ち、同じIDで戻れば元の席に復帰する。
+切断中の席はサーバーが CPU として肩代わりして進めるので、
+誰かが落ちてもゲームは止まらない。ホストが抜けたら次の接続者がホストになる。
+対戦中の部屋には新しい人は入れない。
+
+### 権限の境界
+
+- 席の手は**自分の席のものしか出せない**(`action.player !== seat` は拒否)
+- ルール判定は `validateAction` がサーバーで必ず走る(クライアントの検証は往復を減らす早期リターンにすぎない)
+- ルール・難易度・開始はホストのみ
+
 ## BGM(`audio/bgm.js`)
 
 音源ファイルなしの完全合成。D ドリアンのコード進行を先読みスケジューラで生成し、
@@ -188,6 +256,8 @@ iOS 対策で初回ポインタイベントから開始。ON/OFF は localStorag
 | ルール単体 | `node --test test/`(85+ テスト)。validate の拒否理由・apply の結果・保存則 |
 | 統計 | `test/rng.test.js` + `scripts/dice-audit.mjs`(χ² バッテリー。対の検定は**非重複**ペアで) |
 | 結合 | セルフプレイ: CPU のみで数百ゲーム完走・無限ループ検出・資源/商品の保存則・勝者の点数検証 |
+| オンライン | `test/room.test.js` で部屋のロジック(席・ホスト・伏せ処理・肩代わり・復元)を検証。
+実サーバーは `wrangler dev` + WebSocket / ブラウザ2つで確認 |
 | E2E | Playwright(headless Chromium + SwiftShader)。`window.catanDebug` で state を直接操作して
 UI フローを検証(手順は [CLAUDE.md](../CLAUDE.md)) |
 

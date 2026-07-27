@@ -6,9 +6,14 @@
   "scripts": {
     "test": "node --test 'test/*.test.js'",
     "selfplay": "node scripts/selfplay.js",
-    "serve": "python3 -m http.server 8000"
+    "serve": "python3 -m http.server 8000",
+    "server": "wrangler dev --port 8787",
+    "deploy:server": "wrangler deploy"
   },
   "dependencies": {
     "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.114.0"
   }
 }

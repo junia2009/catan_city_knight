@@ -1,0 +1,19 @@
+# オンライン対戦サーバー(Cloudflare Workers + Durable Objects)
+# デプロイ: npx wrangler deploy   / ローカル: npm run server
+
+name = "catan-web-server"
+main = "server/index.js"
+compatibility_date = "2025-09-01"
+
+# 合言葉ごとに1つの Durable Object が部屋になる
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDO"
+
+# 無料プランで Durable Objects を使うには SQLite バックエンドが必要
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]
+
+[observability]
+enabled = true
