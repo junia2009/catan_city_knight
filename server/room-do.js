@@ -33,6 +33,8 @@ export class RoomDO {
       if (this.room) return Response.json({ free: false });
       this.room = new RoomCore({ code });
       await this.save();
+      // 誰も入らないまま放置された部屋も掃除対象にする(合言葉を空けるため)
+      this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
       return Response.json({ free: true, code });
     }
 
@@ -42,6 +44,7 @@ export class RoomDO {
     if (!this.room) {
       this.room = new RoomCore({ code });
       await this.save();
+      this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
     }
 
     const pair = new WebSocketPair();
