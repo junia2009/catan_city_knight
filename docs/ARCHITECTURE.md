@@ -109,6 +109,10 @@ src/
 │   ├── board-render.js  # 2D Canvas(オフスクリーンキャッシュ)
 │   ├── hud-render.js    # DOM HUD・全ダイアログ・ステータス文
 │   └── rules-content.js # あそびかた(タブ構成、カード説明は定義から自動生成)
+├── demo/
+│   ├── scenario.js      # デモ用の盤面づくり(初期配置の消化・資源配布・出目の仕込み)
+│   ├── script.js        # あそびかたデモの台本(章とビート)
+│   └── driver.js        # 再生エンジン(字幕・指カーソル・一時停止/速度)。ブラウザ専用
 ├── render3d/board3d.js  # Three.js レンダラー
 ├── net/client.js        # オンライン対戦のクライアント(WebSocket・再接続)
 └── audio/bgm.js         # ジェネレーティブBGM(Web Audio)
@@ -262,6 +266,29 @@ Durable Object は WebSocket が繋がっている間ずっとメモリに常駐
 ドローン+パッド+撥弦+フルートを合成リバーブ(生成した IR で convolution)に通す。
 iOS 対策で初回ポインタイベントから開始。ON/OFF は localStorage に保存。
 
+## あそびかたデモ(`src/demo/`)
+
+「文章だと操作感が分からない」を埋めるための**自動再生デモ**。動画ファイルは持たず、
+本物のゲームエンジンと本物の HUD をその場で動かして見せる(だから実装と絶対にずれない)。
+
+```
+台本(script.js) ── ビートの配列
+   ↓ 1ビート = prep → 字幕 → 指でタップ → ui/action
+再生エンジン(driver.js) ── host 経由でしか main.js に触らない
+   ↓ host.patchState / setUi / act / boardPos
+main.js ── 通常の refresh・dispatch・演出がそのまま動く
+```
+
+- **章**: `basic`(基本の手番)/ `cak`(都市と騎士)。タイトルと説明書の各タブから開く。
+- **盤面依存の場所は台本に焼き込まない**。「どの辺に道を引くか」は毎回 `legalRoadEdges`
+  などから選び直すので、盤面生成やルールが変わっても座標がずれない。
+- **ルールエンジンには手を入れない**。出目の固定は既存の `turnFlags.alchemist`、
+  イベントダイスは目的の面が出るまで `state.rng` を空回しして合わせる。
+- **資源の配布は必ず銀行から**(`ensure` / `trimHand`)。保存則を壊さない。
+- 再生中は `demoRunning` で CPU スケジューラを止め、全面シールドで人の入力も遮る。
+- `test/demo.test.js` が台本をブラウザ抜きで空回しし、
+  **全ビートの手が validate を通ること**と保存則を検証する。
+
 ## テスト戦略
 
 | 層 | 手段 |
@@ -280,7 +307,7 @@ UI フローを検証(手順は [CLAUDE.md](../CLAUDE.md)) |
 
 - `window.catanDebug`: `getState` / `setState`(差し替え+再描画+CPU再開)/ `doAction` /
   `newGameWith(patch)` / `getUi` / `screenPos(kind, id)`(3D→画面座標)/ `getRenderer` /
-  `getBgm` / `getViewState`
+  `getBgm` / `getViewState` / `startDemo(id)` / `getDemo` / `demoSkip` / `demoStop`
 - URL `?seed=123`: シード固定
 - `renderer.skyPhaseOverride = 0..1`: 昼夜サイクルの時刻固定(影・照明の目視確認用)
 - `turnFlags.alchemist = [a, b]`: 次ロールの出目固定(テストで暴走や7を意図的に起こす)

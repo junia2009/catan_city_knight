@@ -15,7 +15,7 @@ import {
 import { LAYOUT } from './rules/board.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
-import { drawBoard } from './render/board-render.js';
+import { drawBoard, hexCenterOf, toPixel } from './render/board-render.js';
 import { renderHUD, RES_ICON, COM_ICON, setHumanSeat } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
 import { Bgm } from './audio/bgm.js';
@@ -333,6 +333,97 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) bgm.ctx?.suspend();
   else if (bgm.enabled && bgm.running) bgm.ctx?.resume();
 });
+
+// ---- あそびかたデモ(自動再生。実装は src/demo/)----
+// 台本は実物のルールエンジンを動かすので、CPU の自動進行だけ止めて場を明け渡す。
+let demoDriver = null; // DemoDriver(使い回す。イベント登録が増えないように1つだけ作る)
+let demoScript = null; // 遅延読み込みした script.js
+let demoChapter = null;
+let demoRunning = false;
+let demoReturn = 'title'; // 終了後に戻る画面
+
+function nextDemoChapter() {
+  if (!demoScript || !demoChapter) return null;
+  const i = demoScript.DEMO_CHAPTERS.indexOf(demoChapter);
+  return demoScript.DEMO_CHAPTERS[i + 1] ?? null;
+}
+
+// 盤面要素の画面座標(3D はレイキャスト用の射影、2D は view から逆算)
+function boardPos(kind, id) {
+  if (viewMode === '3d' && renderer3d) return renderer3d.screenPos(kind, id);
+  if (!view) return null;
+  const rect = canvas.getBoundingClientRect();
+  let xy;
+  if (kind === 'vertex') xy = toPixel(view, LAYOUT.vertices[id].x, LAYOUT.vertices[id].y);
+  else if (kind === 'edge') xy = toPixel(view, LAYOUT.edges[id].x, LAYOUT.edges[id].y);
+  else {
+    const c = hexCenterOf(id);
+    xy = toPixel(view, c.x, c.y);
+  }
+  return [rect.left + xy[0], rect.top + xy[1]];
+}
+
+const demoHost = {
+  getState: () => state,
+  getUi: () => ui,
+  // 台本の下ごしらえ(資源配布・出目の仕込み)。複製してから書き換える。
+  patchState: (fn) => {
+    const s = structuredClone(state);
+    fn(s);
+    state = s;
+    refresh();
+  },
+  setUi: (patch) => {
+    if (patch) Object.assign(ui, patch);
+    refresh();
+  },
+  act: (action) => doAction(action),
+  boardPos,
+  resetView: () => renderer3d?.resetView(),
+  nextChapterTitle: () => nextDemoChapter()?.title ?? null,
+  exit: (where) => endDemo(where),
+};
+
+async function startDemo(chapterId, from = 'title') {
+  if (isOnline()) leaveNet(false);
+  const [{ DemoDriver }, script, scenario] = await Promise.all([
+    import('./demo/driver.js'),
+    import('./demo/script.js'),
+    import('./demo/scenario.js'),
+  ]);
+  demoScript = script;
+  demoChapter = script.findChapter(chapterId);
+  demoReturn = from;
+  clearTimeout(cpuTimer);
+  demoRunning = true;
+  setSeat(0);
+  state = scenario.buildDemoState(demoChapter.mode);
+  ui = freshUi();
+  setScreen('game');
+  if (viewMode === '3d' && !renderer3dFailed) await ensureRenderer3d();
+  refresh();
+  demoDriver ??= new DemoDriver(demoHost);
+  demoDriver.run(demoChapter);
+}
+
+// where: 'back'(戻る) | 'play'(そのルールで対戦を始める) | 'next'(次の章)
+function endDemo(where) {
+  const next = where === 'next' ? nextDemoChapter() : null;
+  demoDriver?.stop();
+  demoRunning = false;
+  if (next) {
+    startDemo(next.id, demoReturn);
+    return;
+  }
+  if (where === 'play') {
+    settings.mode = demoChapter.mode;
+    setScreen('game');
+    newGame();
+    return;
+  }
+  showTitleBoard();
+  setScreen(demoReturn === 'rules' ? 'rules' : 'title');
+}
 
 // 説明書画面(タイトルから遷移)
 let rulesTab = 'basic';
@@ -881,6 +972,7 @@ function scheduleCpu() {
   clearTimeout(cpuTimer);
   if (isOnline()) return; // オンラインでは CPU もサーバーが動かす
   if (screen !== 'game') return; // タイトル背景の盤面ではCPUを動かさない
+  if (demoRunning) return; // あそびかたデモ中は台本だけが盤面を動かす
   const pid = actingCpu();
   if (pid == null) return;
   const delay = state.awaiting ? 300 : state.phase === 'setup' ? 450 : 550;
@@ -1114,6 +1206,7 @@ document.addEventListener('click', (e) => {
       else setScreen('title');
       return;
     case 'goto-rules': setScreen('rules'); return;
+    case 'demo': startDemo(arg, screen === 'rules' ? 'rules' : 'title'); return;
     case 'reload-app': location.reload(); return;
 
     // ---- オンライン対戦 ----
@@ -1473,6 +1566,17 @@ window.catanDebug = {
     lobby: online.lobby,
     isHost: isHost(),
   }),
+  // あそびかたデモ(E2E用)
+  startDemo: (id) => startDemo(id),
+  getDemo: () => ({
+    running: demoRunning,
+    chapter: demoChapter?.id ?? null,
+    beat: demoDriver?.beatIndex ?? -1,
+    total: demoChapter?.beats.length ?? 0,
+    caption: document.querySelector('#demo .demo-cap span')?.textContent ?? '',
+  }),
+  demoSkip: () => demoDriver?.skip(),
+  demoStop: () => endDemo('back'),
   netJoin: (code, name) => startNet(code, name),
   netStart: () => net?.start(),
   netLeave: () => leaveNet(true),

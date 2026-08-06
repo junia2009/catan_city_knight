@@ -10,11 +10,17 @@ export const RULES_TABS = [
   ['dragon', '🐉ドラゴン'],
 ];
 
+// 動画(自動再生デモ)への導線。文章の頭に置いて、操作感は動画で見てもらう。
+const demoCta = (chapter, label, note) =>
+  `<button class="demo-cta" data-act="demo:${chapter}">▶ ${label}<small>${note}</small></button>`;
+
 const costRow = (icon, name, cost) =>
   `<div class="rrow"><span class="ricon">${icon}</span><b>${name}</b><span class="rcost">${cost}</span></div>`;
 
-function basicHtml() {
+function basicHtml(demo) {
   return `
+  ${demo ? demoCta('basic', '手番の流れを動画で見る', '実際の画面が動きます・約1分半') : ''}
+
   <h4>🏆 ゲームの目的</h4>
   <p>島に開拓地や都市を築いて<b>勝利点</b>を集めます。基本ルールは<b>10点</b>、都市と騎士は<b>13点</b>で勝利です。</p>
 
@@ -46,8 +52,10 @@ function basicHtml() {
   <p>途切れない自分の道が<b>5本以上</b>で最長のプレイヤーに<b>+2点</b>。</p>`;
 }
 
-function cakHtml() {
+function cakHtml(demo) {
   return `
+  ${demo ? demoCta('cak', '都市と騎士を動画で見る', '商品・都市改良・騎士・蛮族の襲来') : ''}
+
   <h4>🏙 基本ルールとの違い</h4>
   <div class="rrow"><b>勝利点</b><span class="rcost">13点(基本は10点)</span></div>
   <div class="rrow"><b>初期配置</b><span class="rcost">開拓地×1 + 都市×1</span></div>
@@ -139,16 +147,17 @@ function dragonHtml() {
   騎士カードでドラゴンを追い払うのは冒険者の腕の見せどころ。</p>`;
 }
 
-// タブ付きの説明書本体。tabAct のボタンで data-act="rules-tab:<id>" を発行する
-export function rulesHtml(tab = 'basic') {
+// タブ付きの説明書本体。tabAct のボタンで data-act="rules-tab:<id>" を発行する。
+// demo: 動画デモへの導線を出すか(対戦中に開いたときは出さない ── 進行中の盤面を捨てさせないため)
+export function rulesHtml(tab = 'basic', { demo = true } = {}) {
   const tabs = `<div class="seg rules-tabs">${RULES_TABS.map(
     ([id, label]) =>
       `<button class="${tab === id ? 'sel' : ''}" data-act="rules-tab:${id}">${label}</button>`,
   ).join('')}</div>`;
   const body =
-    tab === 'cak' ? cakHtml()
+    tab === 'cak' ? cakHtml(demo)
     : tab === 'cards' ? cardsHtml()
     : tab === 'dragon' ? dragonHtml()
-    : basicHtml();
+    : basicHtml(demo);
   return `${tabs}<div class="rules-body">${body}</div>`;
 }

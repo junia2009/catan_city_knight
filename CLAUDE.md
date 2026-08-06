@@ -25,6 +25,9 @@ npm run deploy:server         # Cloudflare へデプロイ(要ログイン)
    セルフプレイ完走(無限ループなし・勝者が規定点以上)。
 2. **UI / 描画変更** → Playwright で E2E(下記レシピ)。スクリーンショットを目視。
 3. **見た目の変更**は必ずスクリーンショットをユーザーに見せて確認をとる。
+4. **HUD のボタン(`data-act`)やルールを変えたら** `npm test` の `test/demo.test.js` を確認。
+   あそびかたデモ(`src/demo/`)の台本が実物の手を出しているので、ここが落ちたら
+   デモも一緒に直す(`window.catanDebug.startDemo('basic'|'cak')` で再生できる)。
 
 ## Playwright E2E レシピ
 
