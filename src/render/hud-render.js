@@ -603,7 +603,7 @@ function dialogHtml(state, ui) {
 
   if (d.type === 'rules') {
     return `<h3>📖 あそびかた</h3>
-      ${rulesHtml(d.tab)}
+      ${rulesHtml(d.tab, { demo: false })}
       <div class="row end"><button class="primary" data-act="dialog-cancel">閉じる</button></div>`;
   }
 

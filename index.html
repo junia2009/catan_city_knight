@@ -544,6 +544,106 @@
   #netbadge.reconnecting .dot, #netbadge.connecting .dot { background: var(--accent2); }
   #netbadge.closed .dot { background: #e04848; }
 
+  /* ---------- あそびかたデモ(自動再生)---------- */
+  #demo { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+  #demo[hidden] { display: none; }
+  /* 再生中は下の画面を触れないようにする(台本どおりに進める) */
+  .demo-shield { position: absolute; inset: 0; pointer-events: auto; }
+  .demo-bar {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top));
+    background: linear-gradient(180deg, rgba(6,18,32,0.95), rgba(6,18,32,0));
+    pointer-events: auto;
+  }
+  .demo-chapter {
+    font-size: 13px; font-weight: 800; color: var(--accent2);
+    white-space: nowrap; text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+  }
+  .demo-prog {
+    flex: 1; min-width: 30px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,0.18); overflow: hidden;
+  }
+  .demo-prog i {
+    display: block; height: 100%; width: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.3s ease-out;
+  }
+  .demo-bar button { padding: 7px 10px; font-size: 13px; background: rgba(13,32,52,0.92); }
+
+  .demo-cap {
+    position: absolute; left: 50%; bottom: 24px;
+    width: min(620px, calc(100vw - 24px));
+    background: linear-gradient(160deg, rgba(10,26,44,0.96), rgba(8,20,36,0.96));
+    border: 1px solid rgba(242,176,61,0.45);
+    border-radius: 14px; padding: 12px 16px;
+    font-size: 14.5px; line-height: 1.7; color: #eaf2fa;
+    box-shadow: 0 10px 34px rgba(0,0,0,0.55);
+    opacity: 0; transform: translate(-50%, 10px);
+    /* bottom は遷移させない ── 毎フレーム測り直して追従させるので二重に動くと遅れる */
+    transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+  }
+  .demo-cap.on { opacity: 1; transform: translate(-50%, 0); }
+  body.mobile .demo-cap { font-size: 13px; padding: 10px 13px; line-height: 1.65; }
+
+  /* 指カーソル: 本体は点で、輪と波紋は擬似要素で描く */
+  .demo-hand {
+    position: absolute; left: 0; top: 0; width: 0; height: 0;
+    opacity: 0;
+    transition: transform 0.42s cubic-bezier(0.3, 0.8, 0.3, 1), opacity 0.2s;
+  }
+  .demo-hand.on { opacity: 1; }
+  .demo-hand::before, .demo-hand::after {
+    content: ''; position: absolute; left: -19px; top: -19px;
+    width: 38px; height: 38px; border-radius: 50%;
+  }
+  .demo-hand::before {
+    border: 2.5px solid var(--accent2);
+    background: rgba(255, 217, 125, 0.18);
+    box-shadow: 0 0 14px rgba(255, 217, 125, 0.55);
+  }
+  .demo-hand::after { border: 2px solid var(--accent2); opacity: 0; }
+  .demo-hand.tap::before { animation: demoTap 0.24s ease-out; }
+  .demo-hand.tap::after { animation: demoRipple 0.5s ease-out; }
+  @keyframes demoTap { 50% { transform: scale(0.7); background: rgba(255, 217, 125, 0.45); } }
+  @keyframes demoRipple {
+    from { opacity: 0.9; transform: scale(1); }
+    to { opacity: 0; transform: scale(2.4); }
+  }
+  .demo-target {
+    box-shadow: 0 0 0 2px var(--accent2), 0 0 18px rgba(255, 217, 125, 0.65) !important;
+    opacity: 1 !important;
+  }
+
+  .demo-end {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(4, 14, 26, 0.72); backdrop-filter: blur(3px);
+    pointer-events: auto; animation: fadeIn 0.25s ease-out;
+  }
+  .demo-end.on { display: flex; }
+  .demo-end-card {
+    background: linear-gradient(180deg, #17334f, #0f2439);
+    border: 1px solid rgba(130, 180, 230, 0.3);
+    border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    padding: 20px; width: min(440px, 92vw);
+    display: flex; flex-direction: column; gap: 14px;
+    animation: popIn 0.24s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+  .demo-end-card h3 { font-size: 17px; color: var(--accent2); text-align: center; }
+  .demo-end-card .row { flex-direction: column; }
+  .demo-end-card button { padding: 12px 14px; font-size: 14px; }
+
+  /* 説明書からデモを開く導線 */
+  .demo-cta {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    background: linear-gradient(180deg, #ffc95e, #eda428);
+    color: #4a2f00; border-color: rgba(0,0,0,0.35);
+    text-shadow: 0 1px 0 rgba(255,255,255,0.3);
+    padding: 11px 14px; width: 100%; white-space: normal; text-align: left;
+  }
+  .demo-cta small { font-weight: 600; opacity: 0.72; font-size: 11px; }
+
   .logsheet {
     max-height: 55dvh; overflow-y: auto; font-size: 12.5px; color: var(--dim);
     line-height: 1.8; padding-right: 4px;
@@ -705,7 +805,8 @@
       <div class="title-sub">CITIES & KNIGHTS</div>
       <button class="primary big" data-act="goto-select">はじめる</button>
       <button class="big" data-act="goto-online">🌐 オンライン対戦</button>
-      <button class="big" data-act="goto-rules">📖 あそびかた</button>
+      <button class="big" data-act="demo:basic">▶ あそびかた(動画)</button>
+      <button class="big" data-act="goto-rules">📖 あそびかた(文章)</button>
       <button data-act="bgm-toggle">🔊 BGM オン</button>
       <div id="load-note"></div>
       <!-- 版の表示。デプロイ時に BUILD_ID がコミットの短縮SHAへ置換される。
@@ -725,6 +826,21 @@
 
   <div id="netbadge"><span class="dot"></span><span class="txt"></span></div>
   <div id="dialog-root"></div>
+  <!-- あそびかたデモ(自動再生)。中身の制御は src/demo/driver.js -->
+  <div id="demo" hidden>
+    <div class="demo-shield"></div>
+    <div class="demo-hand"></div>
+    <div class="demo-bar">
+      <span class="demo-chapter"></span>
+      <div class="demo-prog"><i></i></div>
+      <button data-demo="playpause" title="一時停止">❚❚</button>
+      <button data-demo="speed" title="再生速度">×1</button>
+      <button data-demo="skip" title="次へ">⏭</button>
+      <button data-demo="exit" title="終了">✕</button>
+    </div>
+    <div class="demo-cap"><span></span></div>
+    <div class="demo-end"></div>
+  </div>
   <script type="importmap">
   {
     "imports": {
