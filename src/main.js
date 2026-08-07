@@ -397,7 +397,7 @@ async function startDemo(chapterId, from = 'title') {
   clearTimeout(cpuTimer);
   demoRunning = true;
   setSeat(0);
-  state = scenario.buildDemoState(demoChapter.mode);
+  state = scenario.buildDemoState(demoChapter.mode, { finishSetup: !demoChapter.fromSetup });
   ui = freshUi();
   setScreen('game');
   if (viewMode === '3d' && !renderer3dFailed) await ensureRenderer3d();

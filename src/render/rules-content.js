@@ -19,7 +19,8 @@ const costRow = (icon, name, cost) =>
 
 function basicHtml(demo) {
   return `
-  ${demo ? demoCta('basic', '手番の流れを動画で見る', '実際の画面が動きます・約1分半') : ''}
+  ${demo ? demoCta('setup', '① はじめの配置を動画で見る', '開拓地と道の置き方・実際の画面が動きます') : ''}
+  ${demo ? demoCta('basic', '② 手番の流れを動画で見る', 'ダイス → 建設 → 交易 → ターン終了') : ''}
 
   <h4>🏆 ゲームの目的</h4>
   <p>島に開拓地や都市を築いて<b>勝利点</b>を集めます。基本ルールは<b>10点</b>、都市と騎士は<b>13点</b>で勝利です。</p>

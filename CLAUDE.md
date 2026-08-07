@@ -27,7 +27,7 @@ npm run deploy:server         # Cloudflare へデプロイ(要ログイン)
 3. **見た目の変更**は必ずスクリーンショットをユーザーに見せて確認をとる。
 4. **HUD のボタン(`data-act`)やルールを変えたら** `npm test` の `test/demo.test.js` を確認。
    あそびかたデモ(`src/demo/`)の台本が実物の手を出しているので、ここが落ちたら
-   デモも一緒に直す(`window.catanDebug.startDemo('basic'|'cak')` で再生できる)。
+   デモも一緒に直す(`window.catanDebug.startDemo('setup'|'basic'|'cak')` で再生できる)。
 
 ## Playwright E2E レシピ
 
