@@ -23,8 +23,10 @@ const TERRAIN_COMMODITY = { forest: 'paper', mountain: 'coin', pasture: 'cloth' 
 
 // ---- 盤面の下ごしらえ ----
 
-// 初期配置だけ CPU ロジックで済ませ、「あなた」の1手番目から始まる盤面を作る
-export function buildDemoState(mode) {
+// デモ用の盤面。既定では初期配置を CPU ロジックで済ませ、
+// 「あなた」の1手番目から始まる状態にする。
+// finishSetup: false なら初期配置の1手目(あなたの番)から始める(「はじめの配置」の章用)。
+export function buildDemoState(mode, { finishSetup = true } = {}) {
   let state = createGame({
     seed: DEMO_SEED,
     playerCount: 3,
@@ -32,6 +34,7 @@ export function buildDemoState(mode) {
     mode,
     difficulty: 'hard',
   });
+  if (!finishSetup) return state;
   let guard = 0;
   while (state.phase === 'setup' && guard++ < 64) {
     const pid = state.awaiting.players[0];

@@ -11,13 +11,15 @@
 // 盤面依存の場所(どの辺・どの頂点)は毎回 state から選び直す。
 // 座標を台本に焼き込まないので、盤面生成が変わっても壊れない。
 
-import { LAYOUT } from '../rules/board.js';
+import { LAYOUT, TERRAIN_RESOURCE } from '../rules/board.js';
 import { validateAction } from '../actions.js';
 import { canPlaceSettlement, totalCards } from '../rules/build.js';
 import { tradeRate } from '../rules/trade.js';
 import { stealableTargets } from '../rules/robber.js';
+import { chooseAction } from '../ai/cpu-player.js';
 import {
   legalCityVertices, legalRoadEdges, legalRobberHexes, legalSettlementVertices,
+  legalSetupEdges,
 } from '../ai/legal-moves.js';
 import {
   DEMO_PLAYER as P, bestRollFor, cutToTurn, ensure, forceRoll,
@@ -80,6 +82,49 @@ function bankTradePlan(state) {
   return { give, receive, rate: tradeRate(state, P, give) };
 }
 
+// ---- 初期配置(setup)用の選び方 ----
+
+// その頂点で新しく手に入る資源の種類(すでに持っている土地との重なりを避けるため)
+function newResourcesAt(state, vid) {
+  const mine = new Set();
+  for (const [v, b] of Object.entries(state.buildings)) {
+    if (b.player !== P) continue;
+    for (const hid of LAYOUT.vertexHexes[v] ?? []) {
+      const res = TERRAIN_RESOURCE[state.board.hexes[hid].terrain];
+      if (res) mine.add(res);
+    }
+  }
+  const gained = new Set();
+  for (const hid of LAYOUT.vertexHexes[vid] ?? []) {
+    const res = TERRAIN_RESOURCE[state.board.hexes[hid].terrain];
+    if (res && !mine.has(res)) gained.add(res);
+  }
+  return gained.size;
+}
+
+// 初期配置の開拓地: 出目の良さ + まだ持っていない資源が取れることを加点
+const pickSetupVertex = (state) =>
+  pickBest(
+    legalSettlementVertices(state, P, { needRoad: false }),
+    (vid) => vertexValue(state, vid) + 2 * newResourcesAt(state, vid),
+  );
+
+// 初期配置の道: 伸ばした先に良い土地がある向きへ
+const pickSetupEdge = (state, vid) =>
+  pickBest(legalSetupEdges(state, vid), (eid) => {
+    const far = LAYOUT.edges[eid].v.find((v) => v !== vid);
+    return far ? vertexValue(state, far) : 0;
+  });
+
+// いま置く番のプレイヤー(初期配置は awaiting が順番を持っている)
+const setupTurnOf = (state) => state.awaiting?.players[0] ?? null;
+
+// CPU の初期配置を1手進める
+const cpuSetupMove = (state) => {
+  const pid = setupTurnOf(state);
+  return pid == null || pid === P ? null : chooseAction(state, pid);
+};
+
 // 7の演出の前に、全員の手札を捨て札ラインの下へ戻す(捨て札ダイアログで話が止まらないように)
 function tidyHandsForSeven(state) {
   for (const p of state.players) {
@@ -88,7 +133,93 @@ function tidyHandsForSeven(state) {
   }
 }
 
-// ---- 第1章: 基本の手番 ----
+// ---- 第1章: はじめの配置 ----
+
+const setupBeats = [
+  {
+    say: 'ゲームは「初期配置」から始まります。全員が順番に、開拓地1つと道1本ずつを2回に分けて置きます。',
+    hold: 900,
+  },
+  {
+    say: '🏠 まずはあなたの番。置ける頂点が光ります ── ほかの建物から2つ以上離す決まりがあるので、光った場所だけが候補です。',
+    hold: 2000,
+  },
+  {
+    say: '数字の下の点が多いほど出やすい目(6と8が最大)。土地3つに接していて、資源の種類が散っている角が有利です。',
+    tap: (s) => ({ vertex: pickSetupVertex(s) }),
+    ui: (s) => ({ pendingVertex: pickSetupVertex(s), mode: 'setup-road' }),
+    hold: 1600,
+  },
+  {
+    say: '続けて、その開拓地につながる道を1本。あとで開拓地を増やしたい方向へ伸ばします。',
+    tap: (s, ui) => ({ edge: pickSetupEdge(s, ui.pendingVertex) }),
+    ui: (s, ui) => ({ pending: { edgeId: pickSetupEdge(s, ui.pendingVertex) } }),
+    hold: 1200,
+  },
+  {
+    say: '「✓ 確定」で決定。',
+    tap: () => ({ btn: 'confirm' }),
+    action: (s, ui) => ({
+      type: 'PLACE_INITIAL', player: P,
+      vertexId: ui.pendingVertex, edgeId: ui.pending?.edgeId,
+    }),
+    hold: 900,
+  },
+  {
+    say: '次の人へ。ほかのプレイヤーも同じように置いていきます。',
+    action: (s) => cpuSetupMove(s),
+    hold: 1000,
+  },
+  {
+    say: '置く順番は 1→2→3 と回り、そこで折り返して 3→2→1。最後の人は2つ続けて置けます。',
+    action: (s) => cpuSetupMove(s),
+    hold: 1600,
+  },
+  {
+    say: '2巡目に入りました。ここから逆回りです。',
+    action: (s) => cpuSetupMove(s),
+    hold: 1000,
+  },
+  {
+    say: '空いている良い場所は、どんどん取られていきます。',
+    action: (s) => cpuSetupMove(s),
+    hold: 1000,
+  },
+  {
+    say: '🏠 最後にもう一度あなたの番。1軒目とは違う資源が取れる場所を選ぶと、序盤が回りやすくなります。',
+    hold: 2000,
+  },
+  {
+    say: '同じように、開拓地 → 道 の順に選びます。',
+    tap: (s) => ({ vertex: pickSetupVertex(s) }),
+    ui: (s) => ({ pendingVertex: pickSetupVertex(s), mode: 'setup-road' }),
+    hold: 1000,
+  },
+  {
+    say: '道も、光った辺をタップするだけ。',
+    tap: (s, ui) => ({ edge: pickSetupEdge(s, ui.pendingVertex) }),
+    ui: (s, ui) => ({ pending: { edgeId: pickSetupEdge(s, ui.pendingVertex) } }),
+    hold: 700,
+  },
+  {
+    say: '確定。2巡目に置いた開拓地に接する土地からは、その場で資源がもらえます。',
+    tap: () => ({ btn: 'confirm' }),
+    action: (s, ui) => ({
+      type: 'PLACE_INITIAL', player: P,
+      vertexId: ui.pendingVertex, edgeId: ui.pending?.edgeId,
+    }),
+    hold: 2000,
+  },
+  {
+    say: (s) => {
+      const n = totalCards(s.players[P]);
+      return `手札に${n}枚入りました。これで準備完了 ── ここからダイスを振る手番が始まります。`;
+    },
+    hold: 1800,
+  },
+];
+
+// ---- 第2章: 基本の手番 ----
 
 const basicBeats = [
   {
@@ -260,7 +391,7 @@ const basicBeats = [
   },
 ];
 
-// ---- 第2章: 都市と騎士 ----
+// ---- 第3章: 都市と騎士 ----
 
 const cakBeats = [
   {
@@ -421,6 +552,15 @@ const cakBeats = [
 ];
 
 export const DEMO_CHAPTERS = [
+  {
+    id: 'setup',
+    mode: 'base',
+    title: 'はじめの配置',
+    lead: '開拓地と道を置いてゲームが始まる',
+    // 初期配置そのものを見せる章なので、盤面は setup の1手目から始める
+    fromSetup: true,
+    beats: setupBeats,
+  },
   {
     id: 'basic',
     mode: 'base',

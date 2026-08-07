@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 
 import { RESOURCES } from '../src/state.js';
 import { dispatch, validateAction } from '../src/actions.js';
+import { totalCards } from '../src/rules/build.js';
 import { COMMODITIES } from '../src/rules/cak/progress-cards.js';
 import { DEMO_CHAPTERS, findChapter } from '../src/demo/script.js';
 import { buildDemoState, DEMO_PLAYER } from '../src/demo/scenario.js';
@@ -27,7 +28,7 @@ function conservation(s, where) {
 
 // main.js の doAction / refresh と同じ順序でビートを実行する(描画だけ無い)
 function dryRun(chapter) {
-  let state = buildDemoState(chapter.mode);
+  let state = buildDemoState(chapter.mode, { finishSetup: !chapter.fromSetup });
   const ui = { mode: 'idle', pending: null, pendingEdges: [], pendingHexes: [], dialog: null };
   let taps = 0;
   let actions = 0;
@@ -69,16 +70,30 @@ function dryRun(chapter) {
   return { state, taps, actions };
 }
 
-test('デモ: 章が2つあり、id で引ける', () => {
-  assert.equal(DEMO_CHAPTERS.length, 2);
+test('デモ: 章が3つあり、id で引ける', () => {
+  assert.deepEqual(DEMO_CHAPTERS.map((c) => c.id), ['setup', 'basic', 'cak']);
   assert.equal(findChapter('cak').mode, 'cak');
-  assert.equal(findChapter('しらない章').id, 'basic'); // 未知の id は先頭にフォールバック
+  assert.equal(findChapter('しらない章').id, 'setup'); // 未知の id は先頭にフォールバック
   for (const ch of DEMO_CHAPTERS) {
     assert.ok(ch.beats.length > 10, `${ch.id}: ビートが少なすぎる`);
   }
 });
 
-test('デモ 第1章: 全ビートが通り、道・開拓地・都市・交易・盗賊まで見せられる', () => {
+test('デモ 第1章: 初期配置を最初から見せられる(あなた2回 + CPU4回)', () => {
+  const { state, actions } = dryRun(findChapter('setup'));
+  const me = state.players[DEMO_PLAYER];
+
+  assert.equal(actions, 6, '初期配置は全員で6手');
+  assert.equal(state.phase, 'main', '初期配置が終わって手番フェーズに入っていない');
+  assert.equal(
+    Object.values(state.buildings).filter((b) => b.player === DEMO_PLAYER).length, 2,
+    'あなたの開拓地が2つ建っていない',
+  );
+  // 2巡目の開拓地から初期資源が入る
+  assert.ok(totalCards(me) >= 2, `初期資源が入っていない: ${totalCards(me)}枚`);
+});
+
+test('デモ 第2章: 全ビートが通り、道・開拓地・都市・交易・盗賊まで見せられる', () => {
   const { state, taps, actions } = dryRun(findChapter('basic'));
   const me = state.players[DEMO_PLAYER];
 
@@ -92,7 +107,7 @@ test('デモ 第1章: 全ビートが通り、道・開拓地・都市・交易�
   assert.ok(state.log.some((l) => l.includes('盗賊')), '盗賊の演出が出ていない');
 });
 
-test('デモ 第2章: 都市改良 → 進歩カード → 騎士 → 蛮族襲来 → 城壁まで通る', () => {
+test('デモ 第3章: 都市改良 → 進歩カード → 騎士 → 蛮族襲来 → 城壁まで通る', () => {
   const { state } = dryRun(findChapter('cak'));
   const me = state.players[DEMO_PLAYER];
 
