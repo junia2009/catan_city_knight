@@ -18,6 +18,7 @@ export class DemoDriver {
     this.host = host;
     this.root = document.getElementById('demo');
     this.hand = this.root.querySelector('.demo-hand');
+    this.panel = this.root.querySelector('.demo-panel'); // 字幕 + 再生バー(画面下)
     this.capEl = this.root.querySelector('.demo-cap');
     this.speed = 1;
     this.paused = false;
@@ -31,7 +32,7 @@ export class DemoDriver {
       const btn = e.target.closest('[data-demo]');
       if (btn) this.#control(btn.dataset.demo);
     });
-    window.addEventListener('resize', () => this.#placeCaption());
+    window.addEventListener('resize', () => this.#placePanel());
   }
 
   // ---- 再生 ----
@@ -151,19 +152,21 @@ export class DemoDriver {
   // ---- 字幕 ----
 
   #caption(text) {
-    const span = this.capEl.querySelector('span');
     if (!text) {
       this.capEl.classList.remove('on');
       return;
     }
-    span.textContent = text;
+    // 一度 on を外してから付け直して、ビートごとにフェードイン演出をやり直す
+    this.capEl.classList.remove('on');
+    this.capEl.querySelector('span').textContent = text;
+    void this.capEl.offsetWidth; // アニメーションの再生をやり直させる
     this.capEl.classList.add('on');
-    this.#placeCaption();
+    this.#placePanel();
   }
 
-  // HUD(下部パネル)やダイアログ(モバイルはボトムシート)に重ならない位置へ字幕を置く。
-  // ダイアログはビートの途中で開くので、再生タイマーから毎回測り直す。
-  #placeCaption() {
+  // 字幕と再生バーを画面下に置く。HUD(下部パネル)やダイアログ(モバイルはボトムシート)
+  // に重ならない高さへ。ダイアログはビートの途中で開くので再生タイマーから測り直す。
+  #placePanel() {
     let top = window.innerHeight;
     for (const el of [
       document.getElementById('bottom'),
@@ -173,7 +176,7 @@ export class DemoDriver {
       if (r && r.height > 0) top = Math.min(top, r.top);
     }
     const bottom = `${Math.max(12, Math.round(window.innerHeight - top + 10))}px`;
-    if (this.capEl.style.bottom !== bottom) this.capEl.style.bottom = bottom;
+    if (this.panel.style.bottom !== bottom) this.panel.style.bottom = bottom;
   }
 
   #progress() {
@@ -197,7 +200,7 @@ export class DemoDriver {
   }
 
   #tick() {
-    if (this.capEl.classList.contains('on')) this.#placeCaption();
+    this.#placePanel();
     if (!this.timer || this.paused || this.stopped) return;
     this.timer.remain -= TICK * this.speed;
     if (this.timer.remain <= 0) this.#resolveWait();
