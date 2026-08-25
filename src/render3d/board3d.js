@@ -2255,15 +2255,23 @@ export class Board3D {
       this.highlightGroup.add(s);
     }
     // 辺は「置ける道の形」で光らせる。点で示すと小さすぎて選べる場所が分からない。
-    for (const eid of h.edges ?? []) {
+    // 辺はヘックス境界(薄い砂色)の上に乗るので、濃い縁取りを敷かないと埋もれる。
+    const edgeBar = (eid, mat, len, thick, width, y) => {
       const [v1, v2] = LAYOUT.edges[eid].v.map(vpos);
       const dir = v2.clone().sub(v1);
-      const s = new THREE.Mesh(GEO.box, pulseMat(0xffe166));
-      s.scale.set(dir.length() * 0.62, 0.09, 0.15);
+      const s = new THREE.Mesh(GEO.box, mat);
+      s.scale.set(dir.length() * len, thick, width);
       s.position.copy(v1).add(v2).multiplyScalar(0.5);
-      s.position.y = TILE_TOP + 0.06;
+      s.position.y = y;
       s.rotation.y = -Math.atan2(dir.z, dir.x);
       this.highlightGroup.add(s);
+    };
+    // 縁取りは点滅させない ── 一緒に薄くなると枠として働かず、色が濁るだけになる
+    const edgeCasing = () =>
+      new THREE.MeshBasicMaterial({ color: 0x14100a, transparent: true, opacity: 0.8, depthWrite: false });
+    for (const eid of h.edges ?? []) {
+      edgeBar(eid, edgeCasing(), 0.72, 0.06, 0.22, TILE_TOP + 0.045);
+      edgeBar(eid, pulseMat(0xffd23f), 0.62, 0.12, 0.14, TILE_TOP + 0.07);
     }
     for (const hid of h.hexes ?? []) {
       const c = hexCenterOf(hid);
@@ -2282,14 +2290,8 @@ export class Board3D {
         this.highlightGroup.add(s);
       }
       if (sel.edgeId) {
-        const [v1, v2] = LAYOUT.edges[sel.edgeId].v.map(vpos);
-        const dir = v2.clone().sub(v1);
-        const s = new THREE.Mesh(GEO.box, solidMat(0x53e08a));
-        s.scale.set(dir.length() * 0.66, 0.12, 0.18);
-        s.position.copy(v1).add(v2).multiplyScalar(0.5);
-        s.position.y = TILE_TOP + 0.065;
-        s.rotation.y = -Math.atan2(dir.z, dir.x);
-        this.highlightGroup.add(s);
+        edgeBar(sel.edgeId, edgeCasing(), 0.76, 0.07, 0.24, TILE_TOP + 0.05);
+        edgeBar(sel.edgeId, solidMat(0x53e08a), 0.66, 0.14, 0.16, TILE_TOP + 0.075);
       }
       if (sel.hexId) {
         const c = hexCenterOf(sel.hexId);
