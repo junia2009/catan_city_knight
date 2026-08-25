@@ -36,6 +36,7 @@ export function zeroResources() {
 export function createGame({
   seed = 1, playerCount = 4, humanIndex = 0, names = null, mode = 'base',
   difficulty = 'hard', // CPU難易度: 'easy' | 'normal' | 'hard'(評価ノイズ量)
+  diceMode = 'balanced', // 出目: 'balanced'(36通りの山札) | 'random'(毎回独立)
 } = {}) {
   let rng = makeRng(seed);
   let board;
@@ -102,6 +103,8 @@ export function createGame({
       progressDecks,
     },
     dice: null,
+    diceMode, // 'balanced' | 'random'(設計書 §6)
+    diceDeck: [], // バランスダイスの残り山札(空なら次のロールで切り直す)
     eventDie: null, // 'ship' | 'trade' | 'politics' | 'science'(cak のみ)
     turnFlags: { rolled: false, playedDev: false },
     longestRoad: { player: null, length: 0 },

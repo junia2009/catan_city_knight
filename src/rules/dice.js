@@ -1,14 +1,45 @@
 // ダイス・資源分配(設計書 §5, §6)
 
 import { LAYOUT, TERRAIN_RESOURCE } from './board.js';
-import { rngInt } from '../rng.js';
+import { rngInt, shuffled } from '../rng.js';
 import { RESOURCES, RES_JP, addLog } from '../state.js';
 
+// バランスダイス用の山札: 赤×黄の36通りを1枚ずつ。
+// 引き切ったら切り直すので、36回のあいだの出目分布は必ず理論通りになる
+// (「6や8が何十回も出ない」「7ばかり続く」といった偏りが起きない)。
+export const DICE_DECK_SIZE = 36;
+
+function freshDiceDeck() {
+  const deck = [];
+  for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) deck.push([a, b]);
+  return deck;
+}
+
+// 山札から1枚引く。state.diceDeck を消費し、空なら切り直す。
+function drawFromDeck(state) {
+  if (!Array.isArray(state.diceDeck) || state.diceDeck.length === 0) {
+    [state.rng, state.diceDeck] = shuffled(state.rng, freshDiceDeck());
+  }
+  return state.diceDeck.pop();
+}
+
+// 出目は2通り(設計書 §6):
+//  'balanced' … 36通りの山札から引く(既定。偏りが体感しにくい)
+//  'random'   … 毎回独立に振る(従来どおり)
 export function rollTwoDice(state) {
+  if (state.diceMode === 'balanced') return drawFromDeck(state);
   let a, b;
   [state.rng, a] = rngInt(state.rng, 6);
   [state.rng, b] = rngInt(state.rng, 6);
   return [a + 1, b + 1];
+}
+
+// 山札の残り枚数(HUD 表示用。'random' では null)
+export function diceDeckLeft(state) {
+  if (state.diceMode !== 'balanced') return null;
+  return Array.isArray(state.diceDeck) && state.diceDeck.length > 0
+    ? state.diceDeck.length
+    : DICE_DECK_SIZE;
 }
 
 // イベントダイス: 船×3面 + 交易/政治/科学 各1面(設計書 §9.3)

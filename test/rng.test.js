@@ -104,3 +104,45 @@ test('rng: rngInt に剰余バイアスがない(理論確認: 浮動小数×n�
     assert.ok(v >= 0 && v <= 5 && Number.isInteger(v));
   }
 });
+
+// ---- バランスダイス(36通りの山札)----
+
+test('バランスダイス: 36回で全36通りがちょうど1回ずつ出る', () => {
+  const state = { rng: makeRng(4242), diceMode: 'balanced', diceDeck: [] };
+  const seen = new Set();
+  const totals = Array(13).fill(0);
+  for (let i = 0; i < 36; i++) {
+    const [a, b] = rollTwoDice(state);
+    assert.ok(a >= 1 && a <= 6 && b >= 1 && b <= 6, `出目が範囲外: ${a},${b}`);
+    seen.add(`${a},${b}`);
+    totals[a + b]++;
+  }
+  assert.equal(seen.size, 36, '36通りが重複なく出ていない');
+  // 36回ぶんの合計分布は理論値(三角分布)とぴったり一致する
+  assert.deepEqual(totals.slice(2), [1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1]);
+  assert.equal(state.diceDeck.length, 0, '山札を使い切っていない');
+});
+
+test('バランスダイス: 引き切ると自動で切り直す', () => {
+  const state = { rng: makeRng(99), diceMode: 'balanced', diceDeck: [] };
+  for (let i = 0; i < 36; i++) rollTwoDice(state);
+  const [a, b] = rollTwoDice(state); // 37回目
+  assert.ok(a >= 1 && a <= 6 && b >= 1 && b <= 6);
+  assert.equal(state.diceDeck.length, 35, '切り直した山札から1枚引いていない');
+});
+
+test('バランスダイス: 108回(3周)でも各目の合計が理論通り', () => {
+  const state = { rng: makeRng(7), diceMode: 'balanced', diceDeck: [] };
+  const totals = Array(13).fill(0);
+  for (let i = 0; i < 108; i++) {
+    const [a, b] = rollTwoDice(state);
+    totals[a + b]++;
+  }
+  assert.deepEqual(totals.slice(2), [3, 6, 9, 12, 15, 18, 15, 12, 9, 6, 3]);
+});
+
+test('純ランダム設定では山札を使わない', () => {
+  const state = { rng: makeRng(5), diceMode: 'random', diceDeck: [] };
+  for (let i = 0; i < 50; i++) rollTwoDice(state);
+  assert.equal(state.diceDeck.length, 0);
+});

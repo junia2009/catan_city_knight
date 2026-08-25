@@ -1408,7 +1408,8 @@ export class Board3D {
     const loop = (t) => {
       if (this.disposed) return;
       this.controls.update();
-      const a = 0.35 + 0.25 * Math.sin(t / 260);
+      // 選べる場所は屋外のスマホでも見える濃さで点滅させる(下限を上げる)
+      const a = 0.62 + 0.18 * Math.sin(t / 260);
       for (const m of this.pulseMats) m.opacity = a;
       this._tickDice(t);
       if (this.seaUniforms) this.seaUniforms.uTime.value = t / 1000;
@@ -2253,11 +2254,15 @@ export class Board3D {
       s.position.y += 0.08;
       this.highlightGroup.add(s);
     }
+    // 辺は「置ける道の形」で光らせる。点で示すと小さすぎて選べる場所が分からない。
     for (const eid of h.edges ?? []) {
-      const e = LAYOUT.edges[eid];
-      const s = new THREE.Mesh(GEO.hlVertex, pulseMat(0xffe166));
-      s.scale.setScalar(0.85);
-      s.position.set(e.x, TILE_TOP + 0.07, e.y);
+      const [v1, v2] = LAYOUT.edges[eid].v.map(vpos);
+      const dir = v2.clone().sub(v1);
+      const s = new THREE.Mesh(GEO.box, pulseMat(0xffe166));
+      s.scale.set(dir.length() * 0.62, 0.09, 0.15);
+      s.position.copy(v1).add(v2).multiplyScalar(0.5);
+      s.position.y = TILE_TOP + 0.06;
+      s.rotation.y = -Math.atan2(dir.z, dir.x);
       this.highlightGroup.add(s);
     }
     for (const hid of h.hexes ?? []) {
@@ -2277,9 +2282,13 @@ export class Board3D {
         this.highlightGroup.add(s);
       }
       if (sel.edgeId) {
-        const e = LAYOUT.edges[sel.edgeId];
-        const s = new THREE.Mesh(GEO.hlVertex, solidMat(0x53e08a));
-        s.position.set(e.x, TILE_TOP + 0.07, e.y);
+        const [v1, v2] = LAYOUT.edges[sel.edgeId].v.map(vpos);
+        const dir = v2.clone().sub(v1);
+        const s = new THREE.Mesh(GEO.box, solidMat(0x53e08a));
+        s.scale.set(dir.length() * 0.66, 0.12, 0.18);
+        s.position.copy(v1).add(v2).multiplyScalar(0.5);
+        s.position.y = TILE_TOP + 0.065;
+        s.rotation.y = -Math.atan2(dir.z, dir.x);
         this.highlightGroup.add(s);
       }
       if (sel.hexId) {

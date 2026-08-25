@@ -5,6 +5,7 @@ import { RESOURCES, RES_JP, DEV_JP } from '../state.js';
 import { COSTS, WALL_COST, canAfford, totalCards } from '../rules/build.js';
 import { computePoints, pointsToWin } from '../rules/victory.js';
 import { tradeRate } from '../rules/trade.js';
+import { diceDeckLeft } from '../rules/dice.js';
 import { KNIGHT_COSTS } from '../rules/cak/knights.js';
 import { TOWER_COST } from '../rules/dragon.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
@@ -111,14 +112,39 @@ function dieHtml(n) {
 
 function renderDice(state) {
   const d = state.dice;
+  const left = diceDeckLeft(state);
+  const deck = left == null
+    ? ''
+    : `<span class="ddeck" title="バランスダイス: 36通りの山札から引いています(残り${left}通り)">🂠${left}</span>`;
   const ev = state.mode === 'cak' && state.eventDie && d
     ? `<span class="evdie" title="イベントダイス">${EV_ICON[state.eventDie]}</span>`
     : state.mode === 'cak'
       ? '<span class="evdie empty"></span>'
       : '';
-  el('dice').innerHTML = d
+  el('dice').innerHTML = (d
     ? `${dieHtml(d[0])}${dieHtml(d[1])}${ev}<span class="dsum">${d[0] + d[1]}</span>`
-    : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`;
+    : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`) + deck;
+}
+
+// 発展カード(基本モード)の説明文
+const DEV_DESC = {
+  knight: '盗賊を好きなヘックスへ動かし、隣接する相手から資源を1枚奪います。3枚使うと最大騎士力(+2点)。',
+  roadBuilding: '道を2本まで無料で建設します。使うと盤面が光るので、建てたい辺をタップして選びます。',
+  yearOfPlenty: '銀行から好きな資源を2枚もらいます。',
+  monopoly: '資源を1種類選び、全員の手札からその資源を全て奪います。',
+  vp: '持っているだけで+1点。使うカードではありません(得点は自動で入ります)。',
+};
+
+// 発展カードが「今」使えない理由(使えるなら null)
+function devPlayableWhy(state, card) {
+  if (card.type === 'vp') return '勝利点カードは使いません(持っているだけで+1点)';
+  if (state.phase !== 'main' || state.currentPlayer !== HUMAN || state.awaiting) {
+    return '自分の手番に使えます';
+  }
+  if (card.boughtTurn >= state.turn) return '購入したターンには使えません';
+  if (state.turnFlags.playedDev) return 'このターンはすでに発展カードを使いました';
+  if (card.type !== 'knight' && !state.turnFlags.rolled) return 'ダイスを振ったあとに使えます';
+  return null;
 }
 
 // 進歩カードが「今」使えるか(手番・タイミング・獲得ターン)
@@ -151,9 +177,6 @@ function renderHand(state, ui) {
       ).join('')
     : '';
 
-  const isMyTurn =
-    state.phase === 'main' && state.currentPlayer === HUMAN && !state.awaiting;
-
   let extra = '';
   if (cak) {
     extra = p.progressCards
@@ -169,15 +192,11 @@ function renderHand(state, ui) {
       .join('');
   } else {
     extra = p.devCards
-      .map((c) => {
-        const playable =
-          isMyTurn &&
-          !state.turnFlags.playedDev &&
-          c.type !== 'vp' &&
-          c.boughtTurn < state.turn &&
-          (c.type === 'knight' || state.turnFlags.rolled);
-        return `<button class="card dev ${playable ? '' : 'dim'}" data-act="play-dev:${c.type}"
-          ${playable ? '' : 'disabled'}>
+      .map((c, i) => {
+        // 進歩カードと同じく、使えないカードもタップできる(理由を説明ダイアログで出す)
+        const playable = !devPlayableWhy(state, c);
+        return `<button class="card dev ${playable ? '' : 'dim'}" data-act="dev-info:${i}"
+          title="${DEV_DESC[c.type]}">
           <div class="icon">${DEV_ICON[c.type]}</div>
           <div class="label">${DEV_JP[c.type]}</div></button>`;
       })
@@ -276,7 +295,8 @@ function statusText(state, ui) {
     case 'build-wall': return '🧱 城壁を建てる都市を選んでください';
     case 'build-tower': return '🗼 見張り塔を建てる自分の建物を選んでください';
     case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
-    case 'play-road-building': return `🛤️ 街道建設: 道をあと${2 - ui.pendingEdges.length}本選べます`;
+    case 'play-road-building':
+      return `🛤️ 街道建設: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
     case 'prog-hex': case 'prog-vertex': case 'prog-edge': case 'prog-hex2': case 'prog-roads': {
       const card = state.players[HUMAN].progressCards[ui.progIndex];
       const def = card ? PROGRESS_CARDS[card.id] : null;
@@ -285,7 +305,7 @@ function statusText(state, ui) {
       if (ui.mode === 'prog-vertex') return `${label}: 対象の頂点を選んでください`;
       if (ui.mode === 'prog-edge') return `${label}: 取り除く道を選んでください`;
       if (ui.mode === 'prog-hex2') return `${label}: 交換する数字を選択(${ui.pendingHexes.length}/2)`;
-      return `${label}: 道をあと${2 - ui.pendingEdges.length}本選べます`;
+      return `${label}: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
     }
     default:
       if (state.phase === 'main') {
@@ -349,15 +369,30 @@ function dialogHtml(state, ui) {
           ${n ? `<span class="tbadge" data-act="${subAct}:${r}">− ${n}</span>` : `<small>${maxOf(r)}</small>`}
         </button>`;
       }).join('');
+      // 提案先は1人ずつ選ぶ(CPU も人も同じ「提案 → 応答」の流れで扱う)
+      const ready = sum(d.pgive) > 0 && sum(d.precv) > 0;
+      const partners = state.players
+        .filter((o) => o.id !== HUMAN)
+        .map((o) => {
+          const err = ready
+            ? validateAction(state, {
+                type: 'OFFER_TRADE', player: HUMAN, partner: o.id,
+                give: { ...d.pgive }, receive: { ...d.precv },
+              })
+            : '渡すものともらうものを選んでください';
+          return `<button class="pick" data-act="pt-offer:${o.id}" style="--pc:${PLAYER_COLORS[o.id]}"
+            ${err ? 'disabled' : ''} title="${err ?? ''}">
+            <span class="chip">${avatarSvg(o.id)}</span>${o.name}<small>${totalCards(o)}枚</small></button>`;
+        })
+        .join('');
       return `<h3>⚖️ 交易</h3>${tabs}
         <p>渡すもの(タップで追加、バッジで減らす)</p>
         <div class="row">${chipRow(d.pgive, 'ptg-add', 'ptg-sub', (r) => have(r))}</div>
         <p>もらうもの</p>
         <div class="row">${chipRow(d.precv, 'ptr-add', 'ptr-sub', () => 6)}</div>
-        <p>提案すると、得だと判断したCPUが応じます</p>
+        <p>提案する相手(同じ相手には1手番に1回まで)</p>
+        <div class="row">${partners}</div>
         <div class="row end">
-          <button class="primary" data-act="pt-propose"
-            ${sum(d.pgive) > 0 && sum(d.precv) > 0 ? '' : 'disabled'}>提案する</button>
           <button data-act="dialog-cancel">閉じる</button>
         </div>`;
     }
@@ -527,7 +562,8 @@ function dialogHtml(state, ui) {
   }
 
   if (d.type === 'discard') {
-    const need = state.awaiting?.context.required[HUMAN] ?? 0;
+    // 割り込みが切り替わった直後に呼ばれても落ちないように、深い参照は全て安全側で読む
+    const need = state.awaiting?.context?.required?.[HUMAN] ?? 0;
     // 都市と騎士では商品も手札上限に数えるため、捨て札の対象にする
     const keys = state.mode === 'cak' ? [...RESOURCES, ...COMMODITIES] : RESOURCES;
     const have = (k) => (RESOURCES.includes(k) ? p.resources[k] : p.commodities[k]);
@@ -607,6 +643,20 @@ function dialogHtml(state, ui) {
       <div class="row end"><button class="primary" data-act="dialog-cancel">閉じる</button></div>`;
   }
 
+  // 発展カード(基本モード)の説明。使えないときは理由を出す。
+  if (d.type === 'dev-info') {
+    const card = p.devCards[d.index];
+    if (!card) return '';
+    const why = devPlayableWhy(state, card);
+    return `<h3>${DEV_ICON[card.type]} ${DEV_JP[card.type]}</h3>
+      <p>${DEV_DESC[card.type]}</p>
+      ${why ? `<p><small>⏳ ${why}</small></p>` : ''}
+      <div class="row end">
+        <button class="primary" data-act="dev-use:${d.index}" ${why ? 'disabled' : ''}>✨ 使う</button>
+        <button data-act="dialog-cancel">閉じる</button>
+      </div>`;
+  }
+
   if (d.type === 'prog-info') {
     const card = p.progressCards[d.index];
     if (!card) return '';
@@ -656,7 +706,16 @@ function dialogHtml(state, ui) {
 
 function renderDialog(state, ui) {
   const root = el('dialog-root');
-  const html = dialogHtml(state, ui);
+  let html;
+  try {
+    html = dialogHtml(state, ui);
+  } catch (e) {
+    // ダイアログの中身が state と食い違っても、画面を覆ったまま固まらせない。
+    // (オンラインではサーバーの state で割り込みが入れ替わることがある)
+    console.error('ダイアログ描画に失敗:', e);
+    ui.dialog = null;
+    html = '';
+  }
   root.innerHTML = html ? `<div class="overlay"><div class="dialog">${html}</div></div>` : '';
 }
 

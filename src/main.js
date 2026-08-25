@@ -3,7 +3,7 @@
 
 import { createGame, RESOURCES } from './state.js';
 import { dispatch, validateAction } from './actions.js';
-import { chooseAction, cpuAcceptsTrade } from './ai/cpu-player.js';
+import { chooseAction } from './ai/cpu-player.js';
 import { stealableTargets } from './rules/robber.js';
 import {
   legalCityVertices,
@@ -78,7 +78,10 @@ function setSeat(seat) {
 }
 
 // 設定(⚙️シートから編集。新しいゲーム開始時に反映)
-const settings = { view: '3d', mode: 'cak', cpuCount: 3, seed: '', difficulty: 'normal', bgm: true };
+const settings = {
+  view: '3d', mode: 'cak', cpuCount: 3, seed: '', difficulty: 'normal', bgm: true,
+  diceMode: 'balanced', // 'balanced'(36通りの山札) | 'random'(毎回独立)
+};
 
 // 画面フロー: title(タイトル) → select(ルール選択) / online(合言葉・ロビー) → game(ゲーム)
 let screen = 'title';
@@ -121,6 +124,7 @@ function renderSelectPanel() {
     <div class="srow"><span>ルール</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本'], ['dragon', '🐉ドラゴン']], settings.mode)}</div>
     <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(settings.cpuCount))}</div>
     <div class="srow"><span>強さ</span>${seg('set-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], settings.difficulty)}</div>
+    <div class="srow"><span>出目</span>${seg('set-dice', [['balanced', 'バランス'], ['random', '純ランダム']], settings.diceMode)}</div>
     <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${settings.seed}"></div>
     <div class="row end">
       <button data-act="goto-title">← タイトル</button>
@@ -214,6 +218,7 @@ function renderOnlinePanel() {
     <div class="srow"><span>ルール</span>${seg('net-mode', [['cak', '都市と騎士'], ['base', '基本'], ['dragon', '🐉ドラゴン']], lb.settings.mode, !host)}</div>
     <div class="srow"><span>空席</span>${seg('net-fill', [['on', 'CPUで埋める'], ['off', '人だけ']], lb.settings.cpuFill ? 'on' : 'off', !host)}</div>
     ${lb.settings.cpuFill ? `<div class="srow"><span>強さ</span>${seg('net-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], lb.settings.difficulty, !host)}</div>` : ''}
+    <div class="srow"><span>出目</span>${seg('net-dice', [['balanced', 'バランス'], ['random', '純ランダム']], lb.settings.diceMode ?? 'balanced', !host)}</div>
     <div class="net-status ${online.status}"><span class="dot"></span>${STATUS_JP[online.status] ?? ''}</div>
     ${err}
     <div class="net-note">${host ? '全員そろったら開始してください' : 'ホストが開始するのを待っています…'}</div>
@@ -241,6 +246,7 @@ function onNetState(msg) {
   const first = !state;
   state = msg.state;
   if (!ui || first) ui = freshUi();
+  ui.sentAwaiting = null; // 新しい state が来たので「返信待ち」は解消
   if (screen !== 'game') {
     setScreen('game');
     if (viewMode === '3d' && !renderer3d) ensureRenderer3d().then(() => refresh());
@@ -289,6 +295,7 @@ function startNet(code, name) {
         setScreen('online');
       } else if (screen === 'game') {
         ui.toast = msg;
+        ui.sentAwaiting = null; // 手が通らなかったので、割り込みのダイアログを出し直す
         refresh();
       }
       renderOnlinePanel();
@@ -456,6 +463,7 @@ function freshUi() {
     pendingVertex: null, // 初期配置で選んだ開拓地
     pendingEdges: [], // 街道建設カード
     pendingHexes: [], // 発明家(数字トークン交換)
+    sentAwaiting: null, // オンライン: サーバーへ応答を送った割り込み(返信待ち)
     knightFrom: null, // 騎士の移動元
     progIndex: null, // 使用中の進歩カード
     dialog: null,
@@ -477,6 +485,7 @@ function newGame() {
     humanIndex: HUMAN,
     mode: settings.mode,
     difficulty: settings.difficulty,
+    diceMode: settings.diceMode,
   });
   ui = freshUi();
   refresh();
@@ -484,6 +493,24 @@ function newGame() {
 }
 
 // ---- UI 状態と GameState の同期 ----
+
+// 割り込み(awaiting)に紐づくダイアログ。割り込みが変わったら必ず閉じる。
+// 閉じ忘れると「捨て札ダイアログのまま盗賊移動になる」ような食い違いが起き、
+// ダイアログの描画が state を読めずに例外で落ちて操作不能になる。
+const INTERRUPT_DIALOGS = ['discard', 'steal', 'tradeOffer', 'aqueduct'];
+// awaiting の種類ごとに、開いたままでよいダイアログ
+const DIALOG_FOR_AWAITING = {
+  discard: 'discard',
+  tradeOffer: 'tradeOffer',
+  aqueduct: 'aqueduct',
+  moveRobber: 'steal', // 略奪相手の選択(自分で開くのでここでは自動で開かない)
+};
+// awaiting の種類ごとの盤面入力モード
+const MODE_FOR_AWAITING = {
+  setupPlacement: 'setup-settlement',
+  moveRobber: 'move-robber',
+  barbarianDefense: 'raze-city',
+};
 
 function syncUi() {
   const aw = state.awaiting;
@@ -496,43 +523,42 @@ function syncUi() {
     return;
   }
 
-  if (aw?.players.includes(HUMAN)) {
-    if (aw.type === 'setupPlacement' && !['setup-settlement', 'setup-road'].includes(ui.mode)) {
+  const mine = aw?.players.includes(HUMAN) ? aw : null;
+  const keep = mine ? DIALOG_FOR_AWAITING[mine.type] : null;
+  // 自分の割り込みかどうかに関わらず、今の割り込みに合わないものは閉じる
+  if (INTERRUPT_DIALOGS.includes(ui.dialog?.type) && ui.dialog.type !== keep) ui.dialog = null;
+
+  // オンラインでは応答を送ってからサーバーの state が届くまで間がある。
+  // その間は同じ割り込みを見ているので、ダイアログや入力モードを開き直さない
+  // (開き直すと二重に手を出せてしまい、捨て札が 0 枚に戻って見える)。
+  const replied = mine != null && ui.sentAwaiting === mine;
+
+  if (mine && !replied) {
+    const wantMode = MODE_FOR_AWAITING[mine.type];
+    if (wantMode === 'setup-settlement' && !['setup-settlement', 'setup-road'].includes(ui.mode)) {
       ui.mode = 'setup-settlement';
       ui.pending = null;
       ui.pendingVertex = null;
-    }
-    if (aw.type === 'moveRobber' && ui.mode !== 'move-robber') {
-      ui.mode = 'move-robber';
+    } else if (wantMode && wantMode !== 'setup-settlement' && ui.mode !== wantMode) {
+      ui.mode = wantMode;
       ui.pending = null;
     }
-    if (aw.type === 'barbarianDefense' && ui.mode !== 'raze-city') {
-      ui.mode = 'raze-city';
-      ui.pending = null;
+    if (keep && keep !== 'steal' && ui.dialog?.type !== keep) {
+      ui.dialog = keep === 'discard'
+        ? {
+            type: 'discard',
+            // 都市と騎士では商品も捨て札の対象(手札上限に数えるため)
+            counts: {
+              wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0,
+              cloth: 0, coin: 0, paper: 0,
+            },
+          }
+        : { type: keep };
     }
-    if (aw.type === 'discard' && ui.dialog?.type !== 'discard') {
-      ui.dialog = {
-        type: 'discard',
-        // 都市と騎士では商品も捨て札の対象(手札上限に数えるため)
-        counts: {
-          wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0,
-          cloth: 0, coin: 0, paper: 0,
-        },
-      };
-    }
-    if (aw.type === 'tradeOffer' && ui.dialog?.type !== 'tradeOffer') {
-      ui.dialog = { type: 'tradeOffer' };
-    }
-    if (aw.type === 'aqueduct' && ui.dialog?.type !== 'aqueduct') {
-      ui.dialog = { type: 'aqueduct' };
-    }
-  } else {
-    if (forced) {
-      ui.mode = 'idle';
-      ui.pending = null;
-      ui.pendingVertex = null;
-    }
-    if (['discard', 'steal', 'tradeOffer', 'aqueduct'].includes(ui.dialog?.type)) ui.dialog = null;
+  } else if (!mine && forced) {
+    ui.mode = 'idle';
+    ui.pending = null;
+    ui.pendingVertex = null;
   }
 }
 
@@ -863,6 +889,33 @@ function resizeCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+// 発展カード(基本モード)の使用開始: 盤面から選ぶものは選択モードへ
+function startDevPlay(type) {
+  if (type === 'knight') {
+    doAction({ type: 'PLAY_DEV_CARD', player: HUMAN, card: 'knight' });
+    return;
+  }
+  if (type === 'roadBuilding') {
+    // 建てられる辺があるかだけ先に確かめる(なければ理由を出して札を減らさない)
+    const err = validateAction(state, {
+      type: 'PLAY_DEV_CARD', player: HUMAN, card: 'roadBuilding',
+      params: { edges: [legalRoadEdges(state, HUMAN)[0]].filter(Boolean) },
+    });
+    if (err) {
+      ui.toast = err;
+      refresh();
+      return;
+    }
+    ui.mode = 'play-road-building';
+    ui.pendingEdges = [];
+    refresh();
+    return;
+  }
+  if (type === 'yearOfPlenty') ui.dialog = { type: 'yop', picks: [] };
+  else if (type === 'monopoly') ui.dialog = { type: 'monopoly' };
+  refresh();
+}
+
 // 進歩カードの使用開始: パラメータ種別に応じて盤面選択モードかダイアログへ
 function startProgressPlay(index) {
   const card = state.players[HUMAN].progressCards[index];
@@ -918,6 +971,9 @@ function doAction(action) {
       refresh();
       return false;
     }
+    // 割り込みへの応答を送ったことを覚えておく。返信が届くまで手元の state は
+    // まだ同じ割り込みを指しているので、目印がないとダイアログを開き直してしまう。
+    ui.sentAwaiting = state.awaiting;
     // 入力状態だけ畳んで、盤面の更新はサーバーからの state を待つ
     resetInputState();
     refresh();
@@ -1267,6 +1323,7 @@ document.addEventListener('click', (e) => {
     }
     case 'net-mode': net?.setSettings({ mode: arg }); return;
     case 'net-diff': net?.setSettings({ difficulty: arg }); return;
+    case 'net-dice': net?.setSettings({ diceMode: arg }); return;
     case 'net-fill': net?.setSettings({ cpuFill: arg === 'on' }); return;
     case 'net-start': net?.start(); return;
     case 'net-leave': leaveNet(true); return;
@@ -1318,6 +1375,7 @@ document.addEventListener('click', (e) => {
     case 'set-mode': settings.mode = arg; refresh(); return;
     case 'set-cpu': settings.cpuCount = Number(arg); refresh(); return;
     case 'set-diff': settings.difficulty = arg; refresh(); return;
+    case 'set-dice': settings.diceMode = arg; refresh(); return;
 
     case 'pexpand':
       ui.expandedPlayer = ui.expandedPlayer === Number(arg) ? null : Number(arg);
@@ -1340,27 +1398,25 @@ document.addEventListener('click', (e) => {
       return;
     }
 
-    case 'play-dev': {
-      if (arg === 'knight') {
-        doAction({ type: 'PLAY_DEV_CARD', player: HUMAN, card: 'knight' });
-      } else if (arg === 'roadBuilding') {
-        const err = validateAction(state, {
-          type: 'PLAY_DEV_CARD', player: HUMAN, card: 'roadBuilding',
-          params: { edges: [legalRoadEdges(state, HUMAN)[0]].filter(Boolean) },
-        });
-        if (err) { ui.toast = err; refresh(); return; }
-        ui.mode = 'play-road-building';
-        ui.pendingEdges = [];
-        refresh();
-      } else if (arg === 'yearOfPlenty') {
-        ui.dialog = { type: 'yop', picks: [] };
-        refresh();
-      } else if (arg === 'monopoly') {
-        ui.dialog = { type: 'monopoly' };
-        refresh();
-      }
+    // 手札の発展カードをタップ → まず説明ダイアログ(そこから「使う」)。
+    // 使えないカードもタップできるようにして、理由が伝わるようにする。
+    case 'dev-info': {
+      const index = Number(arg);
+      if (!state.players[HUMAN].devCards[index]) return;
+      ui.dialog = { type: 'dev-info', index };
+      refresh();
       return;
     }
+
+    case 'dev-use': {
+      const card = state.players[HUMAN].devCards[Number(arg)];
+      if (!card) return;
+      ui.dialog = null;
+      startDevPlay(card.type);
+      return;
+    }
+
+    case 'play-dev': startDevPlay(arg); return;
 
     case 'trade-open':
       ui.dialog = { type: 'trade', tab: 'bank', give: null, receive: null, pgive: {}, precv: {} };
@@ -1384,22 +1440,14 @@ document.addEventListener('click', (e) => {
       if (--ui.dialog.precv[arg] <= 0) delete ui.dialog.precv[arg];
       refresh();
       return;
-    case 'pt-propose': {
+    // 相手を選んで提案する。CPU も人間も同じ「提案 → 応答」の流れで扱うので、
+    // オンライン対戦でも相手のプレイヤーに交易を持ちかけられる。
+    case 'pt-offer': {
       const { pgive, precv } = ui.dialog;
-      for (const pl of state.players) {
-        if (!pl.isCPU) continue;
-        const action = {
-          type: 'TRADE_PLAYERS', player: HUMAN, partner: pl.id,
-          give: { ...pgive }, receive: { ...precv },
-        };
-        if (validateAction(state, action) === null &&
-            cpuAcceptsTrade(state, pl.id, pgive, precv)) {
-          doAction(action);
-          return;
-        }
-      }
-      ui.toast = '誰も交易に応じませんでした';
-      refresh();
+      doAction({
+        type: 'OFFER_TRADE', player: HUMAN, partner: Number(arg),
+        give: { ...pgive }, receive: { ...precv },
+      });
       return;
     }
     case 'aq':

@@ -74,7 +74,8 @@ dispatch(state, action)
               progressCards, progressVP, defenderPoints, treasures, ... }],
   bank,                    // resources 各19・devDeck・commodities 各12・progressDecks
   dice, eventDie,          // eventDie は cak のみ('ship' | 各進歩デッキ)
-  turnFlags,               // rolled / playedDev / fleet / offeredTrade / alchemist ...
+  diceMode, diceDeck,      // 'balanced'(36通りの山札から引く。既定) | 'random'
+  turnFlags,               // rolled / playedDev / fleet / offeredTo / alchemist ...
   longestRoad, largestArmy,
   knights, walls, merchant, barbarians, metropolis,   // 都市と騎士
   dragon, towers, burned,                             // ドラゴンの島
@@ -232,6 +233,7 @@ Durable Object がそのまま `import` して使える。**ルール実装は 1
 - 他プレイヤーの `devCards` / `progressCards` → 同じ枚数の `hidden` に置換
 - `bank.devDeck` / `progressDecks` → 中身を `null` に(枚数は購入可否の判定に必要)
 - `state.rng` → `0`(未来の出目を予測させない)
+- `state.diceDeck` → 中身を `null` に(**残り枚数は公開情報**なので長さは保つ)
 - **決着後は全公開**(隠し勝利点を含む最終得点を正しく出すため)
 
 ### 放置された部屋の自動切断
