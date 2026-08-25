@@ -43,7 +43,7 @@ export class RoomCore {
     this.phase = 'lobby'; // 'lobby' | 'playing'
     this.seats = Array(MAX_SEATS).fill(null); // { clientId, name, online } | null(=CPU席)
     this.hostId = null;
-    this.settings = { mode: 'cak', difficulty: 'normal', cpuFill: true };
+    this.settings = { mode: 'cak', difficulty: 'normal', cpuFill: true, diceMode: 'balanced' };
     this.state = null;
     this.version = 0; // 状態を配るたびに増える(クライアントの取りこぼし検出用)
     this.lastAction = null; // 直前に適用されたアクション(演出の再生用)
@@ -134,6 +134,7 @@ export class RoomCore {
     if (['base', 'cak', 'dragon'].includes(patch?.mode)) next.mode = patch.mode;
     if (['easy', 'normal', 'hard'].includes(patch?.difficulty)) next.difficulty = patch.difficulty;
     if (typeof patch?.cpuFill === 'boolean') next.cpuFill = patch.cpuFill;
+    if (['balanced', 'random'].includes(patch?.diceMode)) next.diceMode = patch.diceMode;
     this.settings = next;
     return { ok: true };
   }
@@ -163,6 +164,7 @@ export class RoomCore {
       names,
       mode: this.settings.mode,
       difficulty: this.settings.difficulty,
+      diceMode: this.settings.diceMode,
     });
     for (let i = 0; i < playerCount; i++) {
       this.state.players[i].isCPU = !this.seats[i];
@@ -262,6 +264,8 @@ export class RoomCore {
     return {
       ...full,
       rng: 0, // 未来の出目を予測させない
+      // バランスダイスの山札も中身は伏せる(残り枚数は公開情報なので長さは保つ)
+      diceDeck: Array.isArray(full.diceDeck) ? full.diceDeck.map(() => null) : [],
       bank: {
         ...full.bank,
         devDeck: full.bank.devDeck.map(() => null),

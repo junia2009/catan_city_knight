@@ -227,9 +227,12 @@ export function validateAction(state, action) {
 
     case 'OFFER_TRADE': {
       if (!state.turnFlags.rolled) return '先にダイスを振ってください';
-      if (state.turnFlags.offeredTrade) return 'このターンはすでに交易を提案しました';
       const partner = state.players[action.partner];
       if (!partner || action.partner === pid) return '交易相手が不正です';
+      // 同じ相手への提案は1手番に1回まで(相手が違えば提案できる)
+      if (state.turnFlags.offeredTo?.[action.partner]) {
+        return 'この相手にはこの手番ですでに提案しました';
+      }
       return validateTradeContents(state, p, partner, action.give, action.receive);
     }
 
@@ -652,7 +655,7 @@ function applyAction(state, action) {
 
     case 'OFFER_TRADE': {
       const partner = state.players[action.partner];
-      state.turnFlags.offeredTrade = true;
+      state.turnFlags.offeredTo = { ...(state.turnFlags.offeredTo ?? {}), [action.partner]: true };
       state.awaiting = {
         type: 'tradeOffer',
         players: [action.partner],

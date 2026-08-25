@@ -102,7 +102,7 @@ test('OFFER_TRADE → RESPOND_TRADE(承諾): 割り込みが立ち、承諾で�
   });
   assert.equal(s.awaiting?.type, 'tradeOffer');
   assert.deepEqual(s.awaiting.players, [1]);
-  assert.equal(s.turnFlags.offeredTrade, true);
+  assert.equal(s.turnFlags.offeredTo[1], true);
   // 応答待ち中は他のアクションは通らない
   assert.match(
     validateAction(s, { type: 'BUILD_ROAD', player: 0, edgeId: 'x' }),
@@ -117,12 +117,13 @@ test('OFFER_TRADE → RESPOND_TRADE(承諾): 割り込みが立ち、承諾で�
   assert.ok(s.log.some((l) => l.startsWith('🤝')));
 });
 
-test('OFFER_TRADE → RESPOND_TRADE(拒否): 交換されず、同ターンの再提案も不可', () => {
+test('OFFER_TRADE → RESPOND_TRADE(拒否): 交換されず、同じ相手への再提案も不可', () => {
   let s = finishSetup(createGame({ seed: 5, humanIndex: -1 }));
   s.turnFlags.rolled = true;
   clearHands(s);
   s.players[0].resources.wood = 2;
   s.players[1].resources.wheat = 1;
+  s.players[2].resources.wheat = 1;
   s = dispatch(s, {
     type: 'OFFER_TRADE', player: 0, partner: 1,
     give: { wood: 1 }, receive: { wheat: 1 },
@@ -137,7 +138,15 @@ test('OFFER_TRADE → RESPOND_TRADE(拒否): 交換されず、同ターンの�
       type: 'OFFER_TRADE', player: 0, partner: 1,
       give: { wood: 1 }, receive: { wheat: 1 },
     }),
-    /すでに交易を提案しました/,
+    /すでに提案しました/,
+  );
+  // 相手が違えば同じ手番でも提案できる
+  assert.equal(
+    validateAction(s, {
+      type: 'OFFER_TRADE', player: 0, partner: 2,
+      give: { wood: 1 }, receive: { wheat: 1 },
+    }),
+    null,
   );
   // 割り込みがないときの RESPOND_TRADE は不正
   assert.notEqual(validateAction(s, { type: 'RESPOND_TRADE', player: 0, accept: true }), null);

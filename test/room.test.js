@@ -311,3 +311,25 @@ test('room: 放置の判定時刻は保存・復元される', () => {
   assert.equal(revived.lastActivityAt, room.lastActivityAt);
   assert.ok(revived.isIdle(), '復元後に放置判定が失われている');
 });
+
+test('room: 出目の設定はホストが選べ、バランスダイスの山札は伏せられる', () => {
+  const room = newRoom();
+  room.join({ clientId: 'c0', name: 'A' });
+  room.join({ clientId: 'c1', name: 'B' });
+  assert.equal(room.settings.diceMode, 'balanced'); // 既定はバランス
+  assert.ok(room.setSettings('c1', { diceMode: 'random' }).error, 'ホスト以外が変えられている');
+  assert.ok(!room.setSettings('c0', { diceMode: 'random' }).error);
+  assert.equal(room.settings.diceMode, 'random');
+  assert.ok(!room.setSettings('c0', { diceMode: 'ぐちゃぐちゃ' }).error);
+  assert.equal(room.settings.diceMode, 'random', '不正な値が通っている');
+
+  room.setSettings('c0', { diceMode: 'balanced', cpuFill: false });
+  room.start('c0');
+  assert.equal(room.state.diceMode, 'balanced');
+  // 何回か振って山札を減らしてから、席から見えるのは「残り枚数」だけであることを確かめる
+  room.state.diceDeck = [[1, 1], [2, 3], [4, 5]];
+  const view = room.viewFor(0);
+  assert.equal(view.diceDeck.length, 3, '残り枚数が伝わっていない');
+  assert.deepEqual(view.diceDeck, [null, null, null], '未来の出目が漏れている');
+  assert.equal(view.rng, 0);
+});

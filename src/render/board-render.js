@@ -774,6 +774,32 @@ function pulse(time) {
   return 0.55 + 0.35 * Math.sin(time / 260);
 }
 
+// 辺のハイライト: 道と同じ向き・長さの帯で描く。
+// 辺はヘックスの境界線(薄い砂色)の上に乗るので、濃い縁取りを付けないと埋もれる。
+function edgeMark(ctx, view, eid, a, sel) {
+  const [v1, v2] = LAYOUT.edges[eid].v.map((id) => LAYOUT.vertices[id]);
+  const [x1, y1] = toPixel(view, v1.x, v1.y);
+  const [x2, y2] = toPixel(view, v2.x, v2.y);
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const dx = (x2 - x1) * 0.62;
+  const dy = (y2 - y1) * 0.62;
+  const w = Math.max(5, view.scale * 0.13);
+  const line = (width, style) => {
+    ctx.lineWidth = width;
+    ctx.strokeStyle = style;
+    ctx.beginPath();
+    ctx.moveTo(mx - dx / 2, my - dy / 2);
+    ctx.lineTo(mx + dx / 2, my + dy / 2);
+    ctx.stroke();
+  };
+  ctx.save();
+  ctx.lineCap = 'round';
+  line(w + Math.max(3, view.scale * 0.05), `rgba(30,22,8,${sel ? 0.75 : a * 0.7})`);
+  line(w, sel ? 'rgba(83,224,138,0.95)' : `rgba(255,206,48,${a})`);
+  ctx.restore();
+}
+
 function drawHighlights(ctx, view, highlights, selected, time) {
   const a = pulse(time);
   const mark = (x, y, r, sel) => {
@@ -794,10 +820,9 @@ function drawHighlights(ctx, view, highlights, selected, time) {
     ctx.lineWidth = Math.max(2, view.scale * 0.04);
     ctx.stroke();
   }
+  // 辺は「置ける道の形」で光らせる(点だと選べる場所が分かりにくい)
   for (const eid of highlights.edges ?? []) {
-    const e = LAYOUT.edges[eid];
-    const [px, py] = toPixel(view, e.x, e.y);
-    mark(px, py, view.scale * 0.12, false);
+    edgeMark(ctx, view, eid, a, false);
   }
   for (const vid of highlights.vertices ?? []) {
     const v = LAYOUT.vertices[vid];
@@ -811,9 +836,7 @@ function drawHighlights(ctx, view, highlights, selected, time) {
       mark(px, py, view.scale * 0.16, true);
     }
     if (selected.edgeId) {
-      const e = LAYOUT.edges[selected.edgeId];
-      const [px, py] = toPixel(view, e.x, e.y);
-      mark(px, py, view.scale * 0.14, true);
+      edgeMark(ctx, view, selected.edgeId, a, true);
     }
     if (selected.hexId) {
       hexPath(ctx, view, selected.hexId, 0.92);
