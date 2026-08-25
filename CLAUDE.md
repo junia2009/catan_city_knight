@@ -12,7 +12,7 @@ npm run selfplay              # セルフプレイゲート(scripts/selfplay.js 
 node scripts/selfplay.js 1000 # ゲーム数を指定して回す(モード引数も可)
 node scripts/dice-audit.mjs   # 乱数の統計監査(χ²バッテリー)
 npm run server                # オンライン対戦サーバー(wrangler dev, :8787)
-npm run deploy:server         # Cloudflare へデプロイ(要ログイン)
+npm run deploy:server         # Cloudflare へ手動デプロイ(要ログイン。通常は不要 → デプロイの節)
 ```
 
 ビルド工程はない。ES Modules を直接ブラウザが読む(Three.js は `vendor/` + importmap)。
@@ -92,13 +92,19 @@ npm run serve         # 静的サイト(:8000)
 
 ## デプロイ
 
-静的サイト(GitHub Pages)とサーバー(Cloudflare)は**別々にデプロイする**。
+静的サイト(GitHub Pages)とサーバー(Cloudflare)は**別々のワークフローで**デプロイされる。
+どちらも `main` への push で自動的に走るので、**手動デプロイは不要**。
 
-- 開発ブランチで作業し、動作確認後に `main` へマージして push
-  (`main` push で `.github/workflows/pages.yml` が test → GitHub Pages deploy)。
-- サーバーを変更したら `npm run deploy:server`(GitHub Actions では動かない)。
-  ルールエンジン(`src/rules/`, `src/actions.js`)を変更した場合も、
-  サーバーが同じコードを取り込んでいるので**再デプロイが必要**。
+- 開発ブランチで作業し、動作確認後に `main` へマージして push。
+  - `.github/workflows/pages.yml` → test → GitHub Pages deploy(毎回走る)
+  - `.github/workflows/server.yml` → test → Cloudflare Workers deploy →
+    疎通確認(`/health`・部屋の作成・CORS・`DEFAULT_SERVER` との一致)。
+    `server/**`・`src/**`・`wrangler.toml` が変わったときだけ走る
+- ルールエンジン(`src/rules/`, `src/actions.js`)を変更した場合も、
+  サーバーが同じコードを取り込んでいるので再デプロイが必要 ──
+  これは `src/**` が `server.yml` の paths に入っているので自動で行われる。
+- `npm run deploy:server` は手元から緊急でデプロイしたいとき用(要 `wrangler login`)。
+  ワークフローが動いているなら使わなくてよい。
 - デプロイ確認: GitHub MCP の `actions_list` でワークフロー実行を取得し、
   push した SHA の `"head_sha"` を持つ run の `conclusion` が `success` になるまで確認する
   (完了まで 60〜90 秒程度)。
