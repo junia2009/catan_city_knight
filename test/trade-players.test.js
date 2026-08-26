@@ -117,6 +117,38 @@ test('OFFER_TRADE → RESPOND_TRADE(承諾): 割り込みが立ち、承諾で�
   assert.ok(s.log.some((l) => l.startsWith('🤝')));
 });
 
+test('OFFER_TRADE: 相手が持っていなくても提案でき、承諾だけが弾かれる', () => {
+  let s = finishSetup(createGame({ seed: 5, humanIndex: -1 }));
+  s.turnFlags.rolled = true;
+  clearHands(s);
+  s.players[0].resources.wood = 2; // 相手(席1)は小麦を1枚も持っていない
+  const offer = {
+    type: 'OFFER_TRADE', player: 0, partner: 1,
+    give: { wood: 1 }, receive: { wheat: 1 },
+  };
+  // 提案の可否は自分の手札だけで決まる(相手の手札が透けないように)
+  assert.equal(validateAction(s, offer), null);
+  s = dispatch(s, offer);
+  assert.equal(s.awaiting?.type, 'tradeOffer');
+  // 出せない相手は承諾できない。理由は応答者から見た向きで返る
+  assert.match(
+    validateAction(s, { type: 'RESPOND_TRADE', player: 1, accept: true }),
+    /^手札が足りません/,
+  );
+  // 断ることはいつでもできる
+  assert.equal(validateAction(s, { type: 'RESPOND_TRADE', player: 1, accept: false }), null);
+  // 自分が渡せない提案は今までどおり出せない
+  s.awaiting = null;
+  s.turnFlags.offeredTo = {};
+  assert.match(
+    validateAction(s, {
+      type: 'OFFER_TRADE', player: 0, partner: 1,
+      give: { wood: 5 }, receive: { wheat: 1 },
+    }),
+    /手札が足りません/,
+  );
+});
+
 test('OFFER_TRADE → RESPOND_TRADE(拒否): 交換されず、同じ相手への再提案も不可', () => {
   let s = finishSetup(createGame({ seed: 5, humanIndex: -1 }));
   s.turnFlags.rolled = true;

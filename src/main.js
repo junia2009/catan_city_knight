@@ -916,39 +916,58 @@ function rollFx() {
   }
 }
 
-// 交易成立の目立つバナー(誰が何を渡し何を得たか)
-function showTradeFx(aName, bName, give, receive) {
+const tradeItems = (obj) =>
+  Object.entries(obj)
+    .map(([r, n]) => `${RES_ICON[r] ?? COM_ICON[r]}×${n}`)
+    .join(' ');
+
+function tradeBanner(cls, html, life = 2100) {
   const fxEl = document.getElementById('fx');
-  const items = (obj) =>
-    Object.entries(obj)
-      .map(([r, n]) => `${RES_ICON[r] ?? COM_ICON[r]}×${n}`)
-      .join(' ');
   const div = document.createElement('div');
-  div.className = 'tradefx';
-  div.innerHTML = `
-    <div class="tf-title">🤝 交易成立!</div>
-    <div class="tf-line"><b>${aName}</b><span class="tf-items">${items(give)}</span><span class="tf-arrow">➜</span><b>${bName}</b></div>
-    <div class="tf-line"><b>${aName}</b><span class="tf-arrow">⬅</span><span class="tf-items">${items(receive)}</span><b>${bName}</b></div>`;
+  div.className = cls;
+  div.innerHTML = html;
   fxEl.appendChild(div);
-  setTimeout(() => div.classList.add('out'), 2100);
-  setTimeout(() => div.remove(), 2600);
+  setTimeout(() => div.classList.add('out'), life);
+  setTimeout(() => div.remove(), life + 500);
 }
 
-// 成立した交易アクションならバナーを出す(人間・CPUどちらの取引でも)
+// 交易成立の目立つバナー(誰が何を渡し何を得たか)
+function showTradeFx(aName, bName, give, receive) {
+  tradeBanner('tradefx', `
+    <div class="tf-title">🤝 交易成立!</div>
+    <div class="tf-line"><b>${aName}</b><span class="tf-items">${tradeItems(give)}</span><span class="tf-arrow">➜</span><b>${bName}</b></div>
+    <div class="tf-line"><b>${aName}</b><span class="tf-arrow">⬅</span><span class="tf-items">${tradeItems(receive)}</span><b>${bName}</b></div>`);
+}
+
+// 断られたときのバナー。提案しっぱなしで結果が分からないままにしない。
+function showTradeDenyFx(byName, give, receive) {
+  tradeBanner('tradefx deny', `
+    <div class="tf-title">🚫 交易は不成立</div>
+    <div class="tf-line"><b>${byName}</b>が提案を断りました</div>
+    <div class="tf-line"><span class="tf-items">${tradeItems(give)}</span><span class="tf-arrow">⇄</span><span class="tf-items">${tradeItems(receive)}</span></div>`);
+}
+
+// 交易アクションならバナーを出す(人間・CPUどちらの取引でも、成立・不成立とも)
 function maybeTradeFx(action, prevAwaiting) {
   if (action.type === 'TRADE_PLAYERS') {
     showTradeFx(
       state.players[action.player].name, state.players[action.partner].name,
       action.give, action.receive,
     );
-  } else if (action.type === 'RESPOND_TRADE' && action.accept) {
-    const ctx = prevAwaiting?.type === 'tradeOffer' ? prevAwaiting.context : null;
-    if (ctx) {
-      showTradeFx(
-        state.players[ctx.from].name, state.players[action.player].name,
-        ctx.give, ctx.receive,
-      );
-    }
+    return;
+  }
+  if (action.type !== 'RESPOND_TRADE') return;
+  const ctx = prevAwaiting?.type === 'tradeOffer' ? prevAwaiting.context : null;
+  if (!ctx) return;
+  if (action.accept) {
+    showTradeFx(
+      state.players[ctx.from].name, state.players[action.player].name,
+      ctx.give, ctx.receive,
+    );
+  } else {
+    // 断ったのが自分なら「あなた」と呼ぶ(オンラインでは自分の表示名が出て紛らわしいため)
+    const by = action.player === HUMAN ? 'あなた' : state.players[action.player].name;
+    showTradeDenyFx(by, ctx.give, ctx.receive);
   }
 }
 

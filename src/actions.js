@@ -100,8 +100,8 @@ const AWAITING_ACTIONS = {
   aqueduct: 'PICK_AQUEDUCT',
 };
 
-// プレイヤー間交易の内容チェック(giver が give を、receiver が receive を差し出せるか)
-function validateTradeContents(state, giver, receiver, give, receive) {
+// 交易内容の形(種類と枚数)だけを見る。誰の手札も参照しない。
+function validateTradeShape(state, give, receive) {
   const keys = state.mode === 'cak' ? ALL_CARD_KEYS : RESOURCES;
   const validObj = (obj) =>
     obj != null &&
@@ -112,13 +112,24 @@ function validateTradeContents(state, giver, receiver, give, receive) {
   if (sumRes(give) === 0 || sumRes(receive) === 0) {
     return '渡すものともらうものを両方選んでください';
   }
-  for (const [r, n] of Object.entries(give)) {
-    if (cardCount(giver, r) < n) return '手札が足りません';
-  }
-  for (const [r, n] of Object.entries(receive)) {
-    if (cardCount(receiver, r) < n) return '相手の手札が足りません';
-  }
   return null;
+}
+
+const hasCards = (player, cards) =>
+  Object.entries(cards).every(([r, n]) => cardCount(player, r) >= n);
+
+// 提案の可否は「自分が渡せるか」だけで決める。
+// 相手が持っているかまで見ると、ボタンの活性や理由から相手の手札が透けてしまう
+// (実際のカタンでも、相手が持っていない物を要求する提案自体は自由にできる)。
+function validateOfferContents(state, giver, give, receive) {
+  return validateTradeShape(state, give, receive)
+    ?? (hasCards(giver, give) ? null : '手札が足りません');
+}
+
+// 成立させるときだけ両者の手札を見る(giver が give を、receiver が receive を出せるか)
+function validateTradeContents(state, giver, receiver, give, receive) {
+  return validateOfferContents(state, giver, give, receive)
+    ?? (hasCards(receiver, receive) ? null : '相手の手札が足りません');
 }
 
 export function validateAction(state, action) {
@@ -233,15 +244,21 @@ export function validateAction(state, action) {
       if (state.turnFlags.offeredTo?.[action.partner]) {
         return 'この相手にはこの手番ですでに提案しました';
       }
-      return validateTradeContents(state, p, partner, action.give, action.receive);
+      // 相手が持っているかは見ない(持っていなければ相手が断る)
+      return validateOfferContents(state, p, action.give, action.receive);
     }
 
     case 'RESPOND_TRADE': {
       if (aw?.type !== 'tradeOffer') return '交易提案はありません';
       if (!action.accept) return null;
       const { from, give, receive } = aw.context;
-      // 受諾時は提案者が give を、応答者(自分)が receive を差し出す
-      return validateTradeContents(state, state.players[from], p, give, receive);
+      // 受諾時は提案者が give を、応答者(自分)が receive を差し出す。
+      // 理由の文言は「応答者から見た」向きにする。
+      const err = validateTradeShape(state, give, receive);
+      if (err) return err;
+      if (!hasCards(p, receive)) return '手札が足りません';
+      if (!hasCards(state.players[from], give)) return '相手の手札が足りません';
+      return null;
     }
 
     case 'PICK_AQUEDUCT': {
