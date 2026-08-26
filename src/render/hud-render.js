@@ -696,7 +696,7 @@ function dialogHtml(state, ui) {
         .join('')}</div>`;
     return `<h3>⚙️ 設定</h3>
       <div class="srow"><span>表示</span>${seg('set-view', [['3d', '3D'], ['2d', '2D']], s.view)}</div>
-      <div class="srow"><span>モード</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本'], ['dragon', '🐉ドラゴン']], s.mode)}</div>
+      <div class="srow"><span>モード</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン']], s.mode)}</div>
       <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(s.cpuCount))}</div>
       <div class="srow"><span>BGM</span>${seg('set-bgm', [['on', '🔊 オン'], ['off', '🔇 オフ']], s.bgm ? 'on' : 'off')}</div>
       <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${s.seed}"></div>

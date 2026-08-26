@@ -36,7 +36,7 @@ export function zeroResources() {
 export function createGame({
   seed = 1, playerCount = 4, humanIndex = 0, names = null, mode = 'base',
   difficulty = 'hard', // CPU難易度: 'easy' | 'normal' | 'hard'(評価ノイズ量)
-  diceMode = 'balanced', // 出目: 'balanced'(36通りの山札) | 'random'(毎回独立)
+  diceMode = 'random', // 出目: 'random'(毎回独立。既定) | 'balanced'(36通りの山札)
 } = {}) {
   let rng = makeRng(seed);
   let board;

@@ -79,8 +79,8 @@ function setSeat(seat) {
 
 // 設定(⚙️シートから編集。新しいゲーム開始時に反映)
 const settings = {
-  view: '3d', mode: 'cak', cpuCount: 3, seed: '', difficulty: 'normal', bgm: true,
-  diceMode: 'balanced', // 'balanced'(36通りの山札) | 'random'(毎回独立)
+  view: '3d', mode: 'base', cpuCount: 3, seed: '', difficulty: 'normal', bgm: true,
+  diceMode: 'random', // 'random'(毎回独立。既定) | 'balanced'(36通りの山札)
 };
 
 // 画面フロー: title(タイトル) → select(ルール選択) / online(合言葉・ロビー) → game(ゲーム)
@@ -121,10 +121,10 @@ function renderSelectPanel() {
       .join('')}</div>`;
   panel.innerHTML = `
     <h3>⬡ ゲーム設定</h3>
-    <div class="srow"><span>ルール</span>${seg('set-mode', [['cak', '都市と騎士'], ['base', '基本'], ['dragon', '🐉ドラゴン']], settings.mode)}</div>
+    <div class="srow"><span>ルール</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン']], settings.mode)}</div>
     <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(settings.cpuCount))}</div>
     <div class="srow"><span>強さ</span>${seg('set-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], settings.difficulty)}</div>
-    <div class="srow"><span>出目</span>${seg('set-dice', [['balanced', 'バランス'], ['random', '純ランダム']], settings.diceMode)}</div>
+    <div class="srow"><span>出目</span>${seg('set-dice', [['random', '純ランダム'], ['balanced', 'バランス']], settings.diceMode)}</div>
     <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${settings.seed}"></div>
     <div class="row end">
       <button data-act="goto-rules:setup">❔ 選択肢の説明</button>
@@ -216,10 +216,10 @@ function renderOnlinePanel() {
       <small>この合言葉を友達に伝えてください</small>
     </div>
     <div class="seat-list">${seats}</div>
-    <div class="srow"><span>ルール</span>${seg('net-mode', [['cak', '都市と騎士'], ['base', '基本'], ['dragon', '🐉ドラゴン']], lb.settings.mode, !host)}</div>
+    <div class="srow"><span>ルール</span>${seg('net-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン']], lb.settings.mode, !host)}</div>
     <div class="srow"><span>空席</span>${seg('net-fill', [['on', 'CPUで埋める'], ['off', '人だけ']], lb.settings.cpuFill ? 'on' : 'off', !host)}</div>
     ${lb.settings.cpuFill ? `<div class="srow"><span>強さ</span>${seg('net-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], lb.settings.difficulty, !host)}</div>` : ''}
-    <div class="srow"><span>出目</span>${seg('net-dice', [['balanced', 'バランス'], ['random', '純ランダム']], lb.settings.diceMode ?? 'balanced', !host)}</div>
+    <div class="srow"><span>出目</span>${seg('net-dice', [['random', '純ランダム'], ['balanced', 'バランス']], lb.settings.diceMode ?? 'random', !host)}</div>
     <div class="net-status ${online.status}"><span class="dot"></span>${STATUS_JP[online.status] ?? ''}</div>
     ${err}
     <div class="net-note">${host ? '全員そろったら開始してください' : 'ホストが開始するのを待っています…'}</div>
