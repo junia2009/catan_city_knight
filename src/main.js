@@ -15,7 +15,8 @@ import {
 import { LAYOUT } from './rules/board.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
-import { drawBoard, hexCenterOf, toPixel } from './render/board-render.js';
+import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-render.js';
+import { avatarSvg } from './render/avatars.js';
 import { renderHUD, RES_ICON, COM_ICON, setHumanSeat } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
 import { Bgm } from './audio/bgm.js';
@@ -135,7 +136,6 @@ function renderSelectPanel() {
 
 // ---- オンライン対戦の画面 ----
 
-const PLAYER_COLORS_CSS = ['#e04848', '#3d7dd8', '#f0973c', '#9d5fd8'];
 const STATUS_JP = {
   idle: '未接続',
   connecting: '接続中…',
@@ -201,7 +201,7 @@ function renderOnlinePanel() {
         <span class="tag">${lb.settings.cpuFill ? 'CPUが入ります' : '空席'}</span></div>`;
     }
     const isMe = s.seat === net?.seat;
-    return `<div class="seat-row" style="--pc:${PLAYER_COLORS_CSS[s.seat]}">
+    return `<div class="seat-row" style="--pc:${PLAYER_COLORS[s.seat]}">
       <span>${s.name}${isMe ? '(あなた)' : ''}</span>
       ${lb.hostSeat === s.seat ? '<span class="tag host">ホスト</span>' : ''}
       ${s.online ? '' : '<span class="tag off">切断中</span>'}
@@ -493,6 +493,7 @@ function newGame() {
     diceMode: settings.diceMode,
   });
   ui = freshUi();
+  lastTurnKey = null; // 新しい対戦なので、1手目の合図から出し直す
   refresh();
   scheduleCpu();
 }
@@ -776,6 +777,74 @@ function refresh() {
     }
   }
   renderHUD(state, ui);
+  maybeTurnFx();
+}
+
+// ---- 手番の合図 ----
+//
+// 「気づいたら自分の番だった」を無くすための演出。
+// 手番が移るたびに、誰の番かを画面の真ん中に大きく出す。
+
+// いま手を打つ人。初期配置は awaiting が順番を持っているのでそちらを見る。
+function onTheClock(s) {
+  if (!s || (s.phase !== 'main' && s.phase !== 'setup')) return null;
+  if (s.phase === 'setup') return s.awaiting?.players[0] ?? null;
+  return s.currentPlayer;
+}
+
+// 「同じ手番」を表す鍵。割り込み(捨て札・盗賊)では変わらないので連打しない。
+function turnKey(s) {
+  const pid = onTheClock(s);
+  if (pid == null) return null;
+  return s.phase === 'setup' ? `setup:${s.setup.index}` : `main:${s.turn}:${pid}`;
+}
+
+let lastTurnKey = null;
+
+function maybeTurnFx() {
+  // あそびかた画面などへ寄り道しているあいだは光らせない。
+  // 鍵は覚えたままにして、戻ってきただけで同じ手番を告げ直さないようにする。
+  if (screen !== 'game') {
+    document.body.classList.remove('myturn');
+    return;
+  }
+  const key = turnKey(state);
+  if (key == null) { // 決着後・対戦前
+    lastTurnKey = null;
+    document.body.classList.remove('myturn');
+    return;
+  }
+  const pid = onTheClock(state);
+  document.body.classList.toggle('myturn', pid === HUMAN);
+  if (key === lastTurnKey) return;
+  lastTurnKey = key;
+  // デモ再生中は出さない(台本の字幕が進行を説明しているので、被ると読みにくい)
+  if (demoRunning) return;
+  showTurnFx(pid);
+}
+
+function showTurnFx(pid) {
+  const p = state.players[pid];
+  if (!p) return;
+  const fxEl = document.getElementById('fx');
+  fxEl.querySelector('.turnfx')?.remove(); // 早送り気味に進んだときは前の合図を捨てる
+  const mine = pid === HUMAN;
+  const div = document.createElement('div');
+  div.className = `turnfx ${mine ? 'me' : ''}`;
+  div.style.setProperty('--pc', PLAYER_COLORS[pid]);
+  div.innerHTML = `
+    <span class="turnfx-band"></span>
+    <span class="turnfx-card">
+      <span class="chip">${avatarSvg(pid)}</span>
+      <span class="turnfx-text">
+        <b>${mine ? 'あなたの番' : `${p.name}の番`}</b>
+        <small>${state.phase === 'setup' ? '初期配置' : `${state.turn + 1}ターン目`}</small>
+      </span>
+    </span>`;
+  fxEl.appendChild(div);
+  const life = mine ? 2000 : 1100;
+  setTimeout(() => div.classList.add('out'), life);
+  setTimeout(() => div.remove(), life + 420);
 }
 
 // 資源獲得のフローティング表示(ロール後)
