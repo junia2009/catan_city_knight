@@ -13,7 +13,7 @@
 
 import { LAYOUT, TERRAIN_RESOURCE } from '../rules/board.js';
 import { validateAction } from '../actions.js';
-import { canPlaceSettlement, totalCards } from '../rules/build.js';
+import { canPlaceSettlement, piecesLeft, totalCards } from '../rules/build.js';
 import { tradeRate } from '../rules/trade.js';
 import { stealableTargets } from '../rules/robber.js';
 import { chooseAction } from '../ai/cpu-player.js';
@@ -23,22 +23,30 @@ import {
 } from '../ai/legal-moves.js';
 import {
   DEMO_PLAYER as P, bestRollFor, cutToTurn, ensure, forceRoll,
-  pickBest, pipsOf, trimHand, vertexValue,
+  pickBest, pipsOf, seedDiceLog, stackDevDeck, trimHand, vertexValue,
 } from './scenario.js';
 
 // ---- 盤面から「見せ場」を選ぶ ----
 
-// 先に開拓地を建てられる場所へ伸びる道を選ぶ
-function pickRoad(state) {
-  return pickBest(legalRoadEdges(state, P), (eid) => {
-    let best = -1;
-    for (const vid of LAYOUT.edges[eid].v) {
-      if (canPlaceSettlement(state, P, vid, { needRoad: false }) !== null) continue;
-      best = Math.max(best, vertexValue(state, vid));
-    }
-    return best;
-  });
+// 辺の「伸ばし甲斐」: その先に開拓地を建てられる良い土地があるか
+function roadScore(state, eid) {
+  let best = -1;
+  for (const vid of LAYOUT.edges[eid].v) {
+    if (canPlaceSettlement(state, P, vid, { needRoad: false }) !== null) continue;
+    best = Math.max(best, vertexValue(state, vid));
+  }
+  return best;
 }
+
+// 先に開拓地を建てられる場所へ伸びる道を選ぶ
+const pickRoad = (state) => pickBest(legalRoadEdges(state, P), (eid) => roadScore(state, eid));
+
+// 街道建設カードの2本目(1本目を建てたことにして選び直す)
+const pickNextRoad = (state, first) =>
+  pickBest(
+    legalRoadEdges(state, P, { extraRoads: { [first]: true } }),
+    (eid) => roadScore(state, eid),
+  );
 
 const pickSettlement = (state) =>
   pickBest(legalSettlementVertices(state, P), (vid) => vertexValue(state, vid));
@@ -74,6 +82,10 @@ function pickRobberHex(state) {
     return targets ? 100 * targets + pipsOf(state, hid) : 0;
   });
 }
+
+// プレイヤー間交易のデモの中身。相手・渡すもの・もらうものを固定して、
+// 字幕と画面のチップが必ず一致するようにする(prep で両者の手札を用意する)。
+const PT = { partner: 1, give: 'wood', giveN: 2, receive: 'ore', receiveN: 1 };
 
 // 銀行と2:1〜4:1で交換できるだけの資源を持たせ、その資源と交換先を決める
 function bankTradePlan(state) {
@@ -295,6 +307,17 @@ const basicBeats = [
     hold: 700,
   },
   {
+    say: (s) => `📦 コマは1人ぶんしかありません(道15本・開拓地5軒・都市4つ)。ボタンの右上の数字が残りで、いまは 道${
+      piecesLeft(s, P, 'road')}・開拓地${piecesLeft(s, P, 'settlement')}・都市${
+      piecesLeft(s, P, 'city')} ── 資源があってもコマが尽きたら建てられません。`,
+    tap: () => ({ btn: 'mode:settlement' }),
+    hold: 2000,
+  },
+  {
+    say: '開拓地を都市に昇格させると、開拓地のコマが1つ手元に戻ります。どこを都市にするかは、コマのやりくりでもあります。',
+    hold: 1600,
+  },
+  {
     say: '⚖️ 資源が偏ったら交易。「交易」から銀行と交換できます。',
     prep: (s) => {
       const { give, rate } = bankTradePlan(s);
@@ -317,26 +340,71 @@ const basicBeats = [
     hold: 500,
   },
   {
-    say: '「プレイヤー」タブなら、CPU に交換を持ちかけることもできます。',
+    say: '銀行との交換はこれで完了です。',
     tap: () => ({ sel: '[data-act="trade-confirm"]' }),
     action: (s, ui) => ({
       type: 'TRADE_BANK', player: P, give: ui.dialog?.give, receive: ui.dialog?.receive,
     }),
-    hold: 1300,
+    hold: 900,
+  },
+  {
+    say: '🤝 相手と直接やりとりもできます。もう一度「交易」を開いて、「プレイヤー」タブへ。',
+    prep: (s) => {
+      ensure(s, P, { [PT.give]: PT.giveN });
+      ensure(s, PT.partner, { [PT.receive]: PT.receiveN });
+    },
+    tap: () => ({ btn: 'trade-open' }),
+    ui: () => ({ dialog: { type: 'trade', tab: 'bank', give: null, receive: null, pgive: {}, precv: {} } }),
+    hold: 900,
+  },
+  {
+    say: 'タブを切り替えると、渡すもの・もらうものを枚数で組み立てられます。',
+    tap: () => ({ sel: '[data-act="trade-tab:players"]' }),
+    ui: (s, ui) => ({ dialog: { ...ui.dialog, tab: 'players' } }),
+    hold: 1200,
+  },
+  {
+    say: `渡すものをタップして追加。ここでは🪵木材を${PT.giveN}枚。`,
+    tap: () => ({ sel: `[data-act="ptg-add:${PT.give}"]` }),
+    ui: (s, ui) => ({ dialog: { ...ui.dialog, pgive: { [PT.give]: PT.giveN } } }),
+    hold: 1100,
+  },
+  {
+    say: `もらうものも同じように。🪨鉱石を${PT.receiveN}枚もらう提案にします。`,
+    tap: () => ({ sel: `[data-act="ptr-add:${PT.receive}"]` }),
+    ui: (s, ui) => ({ dialog: { ...ui.dialog, precv: { [PT.receive]: PT.receiveN } } }),
+    hold: 1100,
+  },
+  {
+    say: '相手を選んで提案。同じ相手には1手番に1回までですが、別の相手にはあらためて持ちかけられます。',
+    tap: () => ({ sel: `[data-act="pt-offer:${PT.partner}"]` }),
+    action: () => ({
+      type: 'OFFER_TRADE', player: P, partner: PT.partner,
+      give: { [PT.give]: PT.giveN }, receive: { [PT.receive]: PT.receiveN },
+    }),
+    hold: 1600,
+  },
+  {
+    say: '相手の手元には「🤝 交換する / 断る」が出ます。今回は受けてもらえました。',
+    action: () => ({ type: 'RESPOND_TRADE', player: PT.partner, accept: true }),
+    hold: 1800,
   },
   {
     say: '📜 発展カードは 🐑1 🌾1 🪨1。騎士・街道建設・収穫・独占・勝利点が入っています。',
-    prep: (s) => ensure(s, P, { sheep: 1, wheat: 1, ore: 1 }),
+    prep: (s) => {
+      ensure(s, P, { sheep: 1, wheat: 1, ore: 1 });
+      stackDevDeck(s, 'roadBuilding'); // 次の章で使うカードを引かせる
+    },
     tap: () => ({ btn: 'buy-dev' }),
     action: () => ({ type: 'BUY_DEV_CARD', player: P }),
     hold: 1500,
   },
   {
-    say: 'カードは買ったターンには使えません。次の手番から、手札のカードをタップして使います。',
-    hold: 700,
+    say: '引いたのは「街道建設」。カードは買ったターンには使えないので、次の手番までお預けです。',
+    hold: 1200,
   },
   {
-    say: 'やることが済んだら「⏭ ターン終了」で次の人へ。',
+    say: 'やることが済んだら「⏭ 終了」で次の人へ。',
     tap: () => ({ btn: 'end-turn' }),
     action: () => ({ type: 'END_TURN', player: P }),
     hold: 700,
@@ -380,6 +448,54 @@ const basicBeats = [
         }
       : { type: 'MOVE_ROBBER', player: P, hexId: ui.pending?.hexId, targetPlayer: null }),
     hold: 1500,
+  },
+  {
+    say: '📜 発展カードは手札のカードをタップ。効果と「✨ 使う」が出ます。',
+    tap: () => ({ sel: '[data-act="dev-info:0"]' }),
+    ui: () => ({ dialog: { type: 'dev-info', index: 0 } }),
+    hold: 1600,
+  },
+  {
+    say: '「街道建設」は道を2本ぶん無料で建てられるカード。使うと、建てられる辺が光ります。',
+    tap: () => ({ sel: '[data-act="dev-use:0"]' }),
+    ui: () => ({ dialog: null, mode: 'play-road-building', pendingEdges: [], pending: null }),
+    hold: 1400,
+  },
+  {
+    say: 'どこへ伸ばすかは自分で選べます。まず1本目。',
+    tap: (s) => ({ edge: pickRoad(s) }),
+    ui: (s) => ({ pendingEdges: [pickRoad(s)] }),
+    hold: 900,
+  },
+  {
+    say: '続けて2本目。1本目の先へつなげることもできます。',
+    tap: (s, ui) => ({ edge: pickNextRoad(s, ui.pendingEdges[0]) }),
+    ui: (s, ui) => ({
+      pendingEdges: [...ui.pendingEdges, pickNextRoad(s, ui.pendingEdges[0])],
+    }),
+    hold: 1000,
+  },
+  {
+    say: '「✓ 確定」でまとめて建設。資源は使いません。',
+    tap: () => ({ btn: 'confirm' }),
+    action: (s, ui) => ({
+      type: 'PLAY_DEV_CARD', player: P, card: 'roadBuilding',
+      params: { edges: [...ui.pendingEdges] },
+    }),
+    hold: 1400,
+  },
+  {
+    say: '📊 ダイスの横の記録ボタンで、2〜12がそれぞれ何回出たかを見られます。',
+    prep: (s) => seedDiceLog(s),
+    tap: () => ({ btn: 'dicelog-open' }),
+    ui: () => ({ dialog: { type: 'dicelog' } }),
+    hold: 1400,
+  },
+  {
+    say: '6と8が出やすく、2と12は出にくい ── 実際の偏りを見ながら次の一手を考えられます。',
+    tap: () => ({ sel: '[data-act="dialog-cancel"]' }),
+    ui: () => ({ dialog: null }),
+    hold: 1600,
   },
   {
     say: '🛤 つながった自分の道が5本以上で最長なら「最長交易路 +2点」。騎士カード3枚で「最大騎士力 +2点」。',
@@ -527,7 +643,7 @@ const cakBeats = [
     hold: 1000,
   },
   {
-    say: '🧱 城壁は 🧱2。7が出たときの手札上限が 7→9 に増えます(都市ひとつに3枚まで)。',
+    say: '🧱 城壁は 🧱2。7が出たときの手札上限が1枚につき +2(7→9)。ボタンの数字のとおり、1人3枚までです。',
     prep: (s) => ensure(s, P, { brick: 2 }),
     tap: () => ({ btn: 'mode:wall' }),
     ui: () => ({ mode: 'build-wall' }),

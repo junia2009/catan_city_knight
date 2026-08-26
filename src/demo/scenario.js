@@ -100,7 +100,28 @@ function cardsOf(player, key) {
   return RESOURCES.includes(key) ? player.resources[key] : player.commodities[key];
 }
 
+// ---- 山札の仕込み ----
+
+// 発展カードの山札の一番上に、見せたい種類を持ってくる。
+// 山札の中身は入れ替えず並べ替えるだけなので、枚数の構成は本物のまま。
+export function stackDevDeck(state, type) {
+  const deck = state.bank.devDeck;
+  const i = deck.lastIndexOf(type);
+  if (i < 0) return false;
+  deck.push(...deck.splice(i, 1));
+  return true;
+}
+
 // ---- 出目の仕込み ----
+
+// 「出目の記録」を見せるための、それらしい履歴。
+// 実際に振った回数ではないが、棒グラフの見え方を説明できる山なりの分布にする。
+const DICE_LOG_SAMPLE = [0, 0, 1, 2, 4, 5, 7, 8, 6, 5, 3, 2, 1];
+
+export function seedDiceLog(state) {
+  const counts = state.diceCounts ?? Array(13).fill(0);
+  state.diceCounts = counts.map((n, i) => Math.max(n, DICE_LOG_SAMPLE[i] ?? 0));
+}
 
 // 赤黄の目を固定し、必要ならイベントダイスの目も出るまで乱数状態を進める。
 // 錬金術師と同じ turnFlags.alchemist を使うので、ルールエンジンには手を入れない。
