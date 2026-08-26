@@ -127,6 +127,7 @@ function renderSelectPanel() {
     <div class="srow"><span>出目</span>${seg('set-dice', [['balanced', 'バランス'], ['random', '純ランダム']], settings.diceMode)}</div>
     <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${settings.seed}"></div>
     <div class="row end">
+      <button data-act="goto-rules:setup">❔ 選択肢の説明</button>
       <button data-act="goto-title">← タイトル</button>
       <button class="primary" data-act="start-game">ゲーム開始</button>
     </div>`;
@@ -223,6 +224,7 @@ function renderOnlinePanel() {
     ${err}
     <div class="net-note">${host ? '全員そろったら開始してください' : 'ホストが開始するのを待っています…'}</div>
     <div class="row end">
+      <button data-act="goto-rules:setup">❔ 選択肢の説明</button>
       <button data-act="net-leave">← 退出</button>
       ${host ? '<button class="primary" data-act="net-start">対戦開始</button>' : ''}
     </div>`;
@@ -432,13 +434,16 @@ function endDemo(where) {
   setScreen(demoReturn === 'rules' ? 'rules' : 'title');
 }
 
-// 説明書画面(タイトルから遷移)
+// 説明書画面(タイトル・設定画面・ロビーから遷移)
 let rulesTab = 'basic';
+// 開く前の画面。閉じたらここへ戻す(ロビーから開いても部屋に戻れるように)
+let rulesFrom = 'title';
 function renderRulesPanel() {
   const panel = document.getElementById('rules-panel');
   if (!panel || screen !== 'rules') return;
+  const backLabel = { select: '← 設定へ', online: '← 部屋へ' }[rulesFrom] ?? '← タイトルへ';
   panel.innerHTML = `<h3>📖 あそびかた</h3>${rulesHtml(rulesTab)}
-    <div class="row end rules-close"><button class="primary" data-act="rules-back">← タイトルへ</button></div>`;
+    <div class="row end rules-close"><button class="primary" data-act="rules-back">${backLabel}</button></div>`;
 }
 
 // モバイル判定: レイアウトを body.mobile で切り替える
@@ -1261,7 +1266,11 @@ document.addEventListener('click', (e) => {
       if (isOnline()) leaveNet(true);
       else setScreen('title');
       return;
-    case 'goto-rules': setScreen('rules'); return;
+    case 'goto-rules':
+      if (screen !== 'rules') rulesFrom = screen;
+      if (arg) rulesTab = arg;
+      setScreen('rules');
+      return;
     case 'demo': startDemo(arg, screen === 'rules' ? 'rules' : 'title'); return;
     case 'reload-app': location.reload(); return;
 
@@ -1339,7 +1348,7 @@ document.addEventListener('click', (e) => {
       syncBgmButtons();
       refresh();
       return;
-    case 'rules-back': setScreen('title'); return;
+    case 'rules-back': setScreen(rulesFrom === 'rules' ? 'title' : rulesFrom); return;
     case 'rules-tab':
       if (ui?.dialog?.type === 'rules') ui.dialog.tab = arg;
       else rulesTab = arg;

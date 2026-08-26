@@ -424,8 +424,11 @@
     gap: 10px;
     -webkit-overflow-scrolling: touch;
   }
-  .rules-tabs { position: sticky; top: -6px; z-index: 2; padding: 6px 0;
+  /* タブは5つあるので、狭い画面では折り返す(折り返した1つが横幅いっぱいに
+     伸びないよう、タブだけは内容幅にする) */
+  .rules-tabs { position: sticky; top: -6px; z-index: 2; padding: 6px 0; flex-wrap: wrap;
     background: linear-gradient(180deg, #17334f 75%, transparent); }
+  .seg.rules-tabs button { flex: 0 1 auto; }
   .rules-body { display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
   .rules-body h4 {
     color: var(--accent2); font-size: 14.5px; margin-top: 10px;
