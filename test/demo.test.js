@@ -93,18 +93,21 @@ test('デモ 第1章: 初期配置を最初から見せられる(あなた2回 +
   assert.ok(totalCards(me) >= 2, `初期資源が入っていない: ${totalCards(me)}枚`);
 });
 
-test('デモ 第2章: 全ビートが通り、道・開拓地・都市・交易・盗賊まで見せられる', () => {
+test('デモ 第2章: 建設・銀行交易・プレイヤー交易・発展カード・盗賊まで見せられる', () => {
   const { state, taps, actions } = dryRun(findChapter('basic'));
-  const me = state.players[DEMO_PLAYER];
 
-  assert.ok(taps >= 15, `タップ演出が少ない: ${taps}`);
-  assert.ok(actions >= 8, `実際の手が少ない: ${actions}`);
+  assert.ok(taps >= 20, `タップ演出が少ない: ${taps}`);
+  assert.ok(actions >= 12, `実際の手が少ない: ${actions}`);
   assert.ok(
     Object.values(state.buildings).some((b) => b.player === DEMO_PLAYER && b.type === 'city'),
     '都市が建っていない',
   );
-  assert.ok(me.devCards.length >= 1, '発展カードを買えていない');
-  assert.ok(state.log.some((l) => l.includes('盗賊')), '盗賊の演出が出ていない');
+  const log = state.log.join('\n');
+  assert.ok(/1 交易/.test(log), '銀行との交易が出ていない');
+  assert.ok(log.includes('🤝'), 'プレイヤー間交易が成立していない');
+  assert.ok(log.includes('発展カードを購入'), '発展カードを買えていない');
+  assert.ok(log.includes('「街道建設」を使用'), '街道建設カードを使えていない');
+  assert.ok(log.includes('盗賊'), '盗賊の演出が出ていない');
 });
 
 test('デモ 第3章: 都市改良 → 進歩カード → 騎士 → 蛮族襲来 → 城壁まで通る', () => {
