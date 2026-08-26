@@ -433,12 +433,14 @@ function dialogHtml(state, ui) {
 
     if (d.tab === 'players') {
       const sum = (obj) => Object.values(obj).reduce((a, b) => a + b, 0);
-      const chipRow = (selected, addAct, subAct, maxOf) => keys.map((r) => {
+      // showMax: 自分の手札のときだけ上限を出す。もらう側に数字を出すと
+      // 「相手が何枚持っているか」に見えてしまうので出さない。
+      const chipRow = (selected, addAct, subAct, maxOf, showMax) => keys.map((r) => {
         const n = selected[r] ?? 0;
         const ok = maxOf(r) > n;
         return `<button class="pick tchip ${n ? 'sel' : ''}" data-act="${addAct}:${r}" ${ok || n ? '' : 'disabled'}>
           <span class="picon">${icon(r)}</span>${jp(r)}
-          ${n ? `<span class="tbadge" data-act="${subAct}:${r}">− ${n}</span>` : `<small>${maxOf(r)}</small>`}
+          ${n ? `<span class="tbadge" data-act="${subAct}:${r}">− ${n}</span>` : showMax ? `<small>${maxOf(r)}</small>` : ''}
         </button>`;
       }).join('');
       // 提案先は1人ずつ選ぶ(CPU も人も同じ「提案 → 応答」の流れで扱う)
@@ -459,10 +461,11 @@ function dialogHtml(state, ui) {
         .join('');
       return `<h3>⚖️ 交易</h3>${tabs}
         <p>渡すもの(タップで追加、バッジで減らす)</p>
-        <div class="row">${chipRow(d.pgive, 'ptg-add', 'ptg-sub', (r) => have(r))}</div>
+        <div class="row">${chipRow(d.pgive, 'ptg-add', 'ptg-sub', (r) => have(r), true)}</div>
         <p>もらうもの</p>
-        <div class="row">${chipRow(d.precv, 'ptr-add', 'ptr-sub', () => 6)}</div>
-        <p>提案する相手(同じ相手には1手番に1回まで)</p>
+        <div class="row">${chipRow(d.precv, 'ptr-add', 'ptr-sub', () => 6, false)}</div>
+        <p>提案する相手(同じ相手には1手番に1回まで)<br>
+          <small>相手が持っているかは分かりません。持っていなければ断られます。</small></p>
         <div class="row">${partners}</div>
         <div class="row end">
           <button data-act="dialog-cancel">閉じる</button>

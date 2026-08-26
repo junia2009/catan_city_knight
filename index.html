@@ -396,6 +396,13 @@
     z-index: 6;
   }
   .tradefx.out { animation: tfOut 0.45s ease-in forwards; }
+  /* 断られたとき: 成立とひと目で見分けられるよう赤系に */
+  .tradefx.deny {
+    border-color: #e07a5f;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55), 0 0 24px rgba(224, 122, 95, 0.25);
+  }
+  .tradefx.deny .tf-title { color: #ffab92; }
+  .tradefx.deny .tf-arrow { color: #ffab92; }
   .tf-title {
     font-size: 17px; font-weight: 900; color: var(--accent, #ffd97d);
     margin-bottom: 8px; letter-spacing: 0.04em;
