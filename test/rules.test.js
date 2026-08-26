@@ -6,7 +6,12 @@ import { LAYOUT, TERRAIN_RESOURCE } from '../src/rules/board.js';
 import { distributeForRoll } from '../src/rules/dice.js';
 import { longestRoadLength, computePoints, updateLongestRoad } from '../src/rules/victory.js';
 import { tradeRate } from '../src/rules/trade.js';
-import { canPlaceSettlement, canPlaceRoad, totalResources } from '../src/rules/build.js';
+import {
+  canPlaceSettlement, canPlaceRoad, countPieces, piecesLeft, totalResources, PIECE_LIMITS,
+} from '../src/rules/build.js';
+import {
+  legalCityVertices, legalRoadEdges, legalSettlementVertices,
+} from '../src/ai/legal-moves.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 
 // セットアップを CPU ロジックで自動完了させる
@@ -263,4 +268,115 @@ test('awaiting 中は通常アクションが拒否される', () => {
   s.awaiting = { type: 'discard', players: [1], context: { required: { 1: 4 } } };
   assert.ok(validateAction(s, { type: 'ROLL_DICE', player: 0 }));
   assert.ok(validateAction(s, { type: 'END_TURN', player: 0 }));
+});
+
+// ---- コマの持ち数(公式: 道15・開拓地5・都市4)----
+
+test('コマ上限: 資源があっても手元のコマが尽きたら建てられない', () => {
+  let s = finishSetup(createGame({ seed: 3, playerCount: 4, humanIndex: -1 }));
+  s.currentPlayer = 0;
+  s.turnFlags = { rolled: true, playedDev: false };
+  give(s, 0, { wood: 30, brick: 30, sheep: 30, wheat: 30, ore: 30 });
+
+  // 道と開拓地を置けるだけ置く
+  for (let i = 0; i < 60; i++) {
+    const vids = legalSettlementVertices(s, 0);
+    if (vids.length) {
+      s = dispatch(s, { type: 'BUILD_SETTLEMENT', player: 0, vertexId: vids[0] });
+      continue;
+    }
+    const eids = legalRoadEdges(s, 0);
+    if (!eids.length) break;
+    s = dispatch(s, { type: 'BUILD_ROAD', player: 0, edgeId: eids[0] });
+  }
+
+  assert.equal(countPieces(s, 0, 'settlement'), PIECE_LIMITS.settlement);
+  assert.equal(countPieces(s, 0, 'road'), PIECE_LIMITS.road);
+  assert.equal(piecesLeft(s, 0, 'settlement'), 0);
+  assert.equal(piecesLeft(s, 0, 'road'), 0);
+  // 資源はまだ潤沢にあるのに、コマ切れで断られる
+  assert.ok(totalResources(s.players[0]) > 10);
+  const freeVid = Object.keys(LAYOUT.vertices).find(
+    (v) => canPlaceSettlement(s, 0, v, { needRoad: false }) === '開拓地のコマがありません',
+  );
+  assert.ok(freeVid, 'コマ切れ以外の理由で弾かれている');
+  const freeEid = Object.keys(LAYOUT.edges).find((e) => !s.roads[e]);
+  assert.match(canPlaceRoad(s, 0, freeEid), /道のコマがありません/);
+});
+
+test('コマ上限: 都市に置き換えると開拓地のコマが1つ戻る', () => {
+  let s = finishSetup(createGame({ seed: 3, playerCount: 4, humanIndex: -1 }));
+  s.currentPlayer = 0;
+  s.turnFlags = { rolled: true, playedDev: false };
+  give(s, 0, { wood: 30, brick: 30, sheep: 30, wheat: 30, ore: 30 });
+  for (let i = 0; i < 60; i++) {
+    const vids = legalSettlementVertices(s, 0);
+    if (vids.length) {
+      s = dispatch(s, { type: 'BUILD_SETTLEMENT', player: 0, vertexId: vids[0] });
+      continue;
+    }
+    const eids = legalRoadEdges(s, 0);
+    if (!eids.length) break;
+    s = dispatch(s, { type: 'BUILD_ROAD', player: 0, edgeId: eids[0] });
+  }
+  assert.equal(piecesLeft(s, 0, 'settlement'), 0);
+  const blocked = legalSettlementVertices(s, 0).length;
+  assert.equal(blocked, 0, 'コマ切れなのに置ける場所がある');
+
+  const vid = legalCityVertices(s, 0)[0];
+  s = dispatch(s, { type: 'BUILD_CITY', player: 0, vertexId: vid });
+  assert.equal(piecesLeft(s, 0, 'settlement'), 1, '都市化で開拓地のコマが戻っていない');
+  assert.equal(piecesLeft(s, 0, 'city'), PIECE_LIMITS.city - 1);
+  assert.ok(legalSettlementVertices(s, 0).length > 0, '戻ったコマで開拓地を建てられない');
+});
+
+test('コマ上限: 都市は4つまで', () => {
+  let s = finishSetup(createGame({ seed: 3, playerCount: 4, humanIndex: -1 }));
+  s.currentPlayer = 0;
+  s.turnFlags = { rolled: true, playedDev: false };
+  give(s, 0, { wood: 30, brick: 30, sheep: 30, wheat: 30, ore: 30 });
+  // 開拓地→都市を繰り返して上限まで
+  for (let i = 0; i < 80 && countPieces(s, 0, 'city') < PIECE_LIMITS.city; i++) {
+    const cities = legalCityVertices(s, 0);
+    if (cities.length) {
+      s = dispatch(s, { type: 'BUILD_CITY', player: 0, vertexId: cities[0] });
+      continue;
+    }
+    const vids = legalSettlementVertices(s, 0);
+    if (vids.length) {
+      s = dispatch(s, { type: 'BUILD_SETTLEMENT', player: 0, vertexId: vids[0] });
+      continue;
+    }
+    const eids = legalRoadEdges(s, 0);
+    if (!eids.length) break;
+    s = dispatch(s, { type: 'BUILD_ROAD', player: 0, edgeId: eids[0] });
+  }
+  assert.equal(countPieces(s, 0, 'city'), PIECE_LIMITS.city);
+  assert.equal(piecesLeft(s, 0, 'city'), 0);
+  const settle = Object.entries(s.buildings).find(
+    ([, b]) => b.player === 0 && b.type === 'settlement',
+  );
+  if (settle) {
+    assert.match(
+      validateAction(s, { type: 'BUILD_CITY', player: 0, vertexId: settle[0] }),
+      /都市のコマがありません/,
+    );
+  }
+});
+
+test('発展カードの山札は公式構成25枚で、尽きたら買えない', () => {
+  const s = createGame({ seed: 9, playerCount: 4, humanIndex: -1 });
+  const pool = {};
+  for (const c of s.bank.devDeck) pool[c] = (pool[c] ?? 0) + 1;
+  assert.equal(s.bank.devDeck.length, 25);
+  assert.deepEqual(pool, { knight: 14, vp: 5, roadBuilding: 2, yearOfPlenty: 2, monopoly: 2 });
+
+  let g = finishSetup(createGame({ seed: 9, playerCount: 4, humanIndex: -1 }));
+  g.currentPlayer = 0;
+  g.turnFlags = { rolled: true, playedDev: false };
+  give(g, 0, { sheep: 30, wheat: 30, ore: 30 });
+  g.bank.devDeck = ['knight']; // 残り1枚にする
+  g = dispatch(g, { type: 'BUY_DEV_CARD', player: 0 });
+  assert.equal(g.bank.devDeck.length, 0);
+  assert.match(validateAction(g, { type: 'BUY_DEV_CARD', player: 0 }), /山札がありません/);
 });

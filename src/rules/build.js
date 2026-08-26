@@ -35,6 +35,10 @@ export function handLimit(state, pid) {
 export const WALL_LIMIT = 3;
 export const WALL_COST = { brick: 2 };
 
+export function wallsLeft(state, pid) {
+  return WALL_LIMIT - Object.values(state.walls ?? {}).filter((x) => x === pid).length;
+}
+
 export function canBuildWall(state, pid, vid) {
   const b = state.buildings[vid];
   if (!b || b.player !== pid || b.type !== 'city') return '自分の都市の下にのみ建てられます';
@@ -62,6 +66,12 @@ export function grantResource(state, pid, res, n) {
   state.bank.resources[res] -= give;
   state.players[pid].resources[res] += give;
   return give;
+}
+
+// 手元に残っているコマの数。盤上のコマを数えて引くだけなので、
+// 開拓地を都市に置き換えると開拓地のコマが自動で1つ戻る(公式ルールどおり)。
+export function piecesLeft(state, pid, type) {
+  return PIECE_LIMITS[type] - countPieces(state, pid, type);
 }
 
 export function countPieces(state, pid, type) {

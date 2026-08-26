@@ -111,6 +111,10 @@
   }
   .ppts small { color: var(--dim); font-weight: 400; font-size: 10px; }
   .pinfo { color: var(--dim); font-size: 11.5px; margin-top: 4px; gap: 12px; }
+  /* 手元に残っているコマ(道/開拓地/都市)。0 になった種類は赤く出す */
+  .stockrow { display: inline-flex; gap: 7px; }
+  .stockrow i { font-style: normal; }
+  .stockrow i.out { color: #ff8a8a; font-weight: 700; }
   .badge {
     background: linear-gradient(180deg, var(--accent2), var(--accent));
     color: #4a2f00; border-radius: 4px;
@@ -233,6 +237,13 @@
   button:hover:not(:disabled) { filter: brightness(1.2); transform: translateY(-1px); }
   button:active:not(:disabled) { transform: translateY(0); }
   button:disabled { opacity: 0.35; cursor: default; }
+  /* ボタン内の残数バッジ(コマ・山札の在庫) */
+  button .stock {
+    display: inline-block; margin-left: 5px; min-width: 14px; padding: 0 3px;
+    border-radius: 5px; background: rgba(0, 0, 0, 0.32); color: var(--accent2);
+    font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px;
+  }
+  button .stock.out { background: #8c2f2f; color: #ffdada; }
   button.primary {
     background: linear-gradient(180deg, #ffc95e, #eda428);
     color: #4a2f00; border-color: rgba(0,0,0,0.35);
@@ -708,7 +719,14 @@
   body.mobile .ppts { font-size: 15px; flex: none; margin-left: 0; }
   body.mobile .chip { width: 21px; height: 21px; }
   body.mobile .player .pinfo { display: none; }
-  body.mobile .player.expanded .pinfo { display: flex; }
+  /* 展開中は幅を広げ、情報を折り返す(横1行だとチップからはみ出す) */
+  body.mobile .player.expanded { flex: 2 1 auto; }
+  /* 展開中は他のチップが狭くなるので、目標点(/13)を省いて見切れを防ぐ */
+  body.mobile #players:has(.expanded) .player:not(.expanded) .ppts small { display: none; }
+  body.mobile .player.expanded .pinfo {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: 3px 9px; font-size: 10.5px; margin-top: 3px;
+  }
   body.mobile #barb {
     pointer-events: auto; align-self: flex-start;
     background: rgba(11, 26, 43, 0.85); border-radius: 10px;
@@ -767,6 +785,9 @@
     padding: 11px 0; font-size: 12px;
     white-space: nowrap; overflow: hidden;
     min-width: 0; width: 100%;
+  }
+  body.mobile button .stock {
+    margin-left: 3px; min-width: 12px; padding: 0 2px; font-size: 9px; line-height: 13px;
   }
 
   /* ダイアログ → ボトムシート */
