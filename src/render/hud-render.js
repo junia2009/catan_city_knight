@@ -111,8 +111,6 @@ function renderBarbarians(state) {
     </span>`;
 }
 
-// 2個のダイスの合計が出る確率(36通りのうち何通りか)
-const DICE_WEIGHT = [0, 0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1];
 const DICE_TOTALS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 function diceCountOf(state, n) {
@@ -123,7 +121,7 @@ function rollTotal(state) {
   return DICE_TOTALS.reduce((s, n) => s + diceCountOf(state, n), 0);
 }
 
-// 出目の記録。実際の回数(棒)と理論値(点線)を並べて偏りを見られるようにする。
+// 出目の記録。2〜12 が何回出たかを棒グラフで出す。
 function diceLogHtml(state) {
   const rolls = rollTotal(state);
   if (rolls === 0) {
@@ -131,35 +129,22 @@ function diceLogHtml(state) {
       <p>まだダイスを振っていません。振るとここに回数がたまります。</p>
       <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
   }
-  const expected = (n) => (rolls * DICE_WEIGHT[n]) / 36;
-  // 縦軸は「実際の最大」と「理論値の最大」の大きいほうに合わせる
-  const top = Math.max(
-    ...DICE_TOTALS.map((n) => Math.max(diceCountOf(state, n), expected(n))),
-    1,
-  );
+  const top = Math.max(...DICE_TOTALS.map((n) => diceCountOf(state, n)), 1);
   const bars = DICE_TOTALS.map((n) => {
     const c = diceCountOf(state, n);
-    const e = expected(n);
-    const diff = c - e;
-    const sign = diff > 0 ? '+' : '';
-    return `<div class="dbar ${n === 7 ? 'seven' : ''}"
-      title="${n}: ${c}回(理論値 ${e.toFixed(1)}回 / ${sign}${diff.toFixed(1)})">
+    return `<div class="dbar ${n === 7 ? 'seven' : ''}" title="${n}: ${c}回">
       <span class="dbnum">${c}</span>
-      <span class="dbcol">
-        <i style="height:${(c / top) * 100}%"></i>
-        <u style="bottom:${(e / top) * 100}%"></u>
-      </span>
+      <span class="dbcol"><i style="height:${(c / top) * 100}%"></i></span>
       <span class="dblabel">${n}</span>
     </div>`;
   }).join('');
   const seven = diceCountOf(state, 7);
   return `<h3>📊 出目の記録</h3>
-    <p>これまで<b>${rolls}回</b>ふりました(7は<b>${seven}回</b>)。
-    棒が実際の回数、<span class="dbkey"></span>点線が今の回数ぶんの理論値です。</p>
+    <p>これまで<b>${rolls}回</b>ふりました(7は<b>${seven}回</b>)。</p>
     <div class="dchart">${bars}</div>
     <p><small>${state.diceMode === 'balanced'
-      ? '⚖️ バランスダイス: 36通りの山札から引いているので、山札を1周するたびに理論値ぴったりに揃います。'
-      : '🎰 純ランダム: 毎回ゼロから振っているので、回数が少ないうちは理論値から外れて当然です。'}</small></p>
+      ? '⚖️ バランスダイス: 36通りの山札から引いています'
+      : '🎰 純ランダム: 毎回ゼロから2個振っています'}</small></p>
     <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
 }
 
