@@ -2,7 +2,7 @@
 // 手札・ボタン・ダイアログは DOM で作る。クリックは data-act 属性で main.js に委譲。
 
 import { RESOURCES, RES_JP, DEV_JP } from '../state.js';
-import { COSTS, WALL_COST, canAfford, totalCards } from '../rules/build.js';
+import { COSTS, WALL_COST, canAfford, piecesLeft, totalCards, wallsLeft } from '../rules/build.js';
 import { computePoints, pointsToWin } from '../rules/victory.js';
 import { tradeRate } from '../rules/trade.js';
 import { diceDeckLeft } from '../rules/dice.js';
@@ -30,6 +30,8 @@ export const RES_ICON = { wood: '🪵', brick: '🧱', sheep: '🐑', wheat: '�
 export const COM_ICON = { cloth: '🧵', coin: '🪙', paper: '📜' };
 export const DEV_ICON = { knight: '⚔️', roadBuilding: '🛤️', yearOfPlenty: '🧺', monopoly: '🎩', vp: '⭐' };
 const EV_ICON = { ship: '⛵', trade: '🧵', politics: '🪙', science: '📜' };
+const PIECE_JP = { road: '道', settlement: '開拓地', city: '都市' };
+const PIECE_ICON = { road: '🛤️', settlement: '🏠', city: '🏰' };
 const TRACK_ICON = { trade: '🧵', politics: '🪙', science: '📜' };
 
 function el(id) {
@@ -57,6 +59,16 @@ function renderPlayers(state, ui) {
         cak && p.defenderPoints > 0 ? `<span class="badge">🛡×${p.defenderPoints}</span>` : '',
         p.treasures > 0 ? `<span class="badge">💎×${p.treasures}</span>` : '',
       ].join('');
+      // 残りコマは全員ぶん公開情報(盤上を数えれば分かる)。
+      // 「相手はもう開拓地を建てられない」が読めると駆け引きになる。
+      const stock = `<span class="stockrow" title="手元に残っているコマ(道/開拓地/都市)">${
+        ['road', 'settlement', 'city']
+          .map((t) => {
+            const n = piecesLeft(state, p.id, t);
+            return `<i class="${n === 0 ? 'out' : ''}">${PIECE_ICON[t]}${n}</i>`;
+          })
+          .join('')
+      }</span>`;
       const info = cak
         ? `<span title="手札">🂠 ${totalCards(p)}</span>
            <span title="進歩カード">📜 ${p.progressCards.length}</span>
@@ -75,7 +87,7 @@ function renderPlayers(state, ui) {
           <span class="pname">${p.name}</span>
           <span class="ppts">${pts}<small>/${goal}</small></span>
         </div>
-        <div class="prow pinfo">${info}${badges}</div>
+        <div class="prow pinfo">${info}${stock}${badges}</div>
       </div>`;
     })
     .join('');
@@ -216,21 +228,40 @@ function renderControls(state, ui) {
   const rolled = state.turnFlags.rolled;
   const cak = state.mode === 'cak';
   const mobile = document.body.classList.contains('mobile');
-  const btn = (act, label, enabled, title = '') =>
-    `<button data-act="${act}" ${enabled ? '' : 'disabled'} title="${title}">${label}</button>`;
+  const btn = (act, label, enabled, title = '', stock = null) => {
+    const badge = stock == null
+      ? ''
+      : `<span class="stock ${stock === 0 ? 'out' : ''}">${stock}</span>`;
+    return `<button data-act="${act}" ${enabled ? '' : 'disabled'} title="${title}">${label}${badge}</button>`;
+  };
+
+  // 資源が足りていても、手元のコマが尽きていれば建てられない(公式ルール)。
+  // 残数をボタンに出して、コマ切れを事前に読めるようにする。
+  const pieceBtn = (act, label, type, cost, costHint) => {
+    const n = piecesLeft(state, HUMAN, type);
+    const title = n > 0
+      ? `${costHint}(残り${n}個)`
+      : type === 'settlement'
+        ? '開拓地のコマがありません(都市にすると1つ手元に戻ります)'
+        : `${PIECE_JP[type]}のコマがありません`;
+    return btn(act, label, myTurn && rolled && canAfford(p, cost) && n > 0, title, n);
+  };
 
   const buildBtns = (road, settlement, city) => [
-    btn('mode:road', road, myTurn && rolled && canAfford(p, COSTS.road), '🪵1 🧱1'),
-    btn('mode:settlement', settlement, myTurn && rolled && canAfford(p, COSTS.settlement), '🪵1 🧱1 🐑1 🌾1'),
-    btn('mode:city', city, myTurn && rolled && canAfford(p, COSTS.city), '🌾2 🪨3'),
+    pieceBtn('mode:road', road, 'road', COSTS.road, '🪵1 🧱1'),
+    pieceBtn('mode:settlement', settlement, 'settlement', COSTS.settlement, '🪵1 🧱1 🐑1 🌾1'),
+    pieceBtn('mode:city', city, 'city', COSTS.city, '🌾2 🪨3'),
   ];
   const cakBtns = (knight, wall, improve) => [
-    btn('mode:knight', knight, myTurn && rolled && canAfford(p, KNIGHT_COSTS.build), '🐑1 🪨1(不活性で配置)'),
-    btn('mode:wall', wall, myTurn && rolled && canAfford(p, WALL_COST), '🧱2(手札上限+2)'),
+    btn('mode:knight', knight, myTurn && rolled && canAfford(p, KNIGHT_COSTS.build), '🐑1 🪨1(不活性で配置。各レベル2体まで)'),
+    btn('mode:wall', wall, myTurn && rolled && canAfford(p, WALL_COST) && wallsLeft(state, HUMAN) > 0,
+      `🧱2(手札上限+2。残り${wallsLeft(state, HUMAN)}枚)`, wallsLeft(state, HUMAN)),
     btn('improve-open', improve, myTurn && rolled, '商品で都市を改良'),
   ];
+  const devLeft = state.bank.devDeck.length;
   const devBtn = (label) =>
-    btn('buy-dev', label, myTurn && rolled && canAfford(p, COSTS.devCard) && state.bank.devDeck.length > 0, '🐑1 🌾1 🪨1');
+    btn('buy-dev', label, myTurn && rolled && canAfford(p, COSTS.devCard) && devLeft > 0,
+      devLeft > 0 ? `🐑1 🌾1 🪨1(山札の残り${devLeft}枚)` : '発展カードの山札がなくなりました', devLeft);
   const dragonMode = state.mode === 'dragon';
   const towerBtn = (label) =>
     btn('mode:tower', label, myTurn && rolled && canAfford(p, TOWER_COST), '🪵1 🧱1 🪨1(隣接ヘックスの襲撃を撃退して財宝)');
