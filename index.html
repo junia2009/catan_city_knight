@@ -422,6 +422,111 @@
   body.mobile .tradefx { padding: 12px 16px; max-width: 88vw; }
   body.mobile .tf-line { font-size: 13px; }
 
+  /* ---------- 手番の合図 ---------- */
+  /* 手番が移るたびに「誰の番か」を画面の真ん中で1度だけ知らせる。
+     操作の邪魔をしないよう pointer-events は殺しておく。 */
+  /* 他人の番は盤面を隠さないよう上寄せの小さいピル、
+     自分の番だけ中央に大きく出す(見落として困るのはこちらだけ)。 */
+  .turnfx {
+    position: absolute; inset: 0; z-index: 7;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding-top: 42px;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .turnfx.me { align-items: center; padding-top: 0; }
+  /* 自分の番だけ、背後を左から右へ走る色帯を添える */
+  .turnfx-band { display: none; }
+  .turnfx.me .turnfx-band {
+    display: block;
+    position: absolute; left: 0; right: 0; top: 50%;
+    height: 92px; margin-top: -46px;
+    background: linear-gradient(90deg,
+      transparent 0%, rgba(255, 217, 125, 0.20) 22%, rgba(255, 217, 125, 0.34) 50%,
+      rgba(255, 217, 125, 0.20) 78%, transparent 100%);
+    animation: tnBand 0.55s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  .turnfx-card {
+    position: relative;
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 16px 6px 8px;
+    border-radius: 999px;
+    background: linear-gradient(160deg, rgba(10, 26, 44, 0.94), rgba(7, 18, 32, 0.94));
+    border: 2px solid var(--pc);
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+    animation: tnDrop 0.36s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+  .turnfx-card .chip { width: 26px; height: 26px; }
+  .turnfx-text { display: flex; flex-direction: column; line-height: 1.15; }
+  .turnfx-text b {
+    font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .turnfx-text small { font-size: 10px; color: #9fb6cc; letter-spacing: 0.06em; }
+  /* 自分の番はいちだんと強く */
+  .turnfx.me .turnfx-card {
+    gap: 12px; padding: 10px 22px 10px 14px;
+    border-color: var(--accent, #ffd97d);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 34px rgba(255, 217, 125, 0.45);
+    animation: tnPop 0.42s cubic-bezier(0.2, 1.6, 0.4, 1), tnBeat 1.1s ease-in-out 0.42s 2;
+  }
+  .turnfx.me .turnfx-card .chip { width: 38px; height: 38px; }
+  .turnfx.me .turnfx-text b { color: var(--accent, #ffd97d); font-size: 24px; }
+  .turnfx.me .turnfx-text small { font-size: 11px; }
+  .turnfx.out { animation: tnOut 0.4s ease-in forwards; }
+  @keyframes tnBand {
+    0% { transform: translateX(-100%); opacity: 0; }
+    35% { opacity: 1; }
+    100% { transform: none; opacity: 1; }
+  }
+  @keyframes tnDrop {
+    0% { transform: translateY(-18px); opacity: 0; }
+    100% { transform: none; opacity: 1; }
+  }
+  @keyframes tnPop {
+    0% { transform: scale(0.7); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes tnBeat {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+  }
+  @keyframes tnOut {
+    to { opacity: 0; transform: scale(0.96); }
+  }
+  /* モバイルは盤面が全画面なので、上に重なる HUD(プレイヤー・ダイス)を避けて下げる */
+  body.mobile .turnfx { padding-top: 152px; }
+  body.mobile .turnfx.me { padding-top: 0; }
+  body.mobile .turnfx-card .chip { width: 24px; height: 24px; }
+  body.mobile .turnfx.me .turnfx-card .chip { width: 34px; height: 34px; }
+  body.mobile .turnfx.me .turnfx-band { height: 76px; margin-top: -38px; }
+  body.mobile .turnfx.me .turnfx-text b { font-size: 20px; }
+  /* 演出が苦手な人・端末では動きを止める(表示自体は残す) */
+  @media (prefers-reduced-motion: reduce) {
+    .turnfx-card, .turnfx.me .turnfx-card, .turnfx.me .turnfx-band { animation: none; }
+  }
+
+  /* バナーは一瞬なので、自分の番のあいだは残り続ける合図も出す。
+     (1) 盤面のフチが光る (2) 自分のプレイヤーチップがゆっくり脈打つ */
+  #board-wrap::after {
+    content: ''; position: absolute; inset: 0; z-index: 4;
+    pointer-events: none; border-radius: inherit;
+    box-shadow: inset 0 0 0 0 rgba(255, 217, 125, 0);
+    transition: box-shadow 0.35s ease;
+  }
+  body.myturn #board-wrap::after {
+    box-shadow: inset 0 0 0 3px rgba(255, 217, 125, 0.6),
+      inset 0 0 60px rgba(255, 217, 125, 0.16);
+  }
+  body.myturn .player.active { animation: myTurnPulse 2s ease-in-out infinite; }
+  @keyframes myTurnPulse {
+    0%, 100% { box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(242, 176, 61, 0.2); }
+    50% { box-shadow: 0 0 0 2px var(--accent), 0 0 22px rgba(242, 176, 61, 0.55); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body.myturn .player.active { animation: none; }
+  }
+
   /* ---------- 画面フロー(タイトル / ルール選択) ---------- */
   .screen {
     position: fixed; inset: 0; z-index: 20;
