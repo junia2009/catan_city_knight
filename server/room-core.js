@@ -43,7 +43,7 @@ export class RoomCore {
     this.phase = 'lobby'; // 'lobby' | 'playing'
     this.seats = Array(MAX_SEATS).fill(null); // { clientId, name, online } | null(=CPU席)
     this.hostId = null;
-    this.settings = { mode: 'cak', difficulty: 'normal', cpuFill: true, diceMode: 'balanced' };
+    this.settings = { mode: 'base', difficulty: 'normal', cpuFill: true, diceMode: 'random' };
     this.state = null;
     this.version = 0; // 状態を配るたびに増える(クライアントの取りこぼし検出用)
     this.lastAction = null; // 直前に適用されたアクション(演出の再生用)

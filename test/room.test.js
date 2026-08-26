@@ -316,12 +316,13 @@ test('room: 出目の設定はホストが選べ、バランスダイスの山�
   const room = newRoom();
   room.join({ clientId: 'c0', name: 'A' });
   room.join({ clientId: 'c1', name: 'B' });
-  assert.equal(room.settings.diceMode, 'balanced'); // 既定はバランス
-  assert.ok(room.setSettings('c1', { diceMode: 'random' }).error, 'ホスト以外が変えられている');
-  assert.ok(!room.setSettings('c0', { diceMode: 'random' }).error);
-  assert.equal(room.settings.diceMode, 'random');
+  assert.equal(room.settings.diceMode, 'random'); // 既定は純ランダム
+  assert.equal(room.settings.mode, 'base'); // 既定は基本ルール
+  assert.ok(room.setSettings('c1', { diceMode: 'balanced' }).error, 'ホスト以外が変えられている');
+  assert.ok(!room.setSettings('c0', { diceMode: 'balanced' }).error);
+  assert.equal(room.settings.diceMode, 'balanced');
   assert.ok(!room.setSettings('c0', { diceMode: 'ぐちゃぐちゃ' }).error);
-  assert.equal(room.settings.diceMode, 'random', '不正な値が通っている');
+  assert.equal(room.settings.diceMode, 'balanced', '不正な値が通っている');
 
   room.setSettings('c0', { diceMode: 'balanced', cpuFill: false });
   room.start('c0');
