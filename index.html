@@ -141,8 +141,38 @@
     100% { transform: rotate(0) scale(1); opacity: 1; }
   }
   .dsum { color: var(--accent2); font-size: 20px; font-weight: 800; margin-left: 2px; }
-  /* バランスダイスの残り山札 */
-  .ddeck { color: var(--dim); font-size: 12px; margin-left: auto; opacity: 0.85; }
+  /* ダイス行の右端: 山札の残りと「出目の記録」ボタン */
+  .dright { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+  .ddeck { color: var(--dim); font-size: 12px; opacity: 0.85; }
+  .dstats { padding: 4px 7px; font-size: 13px; line-height: 1; }
+
+  /* ---------- 出目の記録(棒グラフ) ---------- */
+  .dchart {
+    display: flex; align-items: flex-end; gap: 4px;
+    height: 190px; margin: 6px 0 2px;
+  }
+  .dbar { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; height: 100%; }
+  .dbnum { font-size: 11px; color: var(--dim); line-height: 1.4; }
+  /* 棒の伸びる領域。理論値の点線をこの中に絶対配置する */
+  .dbcol { flex: 1; width: 100%; position: relative; display: flex; align-items: flex-end; }
+  .dbcol i {
+    width: 100%; border-radius: 4px 4px 0 0;
+    background: linear-gradient(180deg, #5f9fd8, #2f5f8c);
+    min-height: 2px; transition: height 0.3s ease-out;
+  }
+  .dbar.seven .dbcol i { background: linear-gradient(180deg, #e07a5f, #a34632); }
+  .dbar.seven .dblabel { color: var(--accent2); font-weight: 800; }
+  /* 理論値のしるし。各列に引くと全体で分布の形になる */
+  .dbcol u {
+    position: absolute; left: -2px; right: -2px; height: 0;
+    border-top: 2px dashed var(--accent2); opacity: 0.85;
+  }
+  .dblabel { font-size: 12px; color: #cfdcea; margin-top: 4px; }
+  /* 説明文中に出す点線の凡例 */
+  .dbkey {
+    display: inline-block; width: 18px; margin: 0 3px 3px 0;
+    border-top: 2px dashed var(--accent2); vertical-align: middle;
+  }
   .evdie {
     width: 34px; height: 34px; border-radius: 8px;
     background: linear-gradient(145deg, #d9534f, #a33632);

@@ -1504,6 +1504,8 @@ document.addEventListener('click', (e) => {
       });
       return;
 
+    case 'dicelog-open': ui.dialog = { type: 'dicelog' }; refresh(); return;
+
     case 'dialog-cancel': ui.dialog = null; refresh(); return;
 
     // ---- 都市と騎士 ----

@@ -111,6 +111,58 @@ function renderBarbarians(state) {
     </span>`;
 }
 
+// 2個のダイスの合計が出る確率(36通りのうち何通りか)
+const DICE_WEIGHT = [0, 0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1];
+const DICE_TOTALS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+function diceCountOf(state, n) {
+  return state.diceCounts?.[n] ?? 0;
+}
+
+function rollTotal(state) {
+  return DICE_TOTALS.reduce((s, n) => s + diceCountOf(state, n), 0);
+}
+
+// 出目の記録。実際の回数(棒)と理論値(点線)を並べて偏りを見られるようにする。
+function diceLogHtml(state) {
+  const rolls = rollTotal(state);
+  if (rolls === 0) {
+    return `<h3>📊 出目の記録</h3>
+      <p>まだダイスを振っていません。振るとここに回数がたまります。</p>
+      <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
+  }
+  const expected = (n) => (rolls * DICE_WEIGHT[n]) / 36;
+  // 縦軸は「実際の最大」と「理論値の最大」の大きいほうに合わせる
+  const top = Math.max(
+    ...DICE_TOTALS.map((n) => Math.max(diceCountOf(state, n), expected(n))),
+    1,
+  );
+  const bars = DICE_TOTALS.map((n) => {
+    const c = diceCountOf(state, n);
+    const e = expected(n);
+    const diff = c - e;
+    const sign = diff > 0 ? '+' : '';
+    return `<div class="dbar ${n === 7 ? 'seven' : ''}"
+      title="${n}: ${c}回(理論値 ${e.toFixed(1)}回 / ${sign}${diff.toFixed(1)})">
+      <span class="dbnum">${c}</span>
+      <span class="dbcol">
+        <i style="height:${(c / top) * 100}%"></i>
+        <u style="bottom:${(e / top) * 100}%"></u>
+      </span>
+      <span class="dblabel">${n}</span>
+    </div>`;
+  }).join('');
+  const seven = diceCountOf(state, 7);
+  return `<h3>📊 出目の記録</h3>
+    <p>これまで<b>${rolls}回</b>ふりました(7は<b>${seven}回</b>)。
+    棒が実際の回数、<span class="dbkey"></span>点線が今の回数ぶんの理論値です。</p>
+    <div class="dchart">${bars}</div>
+    <p><small>${state.diceMode === 'balanced'
+      ? '⚖️ バランスダイス: 36通りの山札から引いているので、山札を1周するたびに理論値ぴったりに揃います。'
+      : '🎰 純ランダム: 毎回ゼロから振っているので、回数が少ないうちは理論値から外れて当然です。'}</small></p>
+    <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
+}
+
 const PIP_LAYOUT = {
   1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
 };
@@ -128,6 +180,9 @@ function renderDice(state) {
   const deck = left == null
     ? ''
     : `<span class="ddeck" title="バランスダイス: 36通りの山札から引いています(残り${left}通り)">🂠${left}</span>`;
+  // 右端に「山札の残り」と「出目の記録」をまとめる
+  const right = `<span class="dright">${deck}<button class="dstats" data-act="dicelog-open"
+    title="出目の記録を見る(${rollTotal(state)}回ぶん)">📊</button></span>`;
   const ev = state.mode === 'cak' && state.eventDie && d
     ? `<span class="evdie" title="イベントダイス">${EV_ICON[state.eventDie]}</span>`
     : state.mode === 'cak'
@@ -135,7 +190,8 @@ function renderDice(state) {
       : '';
   el('dice').innerHTML = (d
     ? `${dieHtml(d[0])}${dieHtml(d[1])}${ev}<span class="dsum">${d[0] + d[1]}</span>`
-    : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`) + deck;
+    : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`)
+    + right;
 }
 
 // 発展カード(基本モード)の説明文
@@ -710,6 +766,8 @@ function dialogHtml(state, ui) {
         <button data-act="dialog-cancel">閉じる</button>
       </div>`;
   }
+
+  if (d.type === 'dicelog') return diceLogHtml(state);
 
   if (d.type === 'log') {
     return `<h3>📜 ログ</h3>

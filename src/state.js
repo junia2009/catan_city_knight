@@ -103,6 +103,7 @@ export function createGame({
       progressDecks,
     },
     dice: null,
+    diceCounts: Array(13).fill(0), // 出目(2〜12)が何回出たか。index 0,1 は未使用
     diceMode, // 'balanced' | 'random'(設計書 §6)
     diceDeck: [], // バランスダイスの残り山札(空なら次のロールで切り直す)
     eventDie: null, // 'ship' | 'trade' | 'politics' | 'science'(cak のみ)
