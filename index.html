@@ -426,8 +426,9 @@
   }
   /* タブは5つあるので、狭い画面では折り返す(折り返した1つが横幅いっぱいに
      伸びないよう、タブだけは内容幅にする) */
-  .rules-tabs { position: sticky; top: -6px; z-index: 2; padding: 6px 0; flex-wrap: wrap;
-    background: linear-gradient(180deg, #17334f 75%, transparent); }
+  /* 2段になっても本文が透けないよう、タブ帯は不透明にする */
+  .rules-tabs { position: sticky; top: -6px; z-index: 2; padding: 6px 0 8px; flex-wrap: wrap;
+    background: #17334f; box-shadow: 0 6px 8px -6px rgba(0,0,0,0.5); }
   .seg.rules-tabs button { flex: 0 1 auto; }
   .rules-body { display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
   .rules-body h4 {
