@@ -111,6 +111,43 @@ function renderBarbarians(state) {
     </span>`;
 }
 
+const DICE_TOTALS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+function diceCountOf(state, n) {
+  return state.diceCounts?.[n] ?? 0;
+}
+
+function rollTotal(state) {
+  return DICE_TOTALS.reduce((s, n) => s + diceCountOf(state, n), 0);
+}
+
+// 出目の記録。2〜12 が何回出たかを棒グラフで出す。
+function diceLogHtml(state) {
+  const rolls = rollTotal(state);
+  if (rolls === 0) {
+    return `<h3>📊 出目の記録</h3>
+      <p>まだダイスを振っていません。振るとここに回数がたまります。</p>
+      <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
+  }
+  const top = Math.max(...DICE_TOTALS.map((n) => diceCountOf(state, n)), 1);
+  const bars = DICE_TOTALS.map((n) => {
+    const c = diceCountOf(state, n);
+    return `<div class="dbar ${n === 7 ? 'seven' : ''}" title="${n}: ${c}回">
+      <span class="dbnum">${c}</span>
+      <span class="dbcol"><i style="height:${(c / top) * 100}%"></i></span>
+      <span class="dblabel">${n}</span>
+    </div>`;
+  }).join('');
+  const seven = diceCountOf(state, 7);
+  return `<h3>📊 出目の記録</h3>
+    <p>これまで<b>${rolls}回</b>ふりました(7は<b>${seven}回</b>)。</p>
+    <div class="dchart">${bars}</div>
+    <p><small>${state.diceMode === 'balanced'
+      ? '⚖️ バランスダイス: 36通りの山札から引いています'
+      : '🎰 純ランダム: 毎回ゼロから2個振っています'}</small></p>
+    <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
+}
+
 const PIP_LAYOUT = {
   1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
 };
@@ -128,6 +165,9 @@ function renderDice(state) {
   const deck = left == null
     ? ''
     : `<span class="ddeck" title="バランスダイス: 36通りの山札から引いています(残り${left}通り)">🂠${left}</span>`;
+  // 右端に「山札の残り」と「出目の記録」をまとめる
+  const right = `<span class="dright">${deck}<button class="dstats" data-act="dicelog-open"
+    title="出目の記録を見る(${rollTotal(state)}回ぶん)">📊</button></span>`;
   const ev = state.mode === 'cak' && state.eventDie && d
     ? `<span class="evdie" title="イベントダイス">${EV_ICON[state.eventDie]}</span>`
     : state.mode === 'cak'
@@ -135,7 +175,8 @@ function renderDice(state) {
       : '';
   el('dice').innerHTML = (d
     ? `${dieHtml(d[0])}${dieHtml(d[1])}${ev}<span class="dsum">${d[0] + d[1]}</span>`
-    : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`) + deck;
+    : `<span class="die empty"></span><span class="die empty"></span>${ev}<span class="dsum">–</span>`)
+    + right;
 }
 
 // 発展カード(基本モード)の説明文
@@ -710,6 +751,8 @@ function dialogHtml(state, ui) {
         <button data-act="dialog-cancel">閉じる</button>
       </div>`;
   }
+
+  if (d.type === 'dicelog') return diceLogHtml(state);
 
   if (d.type === 'log') {
     return `<h3>📜 ログ</h3>

@@ -380,3 +380,36 @@ test('発展カードの山札は公式構成25枚で、尽きたら買えない
   assert.equal(g.bank.devDeck.length, 0);
   assert.match(validateAction(g, { type: 'BUY_DEV_CARD', player: 0 }), /山札がありません/);
 });
+
+test('出目の記録: ロールのたびに合計の回数が増える', () => {
+  let s = finishSetup(createGame({ seed: 12, playerCount: 4, humanIndex: -1 }));
+  assert.equal(s.diceCounts.length, 13);
+  assert.equal(s.diceCounts.reduce((a, b) => a + b, 0), 0, '初期配置ではまだ振っていない');
+
+  const rolls = [];
+  for (let i = 0; i < 12; i++) {
+    s.currentPlayer = 0;
+    s.turnFlags = { rolled: false, playedDev: false };
+    s.awaiting = null;
+    s = dispatch(s, { type: 'ROLL_DICE', player: 0 });
+    rolls.push(s.dice[0] + s.dice[1]);
+    // 捨て札や盗賊の割り込みは畳んで次のロールへ
+    s.awaiting = null;
+  }
+  assert.equal(s.diceCounts.reduce((a, b) => a + b, 0), rolls.length);
+  for (const n of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+    assert.equal(s.diceCounts[n], rolls.filter((r) => r === n).length, `合計${n}の回数`);
+  }
+  // 2〜12 以外には記録されない
+  assert.equal(s.diceCounts[0] + s.diceCounts[1], 0);
+});
+
+test('出目の記録: 錬金術師で指定した出目も数える', () => {
+  let s = finishSetup(createGame({ seed: 12, playerCount: 4, humanIndex: -1, mode: 'cak' }));
+  s.currentPlayer = 0;
+  s.turnFlags = { rolled: false, playedDev: false, alchemist: [3, 5] };
+  s.awaiting = null;
+  s = dispatch(s, { type: 'ROLL_DICE', player: 0 });
+  assert.deepEqual(s.dice, [3, 5]);
+  assert.equal(s.diceCounts[8], 1);
+});

@@ -486,6 +486,9 @@ function applyAction(state, action) {
       }
       const total = a + b;
       state.dice = [a, b];
+      // 出目の記録(2〜12 の回数)。錬金術師で指定した出目も実際に出た目として数える
+      if (!Array.isArray(state.diceCounts)) state.diceCounts = Array(13).fill(0);
+      state.diceCounts[total] += 1;
       state.turnFlags.rolled = true;
 
       if (state.mode === 'cak') {

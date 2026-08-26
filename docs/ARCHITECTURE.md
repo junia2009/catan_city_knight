@@ -75,6 +75,7 @@ dispatch(state, action)
   bank,                    // resources 各19・devDeck・commodities 各12・progressDecks
   dice, eventDie,          // eventDie は cak のみ('ship' | 各進歩デッキ)
   diceMode, diceDeck,      // 'balanced'(36通りの山札から引く。既定) | 'random'
+  diceCounts,              // 出目(2〜12)が何回出たか。📊の棒グラフに使う
   turnFlags,               // rolled / playedDev / fleet / offeredTo / alchemist ...
   longestRoad, largestArmy,
   knights, walls, merchant, barbarians, metropolis,   // 都市と騎士
