@@ -164,6 +164,25 @@ test('room: viewFor は相手の手札と山札・乱数種を伏せる', () => 
   assert.equal(view1.players[1].devCards[0].type, 'monopoly');
 });
 
+test('room: 漁師たちの魚は手元が公開・山札は伏せられる', () => {
+  const room = newRoom();
+  room.join({ clientId: 'a', name: 'A' });
+  room.join({ clientId: 'b', name: 'B' });
+  room.setSettings('a', { mode: 'fish' });
+  room.start('a');
+
+  room.state.players[0].fish = [3, 1];
+  room.state.players[1].fish = [2, 'shoe'];
+
+  const view0 = room.viewFor(0);
+  // 魚トークンは場に公開して置くものなので、相手のぶんも見える
+  assert.deepEqual(view0.players[1].fish, [2, 'shoe']);
+  // 山札の中身は伏せる(残り枚数は公開)
+  assert.equal(view0.bank.fishPool.length, room.state.bank.fishPool.length);
+  assert.ok(view0.bank.fishPool.every((t) => t === null));
+  assert.ok(room.state.bank.fishPool.some((t) => t !== null), '元の山札は壊さない');
+});
+
 test('room: 都市と騎士の進歩カードも伏せられる', () => {
   const room = newRoom();
   room.join({ clientId: 'a', name: 'A' });

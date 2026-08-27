@@ -8,6 +8,7 @@ import { tradeRate } from '../rules/trade.js';
 import { diceDeckLeft } from '../rules/dice.js';
 import { KNIGHT_COSTS } from '../rules/cak/knights.js';
 import { TOWER_COST } from '../rules/dragon.js';
+import { FISH_USES, fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
 import {
   TRACKS, TRACK_JP, TRACK_COMMODITY, MAX_IMPROVEMENT,
@@ -40,9 +41,10 @@ function el(id) {
 
 function renderPlayers(state, ui) {
   const cak = state.mode === 'cak';
-  const goal = pointsToWin(state);
   el('players').innerHTML = state.players
     .map((p) => {
+      // 古い靴を持っている人だけ必要点数が1点重い(公開情報)
+      const goal = pointsToWin(state, p.id);
       const expanded = ui.expandedPlayer === p.id;
       const pts = computePoints(state, p.id, { includeHidden: p.id === HUMAN });
       const active =
@@ -58,6 +60,9 @@ function renderPlayers(state, ui) {
         metro > 0 ? `<span class="badge">🏙 メトロポリス×${metro}</span>` : '',
         cak && p.defenderPoints > 0 ? `<span class="badge">🛡×${p.defenderPoints}</span>` : '',
         p.treasures > 0 ? `<span class="badge">💎×${p.treasures}</span>` : '',
+        // 魚トークンは場に公開して置くもの。全員ぶん見えてよい
+        fishCount(p) > 0 ? `<span class="badge">🐟×${fishCount(p)}</span>` : '',
+        hasOldShoe(p) ? '<span class="badge">👞 古い靴</span>' : '',
       ].join('');
       // 残りコマは全員ぶん公開情報(盤上を数えれば分かる)。
       // 「相手はもう開拓地を建てられない」が読めると駆け引きになる。
@@ -306,6 +311,14 @@ function renderControls(state, ui) {
   const dragonMode = state.mode === 'dragon';
   const towerBtn = (label) =>
     btn('mode:tower', label, myTurn && rolled && canAfford(p, TOWER_COST), '🪵1 🧱1 🪨1(隣接ヘックスの襲撃を撃退して財宝)');
+  const fishMode = state.mode === 'fish';
+  // 魚は2匹から使える(盗賊を戻すのだけはロール前でも押せる)。
+  // 古い靴を持っているときは、渡すために魚0匹でも開ける。
+  const canFish = fishCount(p) >= 2 || hasOldShoe(p);
+  const fishBtn = (label) =>
+    btn('fish-open', label + (hasOldShoe(p) ? '👞' : ''), myTurn && canFish,
+      canFish ? '魚トークンを使う(お釣りは出ません)' : '魚が2匹たまると使えます',
+      fishCount(p));
 
   let list;
   if (mobile) {
@@ -318,6 +331,7 @@ function renderControls(state, ui) {
       ...buildBtns('🛤道', '🏠開拓', '🏰都市'),
       ...(cak ? cakBtns('⚔️騎士', '🧱城壁', '🏙改良')
         : dragonMode ? [devBtn('📜カード'), towerBtn('🗼塔')]
+        : fishMode ? [devBtn('📜カード'), fishBtn('🐟魚')]
         : [devBtn('📜カード')]),
       btn('trade-open', '⚖️交易', myTurn && rolled),
     ];
@@ -327,6 +341,7 @@ function renderControls(state, ui) {
       ...buildBtns('🛤️ 道', '🏠 開拓地', '🏰 都市'),
       ...(cak ? cakBtns('⚔️ 騎士', '🧱 城壁', '🏙 改良')
         : dragonMode ? [devBtn('📜 カード'), towerBtn('🗼 見張り塔')]
+        : fishMode ? [devBtn('📜 カード'), fishBtn('🐟 魚')]
         : [devBtn('📜 カード')]),
       btn('trade-open', '⚖️ 交易', myTurn && rolled),
       btn('end-turn', '⏭ ターン終了', myTurn && rolled),
@@ -373,6 +388,7 @@ function statusText(state, ui) {
     case 'build-knight': return '⚔️ 騎士を配置する頂点を選んでください(自分の道に接続)';
     case 'build-wall': return '🧱 城壁を建てる都市を選んでください';
     case 'build-tower': return '🗼 見張り塔を建てる自分の建物を選んでください';
+    case 'fish-road': return '🐟 魚5匹で建てる道の位置を選んでください';
     case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
     case 'play-road-building':
       return `🛤️ 街道建設: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
@@ -493,6 +509,75 @@ function dialogHtml(state, ui) {
         <button class="primary" data-act="trade-confirm" ${d.give && d.receive ? '' : 'disabled'}>交易する</button>
         <button data-act="dialog-cancel">閉じる</button>
       </div>`;
+  }
+
+  // 漁師たち: 魚トークンの使い道を選ぶ
+  if (d.type === 'fish') {
+    const n = fishCount(p);
+    const tokens = (p.fish ?? [])
+      .map((t) => (t === 'shoe'
+        ? '<span class="pick tchip">👞 古い靴</span>'
+        : `<span class="pick tchip sel"><span class="picon">🐟</span>${t}匹</span>`))
+      .join('');
+    const head = `<h3>🐟 魚トークン(${n}匹)</h3><div class="row">${tokens || '<small>まだ持っていません</small>'}</div>`;
+    const back = '<div class="row end"><button data-act="fish-back">← 戻る</button></div>';
+
+    if (d.pick === 'steal') {
+      const btns = state.players
+        .filter((o) => o.id !== HUMAN && totalCards(o) > 0)
+        .map((o) => `<button class="pick" data-act="fish-steal:${o.id}" style="--pc:${PLAYER_COLORS[o.id]}">
+          <span class="chip">${avatarSvg(o.id)}</span>${o.name}<small>${totalCards(o)}枚</small></button>`)
+        .join('');
+      return `${head}<p>誰から1枚奪いますか?(魚3匹)</p>
+        <div class="row">${btns || '<small>手札を持っている相手がいません</small>'}</div>${back}`;
+    }
+    if (d.pick === 'resource') {
+      const btns = RESOURCES.map(
+        (r) => `<button class="pick" data-act="fish-res:${r}" ${state.bank.resources[r] > 0 ? '' : 'disabled'}>
+          <span class="picon">${RES_ICON[r]}</span>${RES_JP[r]}</button>`,
+      ).join('');
+      return `${head}<p>もらう資源を選んでください(魚4匹)</p><div class="row">${btns}</div>${back}`;
+    }
+
+    const rolled = state.turnFlags.rolled;
+    const others = state.players.some((o) => o.id !== HUMAN && totalCards(o) > 0);
+    const bankHasAny = RESOURCES.some((r) => state.bank.resources[r] > 0);
+    const reason = (use) => {
+      const { cost } = FISH_USES[use];
+      if (n < cost) return `魚が${cost}匹必要です`;
+      if (use !== 'robber' && !rolled) return '先にダイスを振ってください';
+      if (use === 'robber' && state.board.robber === state.board.lake) return '盗賊はすでに湖にいます';
+      if (use === 'steal' && !others) return '手札を持っている相手がいません';
+      if (use === 'resource' && !bankHasAny) return '銀行に在庫がありません';
+      if (use === 'road' && piecesLeft(state, HUMAN, 'road') === 0) return '道のコマがありません';
+      if (use === 'dev' && state.bank.devDeck.length === 0) return '発展カードの山札がありません';
+      return null;
+    };
+    const rows = Object.entries(FISH_USES)
+      .map(([key, u]) => {
+        const err = reason(key);
+        return `<div class="drow fishuse">
+          <span>🐟×${u.cost} <b>${u.jp}</b><small>${err ?? u.desc}</small></span>
+          <button data-act="fish-use:${key}" ${err ? 'disabled' : ''} title="${err ?? ''}">使う</button>
+        </div>`;
+      })
+      .join('');
+    // 古い靴: 自分と同点以上の相手にだけ押しつけられる
+    let shoe = '';
+    if (hasOldShoe(p)) {
+      const targets = shoeTargets(state, HUMAN, (id) => computePoints(state, id));
+      const btns = targets
+        .map((id) => `<button class="pick" data-act="pass-shoe:${id}" style="--pc:${PLAYER_COLORS[id]}">
+          <span class="chip">${avatarSvg(id)}</span>${state.players[id].name}
+          <small>${computePoints(state, id)}点</small></button>`)
+        .join('');
+      shoe = `<p>👞 古い靴(勝利に必要な点数+1)</p>
+        <div class="row">${btns || '<small>自分と同点以上の相手がいないので、いまは渡せません</small>'}</div>`;
+    }
+    return `${head}
+      <p><small>お釣りは出ません(ちょうど払えないときは超過した分が捨てになります)。</small></p>
+      ${rows}${shoe}
+      <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
   }
 
   if (d.type === 'aqueduct') {
@@ -721,12 +806,12 @@ function dialogHtml(state, ui) {
   if (d.type === 'settings') {
     const s = d.settings;
     const seg = (act, options, current) =>
-      `<div class="seg">${options
+      `<div class="seg ${options.length >= 4 ? 'seg-grid' : ''}">${options
         .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}">${label}</button>`)
         .join('')}</div>`;
     return `<h3>⚙️ 設定</h3>
       <div class="srow"><span>表示</span>${seg('set-view', [['3d', '3D'], ['2d', '2D']], s.view)}</div>
-      <div class="srow"><span>モード</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン']], s.mode)}</div>
+      <div class="srow"><span>モード</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師']], s.mode)}</div>
       <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(s.cpuCount))}</div>
       <div class="srow"><span>BGM</span>${seg('set-bgm', [['on', '🔊 オン'], ['off', '🔇 オフ']], s.bgm ? 'on' : 'off')}</div>
       <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${s.seed}"></div>

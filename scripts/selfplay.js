@@ -1,4 +1,5 @@
-// セルフプレイ一括実行: node scripts/selfplay.js [ゲーム数]
+// セルフプレイ一括実行: node scripts/selfplay.js [ゲーム数] [モード]
+//   モード: base(既定) | cak | dragon | fish
 // Phase 1 完了ゲート用(設計書 §10): クラッシュ・無限ループ・整合性の検証と統計。
 
 import { createGame, RESOURCES } from '../src/state.js';
@@ -7,6 +8,7 @@ import { chooseAction } from '../src/ai/cpu-player.js';
 import { computePoints } from '../src/rules/victory.js';
 
 const games = Number(process.argv[2] ?? 200);
+const mode = process.argv[3] ?? 'base';
 const wins = [0, 0, 0, 0];
 let totalTurns = 0;
 let totalActions = 0;
@@ -15,7 +17,7 @@ let failures = 0;
 const t0 = Date.now();
 for (let seed = 1; seed <= games; seed++) {
   try {
-    let state = createGame({ seed, playerCount: 4, humanIndex: -1 });
+    let state = createGame({ seed, playerCount: 4, humanIndex: -1, mode });
     let actions = 0;
     while (state.phase !== 'ended') {
       if (++actions > 6000) throw new Error('6000アクション超過');
@@ -38,7 +40,7 @@ for (let seed = 1; seed <= games; seed++) {
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
 console.log('─'.repeat(40));
-console.log(`ゲーム数: ${games}(${elapsed}秒) 失敗: ${failures}`);
+console.log(`モード: ${mode} ゲーム数: ${games}(${elapsed}秒) 失敗: ${failures}`);
 console.log(`勝率: ${wins.map((w, i) => `P${i}=${((w / games) * 100).toFixed(1)}%`).join(' ')}`);
 console.log(`平均ターン数: ${(totalTurns / games).toFixed(1)} 平均アクション数: ${(totalActions / games).toFixed(1)}`);
 process.exit(failures > 0 ? 1 : 0);

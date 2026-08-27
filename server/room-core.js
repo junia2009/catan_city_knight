@@ -131,7 +131,7 @@ export class RoomCore {
     this.touch();
     if (this.phase !== 'lobby') return { error: '対戦中は変更できません' };
     const next = { ...this.settings };
-    if (['base', 'cak', 'dragon'].includes(patch?.mode)) next.mode = patch.mode;
+    if (['base', 'cak', 'dragon', 'fish'].includes(patch?.mode)) next.mode = patch.mode;
     if (['easy', 'normal', 'hard'].includes(patch?.difficulty)) next.difficulty = patch.difficulty;
     if (typeof patch?.cpuFill === 'boolean') next.cpuFill = patch.cpuFill;
     if (['balanced', 'random'].includes(patch?.diceMode)) next.diceMode = patch.diceMode;
@@ -269,6 +269,8 @@ export class RoomCore {
       bank: {
         ...full.bank,
         devDeck: full.bank.devDeck.map(() => null),
+        // 魚トークンの山も中身は伏せる(残り枚数は公開。手元の魚は公開情報なので伏せない)
+        fishPool: full.bank.fishPool ? full.bank.fishPool.map(() => null) : null,
         progressDecks: full.bank.progressDecks
           ? Object.fromEntries(
               Object.entries(full.bank.progressDecks).map(([k, v]) => [k, v.map(() => null)]),

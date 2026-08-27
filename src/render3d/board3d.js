@@ -7,7 +7,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { LAYOUT, PIPS } from '../rules/board.js';
+import { LAYOUT, PIPS, LAKE_NUMBERS } from '../rules/board.js';
 import { RES_JP_SHORT } from '../state.js';
 import { BARBARIAN_TRACK_LENGTH as BARB_TRACK } from '../rules/cak/barbarians.js';
 
@@ -21,6 +21,7 @@ const TERRAIN_COLORS = {
   hill: 0xb96a3e,
   mountain: 0x8d99ab,
   desert: 0xe2d2a0,
+  lake: 0x3fa8cf, // 漁師たちの湖
 };
 
 const TILE_TOP = 0.26; // タイル上面の高さ
@@ -215,6 +216,79 @@ function portSprite(type) {
   return sp;
 }
 
+// 魚影(看板のテクスチャ用。絵文字はフォントに左右されるので形で描く)
+function drawFish2d(g, x, y, s) {
+  g.beginPath();
+  g.moveTo(x - s, y);
+  g.quadraticCurveTo(x, y - s * 0.6, x + s * 0.7, y);
+  g.quadraticCurveTo(x, y + s * 0.6, x - s, y);
+  g.fill();
+  g.beginPath();
+  g.moveTo(x + s * 0.65, y);
+  g.lineTo(x + s * 1.15, y - s * 0.45);
+  g.lineTo(x + s * 1.15, y + s * 0.45);
+  g.closePath();
+  g.fill();
+}
+
+// 漁師たち: 湖の出目(2/3/11/12)を1枚にまとめた札
+function lakeSignSprite(numbers) {
+  const key = `lake${numbers.join('-')}`;
+  if (!texCache.has(key)) {
+    const cv = document.createElement('canvas');
+    cv.width = 320; cv.height = 96;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#fdf3d8';
+    g.strokeStyle = '#b08b4a';
+    g.lineWidth = 8;
+    g.beginPath();
+    g.roundRect(6, 6, 308, 84, 42);
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#1d4a63';
+    g.font = '800 46px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(numbers.join(' '), 160, 50);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    texCache.set(key, tex);
+  }
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: texCache.get(key), depthTest: true }));
+  sp.scale.set(1.2, 0.36, 1);
+  return sp;
+}
+
+// 漁師たち: 漁場の看板(魚と数字)
+function fisherySprite(number) {
+  const key = `fish${number}`;
+  if (!texCache.has(key)) {
+    const cv = document.createElement('canvas');
+    cv.width = 128; cv.height = 96;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#7fd4ea';
+    g.strokeStyle = '#1d4a63';
+    g.lineWidth = 6;
+    g.beginPath();
+    g.roundRect(4, 4, 120, 88, 14);
+    g.fill();
+    g.stroke();
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = '#ffffff';
+    drawFish2d(g, 64, 30, 14);
+    g.fillStyle = number === 6 || number === 8 ? '#b02020' : '#123c52';
+    g.font = '800 40px system-ui, sans-serif';
+    g.fillText(String(number), 64, 68);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    texCache.set(key, tex);
+  }
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: texCache.get(key), depthTest: true }));
+  sp.scale.set(0.55, 0.41, 1);
+  return sp;
+}
+
 // ---- 地形の装飾(ローポリ)----
 
 function makeTree(rng, sizeMul = 1) {
@@ -337,6 +411,7 @@ const CAP_PARAMS = {
   hill: { amp: 0.06, freq: 4.6, jitter: 0.11, tint: 0xbd7043 },
   mountain: { amp: 0.10, freq: 5.8, jitter: 0.14, tint: 0x93a0b2 },
   desert: { amp: 0.05, freq: 2.6, jitter: 0.06, tint: 0xe6d7a6 },
+  lake: { amp: 0.012, freq: 3.4, jitter: 0.03, tint: 0x49b2d6 }, // さざ波程度
 };
 
 function coordHash(x, z) {
@@ -2024,6 +2099,28 @@ export class Board3D {
         this.staticGroup.add(token);
         this.tokens.push(token);
       }
+      // 漁師たち: 湖には数字トークンがないので、魚の出る出目を1枚にまとめて置く
+      if (hex.terrain === 'lake') {
+        const sign = lakeSignSprite(LAKE_NUMBERS);
+        // 盗賊コマは湖の中央に立つので、札は手前側にずらして重ならないようにする
+        sign.position.set(c.x, TILE_TOP + 0.16, c.y + 0.5);
+        this.staticGroup.add(sign);
+      }
+    }
+
+    // 漁師たち: 漁場(港のない海岸辺)
+    for (const f of state.board.fisheries ?? []) {
+      const e = LAYOUT.edges[f.edgeId];
+      const len = Math.hypot(e.x, e.y) || 1;
+      const sx = e.x + (e.x / len) * 0.5;
+      const sz = e.y + (e.y / len) * 0.5;
+      const buoy = new THREE.Mesh(GEO.pole, mat(0x1d4a63));
+      buoy.position.set(sx, SEA_Y + 0.18, sz);
+      buoy.castShadow = true;
+      this.staticGroup.add(buoy);
+      const sign = fisherySprite(f.number);
+      sign.position.set(sx, SEA_Y + 0.5, sz);
+      this.staticGroup.add(sign);
     }
 
     // 港

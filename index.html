@@ -575,6 +575,9 @@
   }
   .rrow b { white-space: nowrap; flex: none; }
   .drow.improve .ability { display: block; color: var(--dim); margin-top: 2px; }
+  /* 漁師たち: 使い道の説明を見出しの下に落とす */
+  .drow.fishuse { align-items: flex-start; padding: 4px 0; }
+  .drow.fishuse small { display: block; color: var(--dim); margin-top: 2px; font-size: 12px; }
   .drow.improve .ability.on { color: var(--accent2); }
   .rrow .rcost { color: #cfdcea; margin-left: auto; text-align: right; line-height: 1.5; }
   .ricon { font-size: 17px; flex: none; }
@@ -631,9 +634,11 @@
   .select-panel h3 { font-size: 17px; color: var(--accent2); text-align: center; }
 
   /* ---------- 設定シート ---------- */
-  .seg { display: flex; gap: 6px; }
+  /* 選択肢が増えても収まるように折り返す(ルールは4つある) */
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
   /* ラベルの長さに応じて幅を配分(「都市と騎士」等が改行しないように) */
-  .seg button { flex: 1 1 auto; min-width: 0; padding: 9px 10px; }
+  .seg button { flex: 1 1 auto; min-width: 0; padding: 9px 10px; white-space: nowrap; }
+  .seg.seg-grid button { flex-basis: calc(50% - 3px); }
   .seg button.sel {
     background: linear-gradient(180deg, #ffc95e, #eda428);
     color: #4a2f00; font-weight: 700; border-color: rgba(0,0,0,0.35);

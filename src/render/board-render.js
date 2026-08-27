@@ -3,7 +3,7 @@
 // 静的レイヤー(海・島・地形・トークン・港)はオフスクリーンにキャッシュし、
 // 動的レイヤー(盗賊・道・建物・ハイライト)を毎回上描きする。
 
-import { LAYOUT, PIPS } from '../rules/board.js';
+import { LAYOUT, PIPS, LAKE_NUMBERS } from '../rules/board.js';
 
 export const PLAYER_COLORS = ['#e04848', '#3d7dd8', '#f0973c', '#9d5fd8'];
 export const PLAYER_COLORS_DARK = ['#9c2626', '#22508f', '#b3651a', '#6a3a99'];
@@ -15,6 +15,7 @@ const TERRAIN_STYLE = {
   hill:     { top: '#cd7d4c', bottom: '#a85a32' },
   mountain: { top: '#a3aebc', bottom: '#7d8a9c' },
   desert:   { top: '#ecdcae', bottom: '#d8c088' },
+  lake:     { top: '#4fb6d8', bottom: '#2b7ba6' },
 };
 
 // ---- 決定的な擬似乱数(装飾モチーフの配置用、hexId から生成) ----
@@ -264,7 +265,37 @@ function drawTerrainDecor(ctx, view, hid, terrain) {
       drawDune(ctx, cx + dx * u, cy + dy * u, u * 0.2);
     }
     drawCactus(ctx, cx + u * 0.42, cy - u * 0.38, u * 0.16);
+  } else if (terrain === 'lake') {
+    // 漁師たちの湖。さざ波と魚影
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = Math.max(1, u * 0.025);
+    ctx.lineCap = 'round';
+    for (const [dx, dy] of ringPositions(rng, 7, 0.3, 0.62)) {
+      const wx = cx + dx * u, wy = cy + dy * u;
+      ctx.beginPath();
+      ctx.arc(wx, wy, u * 0.1, Math.PI * 0.15, Math.PI * 0.85);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    for (const [dx, dy] of ringPositions(rng, 3, 0.4, 0.58)) {
+      drawFishShape(ctx, cx + dx * u, cy + dy * u, u * 0.13);
+    }
   }
+}
+
+// 魚影(湖の装飾と漁場マーカーで共用)
+function drawFishShape(ctx, x, y, s) {
+  ctx.beginPath();
+  ctx.moveTo(x - s, y);
+  ctx.quadraticCurveTo(x, y - s * 0.6, x + s * 0.7, y);
+  ctx.quadraticCurveTo(x, y + s * 0.6, x - s, y);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x + s * 0.65, y);
+  ctx.lineTo(x + s * 1.15, y - s * 0.45);
+  ctx.lineTo(x + s * 1.15, y + s * 0.45);
+  ctx.closePath();
+  ctx.fill();
 }
 
 // ---- 静的レイヤー ----
@@ -421,6 +452,75 @@ function drawPorts(ctx, view, state) {
   }
 }
 
+// 漁師たち: 湖の出目(2/3/11/12)を1枚の札にまとめて中央に置く
+function drawLakeNumbers(ctx, view, state) {
+  const lake = state.board.lake;
+  if (!lake) return;
+  const c = hexCenterOf(lake);
+  const u = view.scale;
+  // 盗賊コマはヘックス中央に立つので、札は少し下へずらして重ならないようにする
+  const [px, py] = toPixel(view, c.x, c.y + 0.42);
+  const w = u * 0.86;
+  const h = u * 0.3;
+  const r = h / 2;
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.4)';
+  ctx.shadowBlur = u * 0.06;
+  ctx.shadowOffsetY = u * 0.025;
+  ctx.beginPath();
+  ctx.roundRect(px - w / 2, py - h / 2, w, h, r);
+  ctx.fillStyle = '#fdf3d8';
+  ctx.fill();
+  ctx.restore();
+  ctx.beginPath();
+  ctx.roundRect(px - w / 2, py - h / 2, w, h, r);
+  ctx.strokeStyle = '#b08b4a';
+  ctx.lineWidth = Math.max(1.5, u * 0.02);
+  ctx.stroke();
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#1d4a63';
+  ctx.font = `800 ${Math.round(u * 0.17)}px system-ui, sans-serif`;
+  ctx.fillText(LAKE_NUMBERS.join(' '), px, py + u * 0.005);
+}
+
+// 漁師たち: 海岸辺の漁場(数字つき)
+function drawFisheries(ctx, view, state) {
+  for (const f of state.board.fisheries ?? []) {
+    const e = LAYOUT.edges[f.edgeId];
+    const len = Math.hypot(e.x, e.y) || 1;
+    const [px, py] = toPixel(view, e.x + (e.x / len) * 0.5, e.y + (e.y / len) * 0.5);
+    const u = view.scale;
+    const r = u * 0.21;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = u * 0.06;
+    ctx.shadowOffsetY = u * 0.03;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#7fd4ea';
+    ctx.fill();
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.strokeStyle = '#1d4a63';
+    ctx.lineWidth = Math.max(1.5, u * 0.028);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    drawFishShape(ctx, px, py - r * 0.42, u * 0.1);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = f.number === 6 || f.number === 8 ? '#b02020' : '#123c52';
+    ctx.font = `800 ${Math.round(u * 0.17)}px system-ui, sans-serif`;
+    ctx.fillText(String(f.number), px, py + r * 0.4);
+  }
+}
+
 // 静的レイヤーのキャッシュ
 let staticCache = { key: null, canvas: null };
 
@@ -447,6 +547,8 @@ function getStaticLayer(state, width, height, dpr) {
     if (hex.token) drawToken(ctx, view, hid, hex.token);
   }
   drawPorts(ctx, view, state);
+  drawLakeNumbers(ctx, view, state);
+  drawFisheries(ctx, view, state);
 
   // 周辺ビネット
   const vg = ctx.createRadialGradient(

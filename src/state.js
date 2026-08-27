@@ -5,6 +5,7 @@ import { makeRng, shuffled } from './rng.js';
 import { generateBoard } from './rules/board.js';
 import { buildProgressDecks } from './rules/cak/progress-cards.js';
 import { dragonNestHex } from './rules/dragon.js';
+import { FISH_POOL } from './rules/fish.js';
 
 export const RESOURCES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
 
@@ -32,7 +33,7 @@ export function zeroResources() {
 }
 
 // humanIndex: 人間プレイヤーの位置(-1 なら全員CPU、セルフプレイ用)
-// mode: 'base'(基本カタン) | 'cak'(都市と騎士)
+// mode: 'base'(基本カタン) | 'cak'(都市と騎士) | 'dragon' | 'fish'(漁師たち)
 export function createGame({
   seed = 1, playerCount = 4, humanIndex = 0, names = null, mode = 'base',
   difficulty = 'hard', // CPU難易度: 'easy' | 'normal' | 'hard'(評価ノイズ量)
@@ -40,7 +41,7 @@ export function createGame({
 } = {}) {
   let rng = makeRng(seed);
   let board;
-  [rng, board] = generateBoard(rng);
+  [rng, board] = generateBoard(rng, { fish: mode === 'fish' });
   // ドラゴンの島: ドラゴン(=盗賊コマ)は巣(最良の山)から始まる
   if (mode === 'dragon') board.robber = dragonNestHex(board);
 
@@ -62,11 +63,16 @@ export function createGame({
       defenderPoints: 0,
       // --- ドラゴンの島 ---
       treasures: 0, // 財宝(1個=+1点)
+      // --- 漁師たち ---
+      fish: [], // 魚トークン(数値 or 'shoe')。手札上限には数えない
     });
   }
 
   let devDeck;
   [rng, devDeck] = shuffled(rng, DEV_POOL);
+
+  let fishPool = null;
+  if (mode === 'fish') [rng, fishPool] = shuffled(rng, FISH_POOL);
 
   let progressDecks = null;
   if (mode === 'cak') {
@@ -101,6 +107,7 @@ export function createGame({
       devDeck,
       commodities: { cloth: 12, coin: 12, paper: 12 },
       progressDecks,
+      fishPool, // 漁師たちの魚トークンの山(それ以外は null)
     },
     dice: null,
     diceCounts: Array(13).fill(0), // 出目(2〜12)が何回出たか。index 0,1 は未使用

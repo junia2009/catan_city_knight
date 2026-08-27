@@ -23,7 +23,16 @@ import {
 } from './rules/build.js';
 import { rollTwoDice, rollEventDie, distributeForRoll } from './rules/dice.js';
 import { TOWER_COST, canBuildTower, resolveRampage } from './rules/dragon.js';
-import { stealableTargets, applyRobberMove } from './rules/robber.js';
+import { stealableTargets, applyRobberMove, stealRandomCard } from './rules/robber.js';
+import {
+  FISH_USES,
+  drawFish,
+  fishCount,
+  fishGainForRoll,
+  hasOldShoe,
+  payFish,
+  shoeTargets,
+} from './rules/fish.js';
 import { tradeRate } from './rules/trade.js';
 import {
   computePoints,
@@ -401,6 +410,49 @@ export function validateAction(state, action) {
       }
     }
 
+    // 漁師たち: 魚トークンを使う。お釣りは出ない(超過分は捨てる)。
+    case 'SPEND_FISH': {
+      if (state.mode !== 'fish') return '漁師たちのルールではありません';
+      const use = FISH_USES[action.use];
+      if (!use) return '不明な使い道です';
+      if (fishCount(p) < use.cost) return `魚が${use.cost}匹必要です`;
+      // 盗賊を戻すのだけはロール前に使える(そのための使い道なので)
+      if (action.use !== 'robber' && !state.turnFlags.rolled) return '先にダイスを振ってください';
+      switch (action.use) {
+        case 'robber':
+          if (state.board.robber === state.board.lake) return '盗賊はすでに湖にいます';
+          return null;
+        case 'steal': {
+          const t = state.players[action.params?.target];
+          if (!t || t.id === pid) return '奪う相手を選んでください';
+          if (totalCards(t) === 0) return 'その相手は手札を持っていません';
+          return null;
+        }
+        case 'resource': {
+          const r = action.params?.resource;
+          if (!RESOURCES.includes(r)) return '資源を選んでください';
+          if (state.bank.resources[r] < 1) return '銀行に在庫がありません';
+          return null;
+        }
+        case 'road':
+          return canPlaceRoad(state, pid, action.params?.edgeId);
+        case 'dev':
+          if (state.bank.devDeck.length === 0) return '発展カードの山札がありません';
+          return null;
+        default:
+          return '不明な使い道です';
+      }
+    }
+
+    // 漁師たち: 古い靴を自分と同点以上の相手へ押しつける
+    case 'PASS_SHOE': {
+      if (state.mode !== 'fish') return '漁師たちのルールではありません';
+      if (!hasOldShoe(p)) return '古い靴を持っていません';
+      const targets = shoeTargets(state, pid, (id) => computePoints(state, id));
+      if (!targets.includes(action.target)) return '自分と同点以上の相手にだけ渡せます';
+      return null;
+    }
+
     case 'END_TURN':
       if (!state.turnFlags.rolled) return '先にダイスを振ってください';
       return null;
@@ -413,16 +465,32 @@ export function validateAction(state, action) {
 function checkVictoryFor(state, pid) {
   if (state.phase !== 'main' || state.winner != null) return;
   const pts = computePoints(state, pid, { includeHidden: true });
-  if (pts >= pointsToWin(state)) {
+  if (pts >= pointsToWin(state, pid)) {
     state.phase = 'ended';
     state.winner = pid;
     addLog(state, `🏆 ${state.players[pid].name}が${pts}点で勝利!`);
   }
 }
 
+// 漁師たち: 湖と漁場から魚トークンを配る(出目7には魚の数字がないので呼ばれない)
+function distributeFish(state, total) {
+  for (const [gid, n] of Object.entries(fishGainForRoll(state, total))) {
+    const drawn = drawFish(state, Number(gid), n);
+    if (drawn.length === 0) continue;
+    const name = state.players[gid].name;
+    const fishes = drawn.filter((t) => t !== 'shoe');
+    if (fishes.length > 0) {
+      addLog(state, `🐟 ${name}が魚を${fishes.length}枚(${fishes.join('+')}匹)獲得`);
+    }
+    // 古い靴は引いた時点で公開する(隠せない)
+    if (drawn.includes('shoe')) addLog(state, `👞 ${name}が「古い靴」を引きました(勝利に必要な点数+1)`);
+  }
+}
+
 // 出目合計の処理(7 → 捨て札/盗賊、それ以外 → 資源分配)。
 // cak ではイベントダイス(蛮族)解決後に呼ばれる。
 function processRollTotal(state, pid, total) {
+  if (state.mode === 'fish' && total !== 7) distributeFish(state, total);
   if (total === 7) {
     const required = {};
     for (const pl of state.players) {
@@ -803,6 +871,48 @@ function applyAction(state, action) {
       addLog(state, `${p.name}が進歩カード「${def.name}」を使用`);
       def.play(state, pid, action.params);
       state.bank.progressDecks[card.deck].unshift(card.id); // 使用済みは山札の底へ
+      break;
+    }
+
+    case 'SPEND_FISH': {
+      const use = FISH_USES[action.use];
+      payFish(p, use.cost);
+      addLog(state, `🐟 ${p.name}が魚${use.cost}匹で「${use.jp}」`);
+      switch (action.use) {
+        case 'robber':
+          state.board.robber = state.board.lake;
+          addLog(state, '盗賊が湖に戻りました');
+          break;
+        case 'steal': {
+          const t = state.players[action.params.target];
+          stealRandomCard(state, pid, t.id);
+          addLog(state, `${p.name}が${t.name}から1枚奪いました`);
+          break;
+        }
+        case 'resource':
+          grantResource(state, pid, action.params.resource, 1);
+          addLog(state, `${p.name}が${RES_JP[action.params.resource]}を1枚獲得`);
+          break;
+        case 'road':
+          state.roads[action.params.edgeId] = { player: pid };
+          addLog(state, `${p.name}が道を建設しました`);
+          updateLongestRoad(state);
+          break;
+        case 'dev': {
+          const type = state.bank.devDeck.pop();
+          p.devCards.push({ type, boughtTurn: state.turn });
+          addLog(state, `${p.name}が発展カードを引きました(残り${state.bank.devDeck.length}枚)`);
+          break;
+        }
+      }
+      break;
+    }
+
+    case 'PASS_SHOE': {
+      const t = state.players[action.target];
+      p.fish.splice(p.fish.indexOf('shoe'), 1);
+      t.fish.push('shoe');
+      addLog(state, `👞 ${p.name}が「古い靴」を${t.name}に渡しました`);
       break;
     }
 
