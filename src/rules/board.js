@@ -23,9 +23,13 @@ export const DIRS = [
   [0, 1],
 ];
 
-// lake は漁師たちだけに出る(砂漠の置き換え)。資源は産まず、魚を産む。
-export const TERRAINS = ['forest', 'pasture', 'field', 'hill', 'mountain', 'desert', 'lake'];
+// lake は漁師たちだけ(砂漠の置き換え。資源は産まず魚を産む)。
+// sea / gold は航海者たちだけ(海は何も産まない、金鉱は好きな資源を産む)。
+export const TERRAINS = [
+  'forest', 'pasture', 'field', 'hill', 'mountain', 'desert', 'lake', 'sea', 'gold',
+];
 
+// 資源を産まない地形は null。lake / gold は「資源以外の産出」を別途扱う。
 export const TERRAIN_RESOURCE = {
   forest: 'wood',
   pasture: 'sheep',
@@ -34,6 +38,8 @@ export const TERRAIN_RESOURCE = {
   mountain: 'ore',
   desert: null,
   lake: null,
+  sea: null,
+  gold: null,
 };
 
 // 出目 → 確率の目安(36分率の分子)。評価関数・トークン描画に使う。

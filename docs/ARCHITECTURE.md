@@ -62,6 +62,7 @@ dispatch(state, action)
 | 都市と騎士 | `BUILD_KNIGHT` `ACTIVATE_KNIGHT` `PROMOTE_KNIGHT` `MOVE_KNIGHT` `CHASE_ROBBER` `BUILD_WALL` `BUY_IMPROVEMENT` `PLAY_PROGRESS_CARD` `RAZE_CITY` `PICK_AQUEDUCT` |
 | ドラゴンの島 | `BUILD_TOWER` |
 | 漁師たち | `SPEND_FISH`(魚を使う) `PASS_SHOE`(古い靴を渡す) |
+| 航海者たち | `BUILD_SHIP` `MOVE_SHIP` `PICK_GOLD`(金鉱の資源選択) |
 
 ### 割り込み(awaiting 状態機械)
 
@@ -93,9 +94,11 @@ dispatch(state, action)
   awaiting,                // 上記の割り込み(null = 通常フロー)
   board,                   // hexIds・hexes(terrain/token)・robber・ports
                            //  + fisheries/lake(漁師たち)
+                           //  + pirate/islandOf(航海者たち)
   buildings, roads,        // vertexId/edgeId -> { player, ... }
+  ships,                   // edgeId -> { player, builtTurn }(航海者たち)
   players: [{ resources, devCards, commodities, improvements,
-              progressCards, progressVP, defenderPoints, treasures, fish, ... }],
+              progressCards, progressVP, defenderPoints, treasures, fish, islands, ... }],
   bank,                    // resources 各19・devDeck・commodities 各12・progressDecks・fishPool
   dice, eventDie,          // eventDie は cak のみ('ship' | 各進歩デッキ)
   diceMode, diceDeck,      // 'random'(毎回独立。既定) | 'balanced'(36通りの山札から引く)
@@ -127,7 +130,8 @@ src/
 │   ├── victory.js    # computePoints / pointsToWin / 最長交易路
 │   ├── cak/          # barbarians / knights / improvements / progress-cards(54枚)
 │   ├── dragon.js     # 暴走・炎上・見張り塔・財宝
-│   └── fish.js       # 漁師たち: 魚トークンの山・獲得・支払い・古い靴
+│   ├── fish.js       # 漁師たち: 魚トークンの山・獲得・支払い・古い靴
+│   └── sea.js        # 航海者たち: マップ生成・船・海賊・金鉱・島の判定
 ├── ai/
 │   ├── cpu-player.js  # chooseAction(全ての判断の入口)
 │   ├── evaluator.js   # 盤面評価・evalNoise(難易度)

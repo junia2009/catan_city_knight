@@ -25,6 +25,16 @@ import { rollTwoDice, rollEventDie, distributeForRoll } from './rules/dice.js';
 import { TOWER_COST, canBuildTower, resolveRampage } from './rules/dragon.js';
 import { stealableTargets, applyRobberMove, stealRandomCard } from './rules/robber.js';
 import {
+  SHIP_COST,
+  canPlaceShip,
+  goldGainForRoll,
+  isLandHex,
+  isSeaHex,
+  islandAtVertex,
+  movableShips,
+  pirateTargets,
+} from './rules/sea.js';
+import {
   FISH_USES,
   drawFish,
   fishCount,
@@ -108,6 +118,7 @@ const AWAITING_ACTIONS = {
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
+  goldChoice: 'PICK_GOLD',
 };
 
 // 交易の一斉提案は1手番にこの回数まで(内容を変えて出し直せる)
@@ -164,6 +175,10 @@ export function validateAction(state, action) {
     case 'PLACE_INITIAL': {
       const err = canPlaceSettlement(state, pid, action.vertexId, { needRoad: false });
       if (err) return err;
+      // 航海者たち: 最初の2軒は本島(島番号0)に置く。小島へは船で渡る。
+      if (state.mode === 'sea' && islandAtVertex(state.board, action.vertexId) !== 0) {
+        return '最初の開拓地は本島に置いてください';
+      }
       const edge = LAYOUT.edges[action.edgeId];
       if (!edge) return '不正な辺です';
       if (state.roads[action.edgeId]) return 'その辺には道があります';
@@ -185,8 +200,16 @@ export function validateAction(state, action) {
 
     case 'MOVE_ROBBER': {
       if (!state.board.hexes[action.hexId]) return '不正なヘックスです';
-      if (state.board.robber === action.hexId) return '盗賊は別のヘックスへ移動してください';
-      const targets = stealableTargets(state, action.hexId, pid);
+      // 航海者たち: 海のヘックスを選ぶと盗賊ではなく海賊が動く(公式。7でどちらか一方)
+      const toSea = isSeaHex(state.board, action.hexId);
+      if (toSea) {
+        if (state.board.pirate === action.hexId) return '海賊は別の海へ移動してください';
+      } else if (state.board.robber === action.hexId) {
+        return '盗賊は別のヘックスへ移動してください';
+      }
+      const targets = toSea
+        ? pirateTargets(state, action.hexId, pid).filter((t) => totalCards(state.players[t]) > 0)
+        : stealableTargets(state, action.hexId, pid);
       if (targets.length > 0) {
         if (action.targetPlayer == null) return '略奪する相手を選んでください';
         if (!targets.includes(action.targetPlayer)) return 'その相手からは奪えません';
@@ -204,6 +227,28 @@ export function validateAction(state, action) {
       if (!state.turnFlags.rolled) return '先にダイスを振ってください';
       if (!canAfford(p, COSTS.road)) return '資源が足りません(木材1・レンガ1)';
       return canPlaceRoad(state, pid, action.edgeId);
+    }
+
+    // 航海者たち: 船の建設と移動
+    case 'BUILD_SHIP': {
+      if (state.mode !== 'sea') return '航海者たちのルールではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      if (!canAfford(p, SHIP_COST)) return '資源が足りません(木材1・羊毛1)';
+      return canPlaceShip(state, pid, action.edgeId);
+    }
+
+    case 'MOVE_SHIP': {
+      if (state.mode !== 'sea') return '航海者たちのルールではありません';
+      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
+      if (state.turnFlags.movedShip) return '船を動かせるのは1手番に1隻までです';
+      if (!movableShips(state, pid).includes(action.from)) {
+        return 'その船は動かせません(航路の先端にある船だけ)';
+      }
+      if (action.from === action.to) return '別の場所へ動かしてください';
+      // 動かす船をいったん取り除いた状態で置けるかを見る
+      const without = { ...state, ships: { ...state.ships } };
+      delete without.ships[action.from];
+      return canPlaceShip(without, pid, action.to);
     }
 
     case 'BUILD_SETTLEMENT': {
@@ -271,6 +316,12 @@ export function validateAction(state, action) {
       if (!aw.context.accepted.includes(action.partner)) return 'その相手は応じていません';
       const { give, receive } = aw.context;
       return validateTradeContents(state, p, state.players[action.partner], give, receive);
+    }
+
+    case 'PICK_GOLD': {
+      if (!RESOURCES.includes(action.resource)) return '資源を選んでください';
+      if (state.bank.resources[action.resource] < 1) return '銀行に在庫がありません';
+      return null;
     }
 
     case 'PICK_AQUEDUCT': {
@@ -462,6 +513,20 @@ export function validateAction(state, action) {
   }
 }
 
+// 航海者たち: 初めて開拓地を建てた島を記録する(本島以外は1つにつき+2点)
+function noteIsland(state, pid, vertexId) {
+  if (state.mode !== 'sea') return;
+  const island = islandAtVertex(state.board, vertexId);
+  if (island == null) return;
+  const p = state.players[pid];
+  p.islands ??= [];
+  if (p.islands.includes(island)) return;
+  p.islands.push(island);
+  if (island !== 0) {
+    addLog(state, `🏝 ${p.name}が新しい島に入植! (+2点)`);
+  }
+}
+
 function checkVictoryFor(state, pid) {
   if (state.phase !== 'main' || state.winner != null) return;
   const pts = computePoints(state, pid, { includeHidden: true });
@@ -489,6 +554,15 @@ function distributeFish(state, total) {
 
 // 出目合計の処理(7 → 捨て札/盗賊、それ以外 → 資源分配)。
 // cak ではイベントダイス(蛮族)解決後に呼ばれる。
+// 航海者たち: 金鉱は「好きな資源」なので、選ばせる割り込みを立てる
+function pendingGold(state, total) {
+  const gains = goldGainForRoll(state, total);
+  const players = Object.keys(gains).map(Number).sort((a, b) => a - b);
+  if (players.length === 0) return null;
+  if (!RESOURCES.some((r) => state.bank.resources[r] > 0)) return null;
+  return { type: 'goldChoice', players, context: { left: gains } };
+}
+
 function processRollTotal(state, pid, total) {
   if (state.mode === 'fish' && total !== 7) distributeFish(state, total);
   if (total === 7) {
@@ -519,6 +593,14 @@ function processRollTotal(state, pid, total) {
         addLog(state, `💧 水道橋: ${dry.map((i) => state.players[i].name).join('・')}は資源を1枚選べます`);
       }
     }
+    if (state.mode === 'sea') {
+      const gold = pendingGold(state, total);
+      if (gold) {
+        state.awaiting = gold;
+        const who = gold.players.map((i) => state.players[i].name).join('・');
+        addLog(state, `💰 金鉱: ${who}は好きな資源を選べます`);
+      }
+    }
   }
 }
 
@@ -533,6 +615,7 @@ function applyAction(state, action) {
       const type = state.mode === 'cak' && round === 2 ? 'city' : 'settlement';
       state.buildings[action.vertexId] = { player: pid, type };
       state.roads[action.edgeId] = { player: pid };
+      noteIsland(state, pid, action.vertexId);
       addLog(state, `${p.name}が初期配置(${round}巡目)を行いました`);
 
       if (round === 2) {
@@ -652,9 +735,52 @@ function applyAction(state, action) {
     }
 
     case 'MOVE_ROBBER':
-      applyRobberMove(state, pid, action.hexId, action.targetPlayer ?? null);
+      if (isSeaHex(state.board, action.hexId)) {
+        // 航海者たち: 海賊の移動(盗賊はその場に残る)
+        state.board.pirate = action.hexId;
+        if (action.targetPlayer != null) {
+          const t = state.players[action.targetPlayer];
+          stealRandomCard(state, pid, t.id);
+          addLog(state, `🏴‍☠️ ${p.name}が海賊を動かし、${t.name}から1枚奪いました`);
+        } else {
+          addLog(state, `🏴‍☠️ ${p.name}が海賊を動かしました`);
+        }
+      } else {
+        applyRobberMove(state, pid, action.hexId, action.targetPlayer ?? null);
+      }
       state.awaiting = null;
       break;
+
+    case 'BUILD_SHIP':
+      payCost(state, pid, SHIP_COST);
+      state.ships[action.edgeId] = { player: pid, builtTurn: state.turn };
+      addLog(state, `${p.name}が船を建造しました`);
+      updateLongestRoad(state);
+      break;
+
+    case 'MOVE_SHIP': {
+      delete state.ships[action.from];
+      // 動かした船はその手番のうちに建て直したことにはならない(再移動は不可)
+      state.ships[action.to] = { player: pid, builtTurn: state.turn };
+      state.turnFlags.movedShip = true;
+      addLog(state, `${p.name}が船を移動しました`);
+      updateLongestRoad(state);
+      break;
+    }
+
+    case 'PICK_GOLD': {
+      grantResource(state, pid, action.resource, 1);
+      addLog(state, `💰 ${p.name}が金鉱から${RES_JP[action.resource]}を1枚獲得`);
+      const left = state.awaiting.context.left;
+      left[pid] -= 1;
+      if (left[pid] <= 0) {
+        state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+      }
+      // 銀行が空になったら打ち切る
+      if (!RESOURCES.some((r) => state.bank.resources[r] > 0)) state.awaiting.players = [];
+      if (state.awaiting.players.length === 0) state.awaiting = null;
+      break;
+    }
 
     case 'BUILD_ROAD':
       payCost(state, pid, COSTS.road);
@@ -667,6 +793,7 @@ function applyAction(state, action) {
       payCost(state, pid, COSTS.settlement);
       state.buildings[action.vertexId] = { player: pid, type: 'settlement' };
       addLog(state, `${p.name}が開拓地を建設しました`);
+      noteIsland(state, pid, action.vertexId);
       updateLongestRoad(state); // 敵の道を分断する可能性がある
       break;
 

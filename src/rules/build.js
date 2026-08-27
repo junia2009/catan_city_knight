@@ -2,6 +2,7 @@
 // すべて純粋関数。エラー理由の文字列 or null(合法)を返す。
 
 import { LAYOUT, vertexHexesOf } from './board.js';
+import { isLandHex } from './sea.js';
 import { RESOURCES } from '../state.js';
 
 export const COSTS = {
@@ -95,10 +96,11 @@ export function canPlaceSettlement(state, pid, vertexId, { needRoad = true } = {
     return '開拓地のコマがありません';
   }
   if (needRoad) {
+    // 航海者たち: 船も接続とみなす(島には船で渡って入植する)
     const connected = LAYOUT.vertexEdges[vertexId].some(
-      (eid) => state.roads[eid]?.player === pid,
+      (eid) => state.roads[eid]?.player === pid || state.ships?.[eid]?.player === pid,
     );
-    if (!connected) return '自分の道に接続していません';
+    if (!connected) return '自分の道・船に接続していません';
   }
   return null;
 }
@@ -110,6 +112,9 @@ export function canPlaceRoad(state, pid, edgeId, { requireVertex = null, extraRo
   const edge = LAYOUT.edges[edgeId];
   if (!edge) return '不正な辺です';
   if (!edge.hexes.some((h) => state.board.hexes[h])) return '盤の外です';
+  // 航海者たち: 道は陸に面した辺だけ(海の上は船)
+  if (!edge.hexes.some((h) => isLandHex(state.board, h))) return '道は陸に面した辺にだけ置けます';
+  if (state.ships?.[edgeId]) return 'その辺には船があります';
   if (state.roads[edgeId] || extraRoads?.[edgeId]) return 'その辺には道があります';
   const extraCount = extraRoads ? Object.keys(extraRoads).length : 0;
   if (countPieces(state, pid, 'road') + extraCount >= PIECE_LIMITS.road) {

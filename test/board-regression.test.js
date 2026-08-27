@@ -13,7 +13,7 @@ import { dispatch } from '../src/actions.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 import { computePoints } from '../src/rules/victory.js';
 
-const MODES = ['base', 'cak', 'dragon', 'fish'];
+const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 const SEEDS = [1, 2, 3];
 
 function sha(obj) {
@@ -33,6 +33,8 @@ function boardFingerprint(board) {
     hexes,
     robber: board.robber,
     ports: board.ports.map((p) => [p.edgeId, p.type]),
+    pirate: board.pirate ?? null,
+    islandOf: board.islandOf ? Object.keys(board.islandOf).sort().map((h) => [h, board.islandOf[h]]) : null,
     fisheries: (board.fisheries ?? []).map((f) => [f.edgeId, f.number]),
     lake: board.lake ?? null,
   };
@@ -59,6 +61,8 @@ function playFingerprint(mode, seed) {
     winner: state.winner,
     points: state.players.map((p) => computePoints(state, p.id, { includeHidden: true })),
     resources: state.players.map((p) => RESOURCES.map((r) => p.resources[r])),
+    ships: Object.keys(state.ships ?? {}).sort().map((e) => [e, state.ships[e].player]),
+    islands: state.players.map((p) => p.islands ?? []),
     bank: RESOURCES.map((r) => state.bank.resources[r]),
     diceCounts: state.diceCounts,
     logLength: state.log.length,
@@ -66,19 +70,24 @@ function playFingerprint(mode, seed) {
 }
 
 // モード/シード -> ハッシュ。盤面を意図的に変えたときだけ更新すること。
+// 指紋に船・島・海賊を足したので、航海者たちの追加時に全モードの値を取り直している
+// (中身が変わったのは指紋の定義であって、既存モードの挙動ではない)。
 const GOLDEN = {
-  'base/1': '6e816bdc73a03bd3',
-  'base/2': '22b688736b31e38e',
-  'base/3': 'd448dc72d1b2eb04',
-  'cak/1': '4bf4337b271720f4',
-  'cak/2': '5a8509abd60025f0',
-  'cak/3': 'f0f794e91751db80',
-  'dragon/1': 'f52887297fc591f3',
-  'dragon/2': '1abec8750665e59c',
-  'dragon/3': 'a55cc19e86c05e3c',
-  'fish/1': '300093c14fd3c862',
-  'fish/2': '574860fc1b46e2e0',
-  'fish/3': '08e248925e023cae',
+  'base/1': '1ecb22b9fe8523a9',
+  'base/2': 'e0ef987ac4198c85',
+  'base/3': '5018653d959345dd',
+  'cak/1': '47215bbbbb63c49a',
+  'cak/2': '9312d2f486dd13da',
+  'cak/3': 'e08a9d8ecf983dad',
+  'dragon/1': '1de7146080487f00',
+  'dragon/2': 'ae6f3f71436fe018',
+  'dragon/3': '56089e27b2590d69',
+  'fish/1': '97cbdaac4ec2d13e',
+  'fish/2': '59719d724828a144',
+  'fish/3': '10a1aa4777947e08',
+  'sea/1': '94014b45a123976e',
+  'sea/2': '84487f4714334eb9',
+  'sea/3': '4a844c3461ad91d8',
 };
 
 test('回帰: 既存モードの盤面と展開がシードから完全に再現される', () => {

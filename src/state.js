@@ -6,6 +6,7 @@ import { generateBoard } from './rules/board.js';
 import { buildProgressDecks } from './rules/cak/progress-cards.js';
 import { dragonNestHex } from './rules/dragon.js';
 import { FISH_POOL } from './rules/fish.js';
+import { generateSeaBoard } from './rules/sea.js';
 
 export const RESOURCES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
 
@@ -34,6 +35,7 @@ export function zeroResources() {
 
 // humanIndex: 人間プレイヤーの位置(-1 なら全員CPU、セルフプレイ用)
 // mode: 'base'(基本カタン) | 'cak'(都市と騎士) | 'dragon' | 'fish'(漁師たち)
+//     | 'sea'(航海者たち。盤が半径3になり海と船が入る)
 export function createGame({
   seed = 1, playerCount = 4, humanIndex = 0, names = null, mode = 'base',
   difficulty = 'hard', // CPU難易度: 'easy' | 'normal' | 'hard'(評価ノイズ量)
@@ -41,7 +43,8 @@ export function createGame({
 } = {}) {
   let rng = makeRng(seed);
   let board;
-  [rng, board] = generateBoard(rng, { fish: mode === 'fish' });
+  if (mode === 'sea') [rng, board] = generateSeaBoard(rng);
+  else [rng, board] = generateBoard(rng, { fish: mode === 'fish' });
   // ドラゴンの島: ドラゴン(=盗賊コマ)は巣(最良の山)から始まる
   if (mode === 'dragon') board.robber = dragonNestHex(board);
 
@@ -65,6 +68,8 @@ export function createGame({
       treasures: 0, // 財宝(1個=+1点)
       // --- 漁師たち ---
       fish: [], // 魚トークン(数値 or 'shoe')。手札上限には数えない
+      // --- 航海者たち ---
+      islands: [], // 開拓地を建てた島の番号。本島以外は1つにつき+2点
     });
   }
 
@@ -101,6 +106,7 @@ export function createGame({
     board,
     buildings: {}, // vertexId -> { player, type: 'settlement' | 'city' }
     roads: {}, // edgeId -> { player }
+    ships: {}, // edgeId -> { player, builtTurn }(航海者たち)
     players,
     bank: {
       resources: { wood: 19, brick: 19, sheep: 19, wheat: 19, ore: 19 },
@@ -120,6 +126,8 @@ export function createGame({
     // --- 都市と騎士 ---
     knights: {}, // vertexId -> { player, level, active, activatedTurn }
     merchant: null, // { hexId, player } 商人(進歩カード)。保持者は+1点
+    // --- 航海者たち ---
+    // 1手番に動かせる船は1隻(turnFlags.movedShip で管理)
     // --- ドラゴンの島 ---
     dragon: mode === 'dragon' ? { nestHex: dragonNestHex(board) } : null,
     towers: {}, // vertexId -> pid(見張り塔)

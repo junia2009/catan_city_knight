@@ -183,6 +183,22 @@ test('room: 漁師たちの魚は手元が公開・山札は伏せられる', ()
   assert.ok(room.state.bank.fishPool.some((t) => t !== null), '元の山札は壊さない');
 });
 
+test('room: 航海者たちも部屋の設定として選べる', () => {
+  const room = newRoom();
+  room.join({ clientId: 'a', name: 'A' });
+  room.join({ clientId: 'b', name: 'B' });
+  assert.equal(room.setSettings('a', { mode: 'sea' }).ok, true);
+  room.start('a');
+  assert.equal(room.state.mode, 'sea');
+  assert.equal(room.state.board.hexIds.length, 37);
+  // 船・島・海賊はすべて公開情報なので、伏せずにそのまま配る
+  room.state.ships['x'] = { player: 0, builtTurn: 1 };
+  const view = room.viewFor(1);
+  assert.deepEqual(view.ships, room.state.ships);
+  assert.equal(view.board.pirate, room.state.board.pirate);
+  assert.deepEqual(view.board.islandOf, room.state.board.islandOf);
+});
+
 test('room: 都市と騎士の進歩カードも伏せられる', () => {
   const room = newRoom();
   room.join({ clientId: 'a', name: 'A' });
