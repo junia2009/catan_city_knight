@@ -397,7 +397,10 @@ function drawHexTile(ctx, view, hid, terrain) {
 function drawToken(ctx, view, hid, token) {
   const c = hexCenterOf(hid);
   const [px, py] = toPixel(view, c.x, c.y);
-  const r = view.scale * 0.3;
+  // 盤が広いモード(航海者たち)ではヘックス自体が小さくなるので、
+  // トークンを相対的に大きくし、狭いときは pips を省いて数字を優先する。
+  const tiny = view.scale < 30;
+  const r = view.scale * (tiny ? 0.38 : 0.3);
 
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.4)';
@@ -417,11 +420,17 @@ function drawToken(ctx, view, hid, token) {
 
   const hot = token === 6 || token === 8;
   ctx.fillStyle = hot ? '#c1121f' : '#3a3226';
-  ctx.font = `700 ${Math.round(view.scale * 0.3)}px Georgia, 'Times New Roman', serif`;
+  // 下限は狭いときだけ。広いときに効かせると既存モードの見た目が変わってしまう
+  const fontPx = tiny
+    ? Math.max(11, Math.round(view.scale * 0.42))
+    : Math.round(view.scale * 0.3);
+  ctx.font = `700 ${fontPx}px Georgia, 'Times New Roman', serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(String(token), px, py - r * 0.16);
+  ctx.fillText(String(token), px, py - (tiny ? 0 : r * 0.16));
 
+  // 狭いときは pips を出さない(数字がつぶれるより読めるほうが大事)
+  if (tiny) return;
   const pips = PIPS[token];
   const pr = view.scale * 0.026;
   for (let i = 0; i < pips; i++) {

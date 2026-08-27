@@ -109,7 +109,8 @@ test('fish: ロールで魚が配られる', () => {
   const vid = LAYOUT.hexVertices[lake].find((v) => !s.buildings[v]);
   s.buildings[vid] = { player: 0, type: 'settlement' };
   const total = LAKE_NUMBERS.find((n) => n <= 6 || n >= 8);
-  s.turnFlags.alchemist = [1, total - 1];
+  // どちらも1〜6になる組にする(錬金術師と同じ検証を通る形)
+  s.turnFlags.alchemist = [Math.max(1, total - 6), total - Math.max(1, total - 6)];
 
   const after = dispatch(s, { type: 'ROLL_DICE', player: 0 });
   assert.equal(after.players[0].fish.length, 1);
@@ -296,7 +297,7 @@ test('fish: 古い靴は同時に1枚しか場に出ない', () => {
   s.turnFlags = { rolled: false, playedDev: false };
   const vid = LAYOUT.hexVertices[s.board.lake].find((v) => !s.buildings[v]);
   s.buildings[vid] = { player: 0, type: 'settlement' };
-  s.turnFlags.alchemist = [1, LAKE_NUMBERS[0] - 1];
+  s.turnFlags.alchemist = [Math.max(1, LAKE_NUMBERS[0] - 6), LAKE_NUMBERS[0] - Math.max(1, LAKE_NUMBERS[0] - 6)];
 
   const after = dispatch(s, { type: 'ROLL_DICE', player: 0 });
   assert.equal(hasOldShoe(after.players[0]), false);

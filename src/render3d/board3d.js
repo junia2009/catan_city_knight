@@ -2083,6 +2083,8 @@ export class Board3D {
     if (dir.lengthSq() < 0.5) dir.copy(this._defaultDir());
     this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
     this.controls.maxDistance = Math.max(24, dist * 1.3);
+    // 広い盤でも寄って数字を確かめられるように、近づける下限も緩める
+    this.controls.minDistance = 5;
     this.scene.fog.near = dist + 14;
     this.scene.fog.far = dist + 36;
     this.camera.updateProjectionMatrix();
@@ -2188,6 +2190,9 @@ export class Board3D {
           new THREE.MeshStandardMaterial({ map: tokenTexture(hex.token), roughness: 0.8 }),
           mat(0xe8ddbe),
         ]);
+        // 盤が広いモードではカメラが引くぶんトークンが小さく見えるので、
+        // ヘックスからはみ出さない範囲で大きくする(2D と同じ考え)
+        if (this.boardK > 1) token.scale.setScalar(Math.min(1.35, this.boardK));
         token.position.set(c.x, TILE_TOP + 0.025, c.y);
         token.rotation.y = this.tokenRot; // 構図に合わせて数字を読める向きに
         token.castShadow = true;

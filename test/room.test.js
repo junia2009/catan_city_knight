@@ -190,7 +190,7 @@ test('room: 航海者たちも部屋の設定として選べる', () => {
   assert.equal(room.setSettings('a', { mode: 'sea' }).ok, true);
   room.start('a');
   assert.equal(room.state.mode, 'sea');
-  assert.equal(room.state.board.hexIds.length, 37);
+  assert.equal(room.state.board.hexIds.length, 61);
   // 船・島・海賊はすべて公開情報なので、伏せずにそのまま配る
   room.state.ships['x'] = { player: 0, builtTurn: 1 };
   const view = room.viewFor(1);
