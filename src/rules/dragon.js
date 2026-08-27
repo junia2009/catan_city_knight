@@ -15,7 +15,7 @@ export const BURN_TURNS = 8; // 炎上の継続(手番数)
 export function dragonNestHex(board) {
   let best = null;
   let bestPips = -1;
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of board.hexIds) {
     const hex = board.hexes[hid];
     if (hex.terrain !== 'mountain' || !hex.token) continue;
     if (PIPS[hex.token] > bestPips) {
@@ -23,7 +23,7 @@ export function dragonNestHex(board) {
       best = hid;
     }
   }
-  return best ?? LAYOUT.hexIds.find((h) => board.hexes[h].terrain === 'desert');
+  return best ?? board.hexIds.find((h) => board.hexes[h].terrain === 'desert');
 }
 
 export function isBurning(state, hid) {
@@ -67,7 +67,7 @@ export function grantTreasure(state, pid) {
 export function rampageTarget(state) {
   let best = null;
   let bestValue = 0;
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of state.board.hexIds) {
     const hex = state.board.hexes[hid];
     if (!hex.token || !TERRAIN_RESOURCE[hex.terrain]) continue;
     if (hid === state.board.robber || isBurning(state, hid)) continue;

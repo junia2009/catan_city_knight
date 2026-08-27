@@ -131,7 +131,7 @@ export class RoomCore {
     this.touch();
     if (this.phase !== 'lobby') return { error: '対戦中は変更できません' };
     const next = { ...this.settings };
-    if (['base', 'cak', 'dragon', 'fish'].includes(patch?.mode)) next.mode = patch.mode;
+    if (['base', 'cak', 'dragon', 'fish', 'sea'].includes(patch?.mode)) next.mode = patch.mode;
     if (['easy', 'normal', 'hard'].includes(patch?.difficulty)) next.difficulty = patch.difficulty;
     if (typeof patch?.cpuFill === 'boolean') next.cpuFill = patch.cpuFill;
     if (['balanced', 'random'].includes(patch?.diceMode)) next.diceMode = patch.diceMode;

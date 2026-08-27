@@ -3,7 +3,7 @@
 // 静的レイヤー(海・島・地形・トークン・港)はオフスクリーンにキャッシュし、
 // 動的レイヤー(盗賊・道・建物・ハイライト)を毎回上描きする。
 
-import { LAYOUT, PIPS, LAKE_NUMBERS } from '../rules/board.js';
+import { LAYOUT, PIPS, LAKE_NUMBERS, boardVertexIds } from '../rules/board.js';
 
 export const PLAYER_COLORS = ['#e04848', '#3d7dd8', '#f0973c', '#9d5fd8'];
 export const PLAYER_COLORS_DARK = ['#9c2626', '#22508f', '#b3651a', '#6a3a99'];
@@ -16,6 +16,9 @@ const TERRAIN_STYLE = {
   mountain: { top: '#a3aebc', bottom: '#7d8a9c' },
   desert:   { top: '#ecdcae', bottom: '#d8c088' },
   lake:     { top: '#4fb6d8', bottom: '#2b7ba6' },
+  // 航海者たち
+  sea:      { top: '#2a7fb5', bottom: '#175e8f' },
+  gold:     { top: '#f2d06b', bottom: '#c9992c' },
 };
 
 // ---- 決定的な擬似乱数(装飾モチーフの配置用、hexId から生成) ----
@@ -39,13 +42,19 @@ function localRng(seed) {
 
 // ---- ビュー変換 ----
 
-export function computeView(width, height) {
+// 盤に実際にあるヘックスだけに合わせて拡大率と原点を決める。
+// レイアウトは航海者たち用に広めに作ってあるので、盤の頂点だけを見ること。
+export function computeView(width, height, board) {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const v of Object.values(LAYOUT.vertices)) {
+  for (const vid of boardVertexIds(board)) {
+    const v = LAYOUT.vertices[vid];
     minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
     minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
   }
-  const margin = 1.35; // 港・海の分
+  // 港は辺の外側にはみ出すぶんの余白が要る。ただし航海者たちでは
+  // 港が本島の内側の海岸にあり、盤の外周はもともと海なので余白は小さくてよい。
+  const hasSea = board.hexIds.some((hid) => board.hexes[hid].terrain === 'sea');
+  const margin = hasSea ? 0.4 : 1.35;
   const scale = Math.min(
     width / (maxX - minX + margin * 2),
     height / (maxY - minY + margin * 2),
@@ -265,6 +274,11 @@ function drawTerrainDecor(ctx, view, hid, terrain) {
       drawDune(ctx, cx + dx * u, cy + dy * u, u * 0.2);
     }
     drawCactus(ctx, cx + u * 0.42, cy - u * 0.38, u * 0.16);
+  } else if (terrain === 'gold') {
+    // 金鉱: きらめく金塊
+    for (const [dx, dy] of ringPositions(rng, 5, 0.38, 0.6)) {
+      drawNugget(ctx, cx + dx * u, cy + dy * u, u * 0.13);
+    }
   } else if (terrain === 'lake') {
     // 漁師たちの湖。さざ波と魚影
     ctx.strokeStyle = 'rgba(255,255,255,0.45)';
@@ -281,6 +295,25 @@ function drawTerrainDecor(ctx, view, hid, terrain) {
       drawFishShape(ctx, cx + dx * u, cy + dy * u, u * 0.13);
     }
   }
+}
+
+// 金塊(金鉱の装飾)
+function drawNugget(ctx, x, y, s) {
+  ctx.fillStyle = '#fff3b0';
+  ctx.strokeStyle = 'rgba(120,85,10,0.7)';
+  ctx.lineWidth = Math.max(1, s * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(x - s, y + s * 0.35);
+  ctx.lineTo(x - s * 0.5, y - s * 0.45);
+  ctx.lineTo(x + s * 0.45, y - s * 0.55);
+  ctx.lineTo(x + s, y + s * 0.25);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.beginPath();
+  ctx.ellipse(x - s * 0.25, y - s * 0.1, s * 0.25, s * 0.12, -0.4, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // 魚影(湖の装飾と漁場マーカーで共用)
@@ -329,11 +362,12 @@ function drawSea(ctx, width, height, view) {
   }
 }
 
-function drawIslandBase(ctx, view) {
-  // 砂浜(全ヘックスを拡大して下敷きに)
+function drawIslandBase(ctx, view, board) {
+  // 砂浜(盤の陸ヘックスを拡大して下敷きに)。海のヘックスには敷かない。
+  const land = board.hexIds.filter((hid) => board.hexes[hid].terrain !== 'sea');
   for (const [color, scale] of [['rgba(0,0,0,0.28)', 1.13], ['#e8d5a0', 1.1], ['#d9bf82', 1.045]]) {
     ctx.fillStyle = color;
-    for (const hid of LAYOUT.hexIds) {
+    for (const hid of land) {
       hexPath(ctx, view, hid, scale);
       ctx.fill();
     }
@@ -534,14 +568,16 @@ function getStaticLayer(state, width, height, dpr) {
   off.height = Math.round(height * dpr);
   const ctx = off.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const view = computeView(width, height);
+  const view = computeView(width, height, state.board);
 
   drawSea(ctx, width, height, view);
-  drawIslandBase(ctx, view);
-  for (const hid of LAYOUT.hexIds) {
+  drawIslandBase(ctx, view, state.board);
+  // 海のヘックスはタイルを描かない(背景の海がそのまま見える)
+  const drawable = state.board.hexIds.filter((hid) => state.board.hexes[hid].terrain !== 'sea');
+  for (const hid of drawable) {
     drawHexTile(ctx, view, hid, state.board.hexes[hid].terrain);
   }
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of drawable) {
     drawTerrainDecor(ctx, view, hid, state.board.hexes[hid].terrain);
     const hex = state.board.hexes[hid];
     if (hex.token) drawToken(ctx, view, hid, hex.token);
@@ -709,6 +745,90 @@ function drawRobber(ctx, view, hid) {
   ctx.strokeStyle = 'rgba(0,0,0,0.5)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
+  ctx.restore();
+}
+
+// 航海者たち: 船(辺の真ん中に浮かぶ小舟)
+function drawShip(ctx, view, eid, pid, alpha = 1) {
+  const e = LAYOUT.edges[eid];
+  const [v1, v2] = e.v.map((v) => LAYOUT.vertices[v]);
+  const [px, py] = toPixel(view, e.x, e.y);
+  const angle = Math.atan2(v2.y - v1.y, v2.x - v1.x);
+  const s = view.scale * 0.17;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(px, py);
+  ctx.rotate(angle);
+  // 船体
+  ctx.shadowColor = 'rgba(0,0,0,0.4)';
+  ctx.shadowBlur = view.scale * 0.05;
+  ctx.shadowOffsetY = view.scale * 0.02;
+  ctx.fillStyle = PLAYER_COLORS_DARK[pid];
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.95, -s * 0.16);
+  ctx.lineTo(s * 0.95, -s * 0.16);
+  ctx.quadraticCurveTo(s * 0.6, s * 0.5, 0, s * 0.5);
+  ctx.quadraticCurveTo(-s * 0.6, s * 0.5, -s * 0.95, -s * 0.16);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  // 帆(プレイヤー色。向きに依らず上を向くよう回転を戻す)
+  ctx.rotate(-angle);
+  ctx.fillStyle = PLAYER_COLORS[pid];
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 1.35);
+  ctx.lineTo(s * 0.7, -s * 0.2);
+  ctx.lineTo(-s * 0.55, -s * 0.2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+// 航海者たち: 海賊船(黒い帆)
+function drawPirate(ctx, view, hid) {
+  const c = hexCenterOf(hid);
+  const [px, py] = toPixel(view, c.x, c.y);
+  const s = view.scale * 0.2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(px, py + s * 0.7, s * 1.0, s * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 船体
+  ctx.fillStyle = '#3a2b20';
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(px - s, py);
+  ctx.lineTo(px + s, py);
+  ctx.quadraticCurveTo(px + s * 0.6, py + s * 0.6, px, py + s * 0.6);
+  ctx.quadraticCurveTo(px - s * 0.6, py + s * 0.6, px - s, py);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // マストと黒い帆
+  ctx.strokeStyle = '#2a2018';
+  ctx.lineWidth = Math.max(1.5, s * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(px, py); ctx.lineTo(px, py - s * 1.5);
+  ctx.stroke();
+  ctx.fillStyle = '#22202a';
+  ctx.beginPath();
+  ctx.moveTo(px + s * 0.05, py - s * 1.45);
+  ctx.lineTo(px + s * 0.9, py - s * 0.75);
+  ctx.lineTo(px + s * 0.05, py - s * 0.2);
+  ctx.closePath();
+  ctx.fill();
+  // ドクロ代わりの白い印
+  ctx.fillStyle = '#e8e4dc';
+  ctx.beginPath();
+  ctx.arc(px + s * 0.38, py - s * 0.8, s * 0.16, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -952,7 +1072,7 @@ function drawHighlights(ctx, view, highlights, selected, time) {
 // メイン描画。time はパルスアニメーション用(ms)。
 export function drawBoard(ctx, width, height, state, ui, time = 0) {
   const dpr = window.devicePixelRatio || 1;
-  const view = computeView(width, height);
+  const view = computeView(width, height, state.board);
 
   const staticLayer = getStaticLayer(state, width, height, dpr);
   ctx.drawImage(staticLayer, 0, 0, width, height);
@@ -967,8 +1087,13 @@ export function drawBoard(ctx, width, height, state, ui, time = 0) {
   }
   if (state.merchant) drawMerchant(ctx, view, state.merchant);
 
+  if (state.board.pirate != null) drawPirate(ctx, view, state.board.pirate);
+
   for (const [eid, road] of Object.entries(state.roads)) {
     drawRoad(ctx, view, eid, road.player);
+  }
+  for (const [eid, ship] of Object.entries(state.ships ?? {})) {
+    drawShip(ctx, view, eid, ship.player);
   }
   for (const eid of ui.pendingEdges ?? []) {
     drawRoad(ctx, view, eid, 0, 0.55);

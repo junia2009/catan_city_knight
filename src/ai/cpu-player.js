@@ -3,12 +3,15 @@
 // awaiting への応答は即時に決定できる。返す前に必ず validate を通す。
 
 import { validateAction } from '../actions.js';
-import { LAYOUT } from '../rules/board.js';
+import { LAYOUT, boardVertexIds } from '../rules/board.js';
 import {
   COSTS, WALL_COST, canAfford, countPieces, PIECE_LIMITS, totalResources, totalCards,
 } from '../rules/build.js';
 import { stealableTargets } from '../rules/robber.js';
 import { fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
+import {
+  SHIP_COST, SHIP_LIMIT, islandAtVertex, isSeaHex, movableShips, pirateTargets,
+} from '../rules/sea.js';
 import { tradeRate } from '../rules/trade.js';
 import { computePoints } from '../rules/victory.js';
 import { RESOURCES } from '../state.js';
@@ -24,6 +27,8 @@ import {
   legalRobberHexes,
   legalSettlementVertices,
   legalSetupEdges,
+  legalSetupVertices,
+  legalShipEdges,
 } from './legal-moves.js';
 import { missingFor, pipsOfVertex, robberHexValue, vertexValue } from './evaluator.js';
 
@@ -47,7 +52,7 @@ function best(items, scoreFn) {
 // ---- awaiting 応答 ----
 
 function chooseInitialPlacement(state, pid) {
-  const vids = legalSettlementVertices(state, pid, { needRoad: false });
+  const vids = legalSetupVertices(state, pid);
   const vid = best(vids, (v) => vertexValue(state, pid, v));
   const edges = legalSetupEdges(state, vid);
   const eid = best(edges, (e) => {
@@ -82,8 +87,20 @@ function chooseDiscard(state, pid) {
 
 function chooseRobberMove(state, pid) {
   const hexes = legalRobberHexes(state);
-  const hid = best(hexes, (h) => robberHexValue(state, pid, h));
-  const targets = stealableTargets(state, hid, pid);
+  // 航海者たち: 海のヘックスを選ぶと海賊が動く。船を持つ相手から奪えるなら価値がある。
+  const valueOf = (h) => {
+    if (state.mode === 'sea' && isSeaHex(state.board, h)) {
+      const targets = pirateTargets(state, h, pid).filter((t) => totalCards(state.players[t]) > 0);
+      if (targets.length === 0) return -1;
+      return 2 + Math.max(...targets.map((t) => totalCards(state.players[t]))) * 0.3;
+    }
+    return robberHexValue(state, pid, h);
+  };
+  const hid = best(hexes, valueOf);
+  const sea = state.mode === 'sea' && isSeaHex(state.board, hid);
+  const targets = sea
+    ? pirateTargets(state, hid, pid).filter((t) => totalCards(state.players[t]) > 0)
+    : stealableTargets(state, hid, pid);
   const target = targets.length
     ? best(targets, (t) => totalCards(state.players[t]))
     : null;
@@ -109,6 +126,11 @@ export function nextGoal(state, pid) {
     countPieces(state, pid, 'settlement') < PIECE_LIMITS.settlement
   ) {
     return { kind: 'settlement', cost: COSTS.settlement };
+  }
+  // 航海者たち: 新しい島へ渡る船は開拓地+2点につながるので、道より優先する。
+  // ただし行き先(まだ入植していない島)がある間だけ。
+  if (state.mode === 'sea' && hasIslandTarget(state, pid)) {
+    return { kind: 'ship', cost: SHIP_COST };
   }
   if (countPieces(state, pid, 'road') < PIECE_LIMITS.road && legalRoadEdges(state, pid).length > 0) {
     return { kind: 'road', cost: COSTS.road };
@@ -191,6 +213,66 @@ export function cpuAcceptsTrade(state, pid, incoming, outgoing) {
   // 弱いCPUは多少不利な取引にも応じる
   const margin = state.difficulty === 'easy' ? 0.1 : state.difficulty === 'normal' ? 0.35 : 0.5;
   return inValue >= outValue + margin + Math.max(0, countDiff) * 0.3;
+}
+
+// ---- 航海者たち ----
+
+// まだ自分が入植していない島の頂点から幅優先で距離を測る。
+// 「あと何本で島に届くか」が分かるので、船を伸ばす向きを決められる。
+function distanceToNewIslands(state, pid) {
+  const board = state.board;
+  const mine = new Set(state.players[pid].islands ?? []);
+  const dist = {};
+  const queue = [];
+  for (const vid of boardVertexIds(board)) {
+    const island = islandAtVertex(board, vid);
+    if (island == null || island === 0 || mine.has(island)) continue;
+    if (state.buildings[vid]) continue;
+    dist[vid] = 0;
+    queue.push(vid);
+  }
+  for (let i = 0; i < queue.length; i++) {
+    const v = queue[i];
+    for (const eid of LAYOUT.vertexEdges[v]) {
+      const e = LAYOUT.edges[eid];
+      if (!e.hexes.some((h) => board.hexes[h])) continue;
+      const other = e.v[0] === v ? e.v[1] : e.v[0];
+      if (dist[other] != null) continue;
+      dist[other] = dist[v] + 1;
+      queue.push(other);
+    }
+  }
+  return dist;
+}
+
+// まだ入植していない島に、空いている頂点が残っているか
+function hasIslandTarget(state, pid) {
+  const mine = new Set(state.players[pid].islands ?? []);
+  return boardVertexIds(state.board).some((vid) => {
+    const island = islandAtVertex(state.board, vid);
+    return island != null && island !== 0 && !mine.has(island) && !state.buildings[vid];
+  });
+}
+
+// 島へ近づく船を1隻建てる。行き先がなければ null。
+function tryBuildShip(state, pid) {
+  if (state.mode !== 'sea') return null;
+  const p = state.players[pid];
+  if (!canAfford(p, SHIP_COST)) return null;
+  const dist = distanceToNewIslands(state, pid);
+  const edges = legalShipEdges(state, pid);
+  if (edges.length === 0) return null;
+
+  // その辺を引いたとき、両端のうち島に近いほうの距離。小さいほど良い。
+  const reach = (eid) => {
+    const [a, b] = LAYOUT.edges[eid].v;
+    const da = dist[a] ?? 99;
+    const db = dist[b] ?? 99;
+    return Math.min(da, db);
+  };
+  const eid = best(edges, (e) => -reach(e));
+  if (!eid || reach(eid) >= 99) return null;
+  return valid(state, { type: 'BUILD_SHIP', player: pid, edgeId: eid });
 }
 
 // ---- 漁師たち: 魚トークン ----
@@ -408,7 +490,7 @@ function tryDefense(state, pid) {
   // 2. 騎士の建設(都市を持ったら早めに1体は構える)
   const myKnights = Object.values(state.knights).filter((k) => k.player === pid).length;
   if (myKnights < Math.min(cities, 2) && canAfford(state.players[pid], KNIGHT_COSTS.build)) {
-    const spots = Object.keys(LAYOUT.vertices).filter(
+    const spots = boardVertexIds(state.board).filter(
       (v) => canPlaceKnight(state, pid, v) === null,
     );
     const vid = best(spots, (v) => vertexValue(state, pid, v) * 0.1 + 1);
@@ -474,6 +556,13 @@ export function chooseAction(state, pid) {
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
     if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
+    if (aw.type === 'goldChoice') {
+      // 目標に足りない資源を優先、なければ在庫のあるものを
+      const goal = nextGoal(state, pid);
+      const missing = goal ? Object.keys(missingFor(state.players[pid], goal.cost)) : [];
+      const pick = [...missing, ...RESOURCES].find((r) => state.bank.resources[r] > 0);
+      return { type: 'PICK_GOLD', player: pid, resource: pick };
+    }
     if (aw.type === 'aqueduct') {
       // 目標に足りない資源を優先、なければ在庫のあるものを選ぶ
       const goal = nextGoal(state, pid);
@@ -555,6 +644,10 @@ export function chooseAction(state, pid) {
   // 3'. 基本: 発展カード使用
   const dev = tryPlayDevCard(state, pid);
   if (dev) return dev;
+
+  // 3''. 航海者たち: 島へ向かって船を伸ばす(新しい島は開拓地+2点)
+  const ship = tryBuildShip(state, pid);
+  if (ship) return ship;
 
   // 3''. ドラゴンの島: 産出の高い自分の建物に見張り塔(撃退で財宝+1点)
   if (state.mode === 'dragon' && canAfford(p, TOWER_COST)) {

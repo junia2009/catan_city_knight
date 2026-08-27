@@ -9,6 +9,7 @@ import { diceDeckLeft } from '../rules/dice.js';
 import { KNIGHT_COSTS } from '../rules/cak/knights.js';
 import { TOWER_COST } from '../rules/dragon.js';
 import { FISH_USES, fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
+import { SHIP_COST, SHIP_LIMIT, movableShips } from '../rules/sea.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
 import {
   TRACKS, TRACK_JP, TRACK_COMMODITY, MAX_IMPROVEMENT,
@@ -63,6 +64,10 @@ function renderPlayers(state, ui) {
         // 魚トークンは場に公開して置くもの。全員ぶん見えてよい
         fishCount(p) > 0 ? `<span class="badge">🐟×${fishCount(p)}</span>` : '',
         hasOldShoe(p) ? '<span class="badge">👞 古い靴</span>' : '',
+        // 航海者たち: 本島以外に入植した島の数(1つ+2点)
+        (p.islands ?? []).filter((i) => i !== 0).length > 0
+          ? `<span class="badge">🏝×${(p.islands ?? []).filter((i) => i !== 0).length}</span>`
+          : '',
       ].join('');
       // 残りコマは全員ぶん公開情報(盤上を数えれば分かる)。
       // 「相手はもう開拓地を建てられない」が読めると駆け引きになる。
@@ -311,6 +316,17 @@ function renderControls(state, ui) {
   const dragonMode = state.mode === 'dragon';
   const towerBtn = (label) =>
     btn('mode:tower', label, myTurn && rolled && canAfford(p, TOWER_COST), '🪵1 🧱1 🪨1(隣接ヘックスの襲撃を撃退して財宝)');
+  const seaMode = state.mode === 'sea';
+  const shipsLeft = SHIP_LIMIT - Object.values(state.ships ?? {}).filter((x) => x.player === HUMAN).length;
+  const shipBtn = (label) =>
+    btn('mode:ship', label, myTurn && rolled && canAfford(p, SHIP_COST) && shipsLeft > 0,
+      `🪵1 🐑1(海に面した辺。残り${shipsLeft}隻)`, shipsLeft);
+  const moveShipBtn = (label) =>
+    btn('mode:moveship', label,
+      myTurn && rolled && !state.turnFlags.movedShip && movableShips(state, HUMAN).length > 0,
+      state.turnFlags.movedShip
+        ? 'この手番はもう船を動かしました'
+        : '航路の先端にある船を1隻だけ動かせます');
   const fishMode = state.mode === 'fish';
   // 魚は2匹から使える(盗賊を戻すのだけはロール前でも押せる)。
   // 古い靴を持っているときは、渡すために魚0匹でも開ける。
@@ -332,6 +348,7 @@ function renderControls(state, ui) {
       ...(cak ? cakBtns('⚔️騎士', '🧱城壁', '🏙改良')
         : dragonMode ? [devBtn('📜カード'), towerBtn('🗼塔')]
         : fishMode ? [devBtn('📜カード'), fishBtn('🐟魚')]
+        : seaMode ? [devBtn('📜カード'), shipBtn('⛵船'), moveShipBtn('🧭移動')]
         : [devBtn('📜カード')]),
       btn('trade-open', '⚖️交易', myTurn && rolled),
     ];
@@ -342,6 +359,7 @@ function renderControls(state, ui) {
       ...(cak ? cakBtns('⚔️ 騎士', '🧱 城壁', '🏙 改良')
         : dragonMode ? [devBtn('📜 カード'), towerBtn('🗼 見張り塔')]
         : fishMode ? [devBtn('📜 カード'), fishBtn('🐟 魚')]
+        : seaMode ? [devBtn('📜 カード'), shipBtn('⛵ 船'), moveShipBtn('🧭 船を動かす')]
         : [devBtn('📜 カード')]),
       btn('trade-open', '⚖️ 交易', myTurn && rolled),
       btn('end-turn', '⏭ ターン終了', myTurn && rolled),
@@ -366,10 +384,11 @@ function statusText(state, ui) {
     if (aw.type === 'discard') return `🂠 手札を${aw.context.required[HUMAN]}枚捨ててください`;
     if (aw.type === 'aqueduct') return '💧 水道橋: もらう資源を選んでください';
     if (aw.type === 'moveRobber') {
-      return state.mode === 'dragon'
-        ? '🐉 ドラゴンの移動先ヘックスを選んでください'
-        : '🥷 盗賊の移動先ヘックスを選んでください';
+      if (state.mode === 'dragon') return '🐉 ドラゴンの移動先ヘックスを選んでください';
+      if (state.mode === 'sea') return '🥷 盗賊(陸)か 🏴‍☠️ 海賊(海)の移動先を選んでください';
+      return '🥷 盗賊の移動先ヘックスを選んでください';
     }
+    if (aw.type === 'goldChoice') return '💰 金鉱: もらう資源を選んでください';
     if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
     if (aw.type === 'tradeChoose') return '🤝 交換する相手を選んでください';
   } else if (aw) {
@@ -389,6 +408,9 @@ function statusText(state, ui) {
     case 'build-wall': return '🧱 城壁を建てる都市を選んでください';
     case 'build-tower': return '🗼 見張り塔を建てる自分の建物を選んでください';
     case 'fish-road': return '🐟 魚5匹で建てる道の位置を選んでください';
+    case 'build-ship': return '⛵ 船を建てる辺を選んでください(海に面した辺)';
+    case 'move-ship': return '🧭 動かす船を選んでください';
+    case 'move-ship-to': return '🧭 その船をどこへ動かしますか?';
     case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
     case 'play-road-building':
       return `🛤️ 街道建設: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
@@ -578,6 +600,18 @@ function dialogHtml(state, ui) {
       <p><small>お釣りは出ません(ちょうど払えないときは超過した分が捨てになります)。</small></p>
       ${rows}${shoe}
       <div class="row end"><button data-act="dialog-cancel">閉じる</button></div>`;
+  }
+
+  // 航海者たち: 金鉱でもらう資源を選ぶ
+  if (d.type === 'gold') {
+    const left = state.awaiting?.context?.left?.[HUMAN] ?? 1;
+    const btns = RESOURCES.map(
+      (r) => `<button class="pick" data-act="gold:${r}" ${state.bank.resources[r] > 0 ? '' : 'disabled'}>
+        <span class="picon">${RES_ICON[r]}</span>${RES_JP[r]}</button>`,
+    ).join('');
+    return `<h3>💰 金鉱</h3>
+      <p>好きな資源をもらえます(あと${left}枚)</p>
+      <div class="row">${btns}</div>`;
   }
 
   if (d.type === 'aqueduct') {
@@ -777,7 +811,8 @@ function dialogHtml(state, ui) {
       return `<button class="pick" data-act="steal:${t}" style="--pc:${PLAYER_COLORS[t]}">
         <span class="chip">${avatarSvg(t)}</span>${tp.name}<small>手札${totalCards(tp)}枚</small></button>`;
     }).join('');
-    return `<h3>🥷 誰から奪いますか?</h3><div class="row">${btns}</div>`;
+    const head = d.pirate ? '🏴‍☠️ 海賊で誰から奪いますか?' : '🥷 誰から奪いますか?';
+    return `<h3>${head}</h3><div class="row">${btns}</div>`;
   }
 
   if (d.type === 'monopoly') {
@@ -811,7 +846,7 @@ function dialogHtml(state, ui) {
         .join('')}</div>`;
     return `<h3>⚙️ 設定</h3>
       <div class="srow"><span>表示</span>${seg('set-view', [['3d', '3D'], ['2d', '2D']], s.view)}</div>
-      <div class="srow"><span>モード</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師']], s.mode)}</div>
+      <div class="srow"><span>モード</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師'], ['sea', '⛵航海者']], s.mode)}</div>
       <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(s.cpuCount))}</div>
       <div class="srow"><span>BGM</span>${seg('set-bgm', [['on', '🔊 オン'], ['off', '🔇 オフ']], s.bgm ? 'on' : 'off')}</div>
       <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${s.seed}"></div>

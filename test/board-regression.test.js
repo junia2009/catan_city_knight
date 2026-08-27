@@ -1,0 +1,116 @@
+// 盤面まわりを改修したときの回帰テスト。
+//
+// 盤面の生成と対戦の進行はシードで完全に決まるので、モード×シードごとに
+// 「盤面」と「対戦の結果」をハッシュにして固定しておく。
+// LAYOUT や盤面生成に手を入れたとき、この値が変わったら
+// 既存モードの挙動を壊している(= 同じシードで違う盤面・違う展開になっている)。
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { createGame, RESOURCES } from '../src/state.js';
+import { dispatch } from '../src/actions.js';
+import { chooseAction } from '../src/ai/cpu-player.js';
+import { computePoints } from '../src/rules/victory.js';
+
+const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
+const SEEDS = [1, 2, 3];
+
+function sha(obj) {
+  return createHash('sha256').update(JSON.stringify(obj)).digest('hex').slice(0, 16);
+}
+
+// 盤面の中身だけを、並び順を固定して取り出す(hexId の昇順)。
+// 内部表現に何を足しても、この見え方が同じなら盤面は変わっていない。
+function boardFingerprint(board) {
+  const hexes = Object.keys(board.hexes)
+    .sort()
+    .map((hid) => {
+      const h = board.hexes[hid];
+      return [hid, h.terrain, h.token ?? null];
+    });
+  return {
+    hexes,
+    robber: board.robber,
+    ports: board.ports.map((p) => [p.edgeId, p.type]),
+    pirate: board.pirate ?? null,
+    islandOf: board.islandOf ? Object.keys(board.islandOf).sort().map((h) => [h, board.islandOf[h]]) : null,
+    fisheries: (board.fisheries ?? []).map((f) => [f.edgeId, f.number]),
+    lake: board.lake ?? null,
+  };
+}
+
+// 対戦を最後まで回して、結果の要点を取り出す
+function playFingerprint(mode, seed) {
+  let state = createGame({ seed, playerCount: 4, humanIndex: -1, mode });
+  const board = boardFingerprint(state.board);
+  let actions = 0;
+  const kinds = {};
+  while (state.phase !== 'ended') {
+    if (++actions > 6000) throw new Error(`${mode}/${seed}: 6000アクション超過`);
+    const pid = state.awaiting ? state.awaiting.players[0] : state.currentPlayer;
+    const action = chooseAction(state, pid);
+    kinds[action.type] = (kinds[action.type] ?? 0) + 1;
+    state = dispatch(state, action);
+  }
+  return {
+    board,
+    actions,
+    kinds,
+    turn: state.turn,
+    winner: state.winner,
+    points: state.players.map((p) => computePoints(state, p.id, { includeHidden: true })),
+    resources: state.players.map((p) => RESOURCES.map((r) => p.resources[r])),
+    ships: Object.keys(state.ships ?? {}).sort().map((e) => [e, state.ships[e].player]),
+    islands: state.players.map((p) => p.islands ?? []),
+    bank: RESOURCES.map((r) => state.bank.resources[r]),
+    diceCounts: state.diceCounts,
+    logLength: state.log.length,
+  };
+}
+
+// モード/シード -> ハッシュ。盤面を意図的に変えたときだけ更新すること。
+// 指紋に船・島・海賊を足したので、航海者たちの追加時に全モードの値を取り直している
+// (中身が変わったのは指紋の定義であって、既存モードの挙動ではない)。
+const GOLDEN = {
+  'base/1': '1ecb22b9fe8523a9',
+  'base/2': 'e0ef987ac4198c85',
+  'base/3': '5018653d959345dd',
+  'cak/1': '47215bbbbb63c49a',
+  'cak/2': '9312d2f486dd13da',
+  'cak/3': 'e08a9d8ecf983dad',
+  'dragon/1': '1de7146080487f00',
+  'dragon/2': 'ae6f3f71436fe018',
+  'dragon/3': '56089e27b2590d69',
+  'fish/1': '97cbdaac4ec2d13e',
+  'fish/2': '59719d724828a144',
+  'fish/3': '10a1aa4777947e08',
+  'sea/1': '94014b45a123976e',
+  'sea/2': '84487f4714334eb9',
+  'sea/3': '4a844c3461ad91d8',
+};
+
+test('回帰: 既存モードの盤面と展開がシードから完全に再現される', () => {
+  const actual = {};
+  for (const mode of MODES) {
+    for (const seed of SEEDS) {
+      actual[`${mode}/${seed}`] = sha(playFingerprint(mode, seed));
+    }
+  }
+  // GOLDEN が未設定なら、いま出た値を出力して落とす(初回の焼き付け用)
+  const missing = Object.entries(GOLDEN).filter(([, v]) => v == null).map(([k]) => k);
+  assert.equal(
+    missing.length, 0,
+    `GOLDEN が未設定です。次の値を貼り付けてください:\n${
+      Object.entries(actual).map(([k, v]) => `  '${k}': '${v}',`).join('\n')}`,
+  );
+  assert.deepEqual(actual, GOLDEN, '同じシードで盤面か展開が変わっています');
+});
+
+test('回帰: 同じシードなら2回作っても同じ盤面になる', () => {
+  for (const mode of MODES) {
+    const a = boardFingerprint(createGame({ seed: 42, playerCount: 4, humanIndex: -1, mode }).board);
+    const b = boardFingerprint(createGame({ seed: 42, playerCount: 4, humanIndex: -1, mode }).board);
+    assert.deepEqual(a, b, `${mode}: 盤面生成が決定的でない`);
+  }
+});

@@ -30,7 +30,7 @@ test('dragon: ドラゴンは最も出目の良い山ヘックスの巣から始
   const hex = s.board.hexes[s.dragon.nestHex];
   assert.equal(hex.terrain, 'mountain');
   // 他のどの山よりも pips が大きい(以上)
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of s.board.hexIds) {
     const h = s.board.hexes[hid];
     if (h.terrain === 'mountain' && h.token) {
       assert.ok(PIPS[hex.token] >= PIPS[h.token]);
@@ -73,7 +73,7 @@ test('dragon: 暴走は最も稼ぐヘックスを炎上させ、隣接プレイ
 test('dragon: 炎上中のヘックスは産出しない', () => {
   let s = finishSetup(newDragon());
   // 建物が隣接するヘックスを1つ選んで炎上させる
-  const hid = LAYOUT.hexIds.find(
+  const hid = s.board.hexIds.find(
     (h) => s.board.hexes[h].token && h !== s.board.robber &&
       LAYOUT.hexVertices[h].some((v) => s.buildings[v]),
   );

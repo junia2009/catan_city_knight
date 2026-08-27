@@ -1,6 +1,12 @@
 // 盤面評価関数(設計書 §7.2)
 
-import { LAYOUT, PIPS, TERRAIN_RESOURCE } from '../rules/board.js';
+import { LAYOUT, PIPS, TERRAIN_RESOURCE, vertexHexesOf } from '../rules/board.js';
+import { islandAtVertex } from '../rules/sea.js';
+
+// 金鉱は好きな資源を選べるので、資源重みは最大値として扱う
+const GOLD_WEIGHT = 1.3;
+// 新しい島の +2 点ぶん。都市化1回に匹敵する重みにしてある
+const NEW_ISLAND_BONUS = 10;
 import { RESOURCES } from '../state.js';
 
 // わずかな資源希少度の重み(小麦・鉱石を優先)
@@ -29,7 +35,7 @@ export function evalNoise(state, key) {
 // 頂点に接するヘックスの出目確率合計(pips)
 export function pipsOfVertex(state, vid) {
   let sum = 0;
-  for (const hid of LAYOUT.vertexHexes[vid]) {
+  for (const hid of vertexHexesOf(state.board, vid)) {
     const hex = state.board.hexes[hid];
     if (hex.token) sum += PIPS[hex.token];
   }
@@ -42,7 +48,7 @@ export function playerProduction(state, pid) {
   for (const [vid, b] of Object.entries(state.buildings)) {
     if (b.player !== pid) continue;
     const mult = b.type === 'city' ? 2 : 1;
-    for (const hid of LAYOUT.vertexHexes[vid]) {
+    for (const hid of vertexHexesOf(state.board, vid)) {
       const hex = state.board.hexes[hid];
       const res = TERRAIN_RESOURCE[hex.terrain];
       if (res && hex.token) prod[res] += PIPS[hex.token] * mult;
@@ -57,14 +63,28 @@ export function vertexValue(state, pid, vid) {
   let value = 0;
   const newRes = new Set();
 
-  for (const hid of LAYOUT.vertexHexes[vid]) {
+  for (const hid of vertexHexesOf(state.board, vid)) {
     const hex = state.board.hexes[hid];
+    if (!hex.token) continue;
+    // 航海者たち: 金鉱は好きな資源が出るので、いちばん重い資源とみなす
+    if (hex.terrain === 'gold') {
+      value += PIPS[hex.token] * GOLD_WEIGHT;
+      continue;
+    }
     const res = TERRAIN_RESOURCE[hex.terrain];
-    if (!res || !hex.token) continue;
+    if (!res) continue;
     value += PIPS[hex.token] * RES_WEIGHT[res];
     if (prod[res] === 0) newRes.add(res);
   }
   value += newRes.size * 2; // 資源の多様性
+
+  // 航海者たち: まだ入植していない島は開拓地1軒で+2点。産出が薄くても行く価値がある
+  if (state.mode === 'sea') {
+    const island = islandAtVertex(state.board, vid);
+    if (island != null && island !== 0 && !(state.players[pid].islands ?? []).includes(island)) {
+      value += NEW_ISLAND_BONUS;
+    }
+  }
 
   for (const port of state.board.ports) {
     if (LAYOUT.edges[port.edgeId].v.includes(vid)) {

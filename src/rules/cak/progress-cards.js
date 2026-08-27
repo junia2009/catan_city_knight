@@ -3,7 +3,7 @@
 //   preRoll?, vp?, validate(state,pid,params), play(state,pid,params) }
 // CPU の使用判断は ai/progress-ai.js 側のプラグインが担当する。
 
-import { LAYOUT, TERRAIN_RESOURCE } from '../board.js';
+import { LAYOUT, TERRAIN_RESOURCE, boardVertexIds } from '../board.js';
 import { rngInt } from '../../rng.js';
 import { RESOURCES, RES_JP, addLog } from '../../state.js';
 import { grantResource, totalCards, canBuildWall, canPlaceRoad } from '../build.js';
@@ -49,7 +49,7 @@ function stealRandomCards(state, fromPid, toPid, n) {
 function harvestTerrain(state, pid, terrain) {
   const res = TERRAIN_RESOURCE[terrain];
   let hexes = 0;
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of state.board.hexIds) {
     if (state.board.hexes[hid].terrain !== terrain) continue;
     const mine = LAYOUT.hexVertices[hid].some(
       (vid) => state.buildings[vid]?.player === pid,
@@ -291,7 +291,7 @@ export const PROGRESS_CARDS = {
       let level = k.level;
       while (level >= 1 && countKnights(state, pid, level) >= KNIGHT_LIMIT_PER_LEVEL) level--;
       if (level < 1) return;
-      const spot = Object.keys(LAYOUT.vertices).find(
+      const spot = boardVertexIds(state.board).find(
         (v) =>
           !state.buildings[v] && !state.knights[v] &&
           LAYOUT.vertexEdges[v].some((e) => state.roads[e]?.player === pid),

@@ -5,14 +5,18 @@ import { createGame, RESOURCES } from './state.js';
 import { dispatch, validateAction } from './actions.js';
 import { chooseAction } from './ai/cpu-player.js';
 import { stealableTargets } from './rules/robber.js';
+import { totalCards } from './rules/build.js';
 import {
   legalCityVertices,
   legalRoadEdges,
   legalRobberHexes,
   legalSettlementVertices,
   legalSetupEdges,
+  legalSetupVertices,
+  legalShipEdges,
 } from './ai/legal-moves.js';
-import { LAYOUT } from './rules/board.js';
+import { LAYOUT, boardVertexIds } from './rules/board.js';
+import { isSeaHex, movableShips, pirateTargets } from './rules/sea.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
 import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-render.js';
@@ -123,7 +127,7 @@ function renderSelectPanel() {
       .join('')}</div>`;
   panel.innerHTML = `
     <h3>⬡ ゲーム設定</h3>
-    <div class="srow"><span>ルール</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師']], settings.mode)}</div>
+    <div class="srow"><span>ルール</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師'], ['sea', '⛵航海者']], settings.mode)}</div>
     <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(settings.cpuCount))}</div>
     <div class="srow"><span>強さ</span>${seg('set-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], settings.difficulty)}</div>
     <div class="srow"><span>出目</span>${seg('set-dice', [['random', '純ランダム'], ['balanced', 'バランス']], settings.diceMode)}</div>
@@ -217,7 +221,7 @@ function renderOnlinePanel() {
       <small>この合言葉を友達に伝えてください</small>
     </div>
     <div class="seat-list">${seats}</div>
-    <div class="srow"><span>ルール</span>${seg('net-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師']], lb.settings.mode, !host)}</div>
+    <div class="srow"><span>ルール</span>${seg('net-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師'], ['sea', '⛵航海者']], lb.settings.mode, !host)}</div>
     <div class="srow"><span>空席</span>${seg('net-fill', [['on', 'CPUで埋める'], ['off', '人だけ']], lb.settings.cpuFill ? 'on' : 'off', !host)}</div>
     ${lb.settings.cpuFill ? `<div class="srow"><span>強さ</span>${seg('net-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], lb.settings.difficulty, !host)}</div>` : ''}
     <div class="srow"><span>出目</span>${seg('net-dice', [['random', '純ランダム'], ['balanced', 'バランス']], lb.settings.diceMode ?? 'random', !host)}</div>
@@ -504,13 +508,14 @@ function newGame() {
 // 割り込み(awaiting)に紐づくダイアログ。割り込みが変わったら必ず閉じる。
 // 閉じ忘れると「捨て札ダイアログのまま盗賊移動になる」ような食い違いが起き、
 // ダイアログの描画が state を読めずに例外で落ちて操作不能になる。
-const INTERRUPT_DIALOGS = ['discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct'];
+const INTERRUPT_DIALOGS = ['discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold'];
 // awaiting の種類ごとに、開いたままでよいダイアログ
 const DIALOG_FOR_AWAITING = {
   discard: 'discard',
   tradeOffer: 'tradeOffer',
   tradeChoose: 'tradeChoose',
   aqueduct: 'aqueduct',
+  goldChoice: 'gold',
   moveRobber: 'steal', // 略奪相手の選択(自分で開くのでここでは自動で開かない)
 };
 // awaiting の種類ごとの盤面入力モード
@@ -573,12 +578,20 @@ function syncUi() {
 function computeHighlights() {
   const m = ui.mode;
   if (m === 'setup-settlement') {
-    return { vertices: legalSettlementVertices(state, HUMAN, { needRoad: false }) };
+    return { vertices: legalSetupVertices(state, HUMAN) };
   }
   if (m === 'setup-road' && ui.pendingVertex) {
     return { edges: legalSetupEdges(state, ui.pendingVertex) };
   }
   if (m === 'build-road' || m === 'fish-road') return { edges: legalRoadEdges(state, HUMAN) };
+  if (m === 'build-ship') return { edges: legalShipEdges(state, HUMAN) };
+  if (m === 'move-ship') return { edges: movableShips(state, HUMAN) };
+  if (m === 'move-ship-to' && ui.shipFrom) {
+    // 動かす船をいったん外した状態で置ける辺
+    const without = { ...state, ships: { ...state.ships } };
+    delete without.ships[ui.shipFrom];
+    return { edges: legalShipEdges(without, HUMAN).filter((e) => e !== ui.shipFrom) };
+  }
   if (m === 'build-settlement') return { vertices: legalSettlementVertices(state, HUMAN) };
   if (m === 'build-city') return { vertices: legalCityVertices(state, HUMAN) };
   if (m === 'move-robber') return { hexes: legalRobberHexes(state) };
@@ -590,7 +603,7 @@ function computeHighlights() {
   // ---- 都市と騎士 ----
   if (m === 'build-knight') {
     return {
-      vertices: Object.keys(LAYOUT.vertices).filter(
+      vertices: boardVertexIds(state.board).filter(
         (v) => validateAction(state, { type: 'BUILD_KNIGHT', player: HUMAN, vertexId: v }) === null,
       ),
     };
@@ -604,7 +617,7 @@ function computeHighlights() {
   }
   if (m === 'move-knight' && ui.knightFrom) {
     return {
-      vertices: Object.keys(LAYOUT.vertices).filter(
+      vertices: boardVertexIds(state.board).filter(
         (v) =>
           validateAction(state, {
             type: 'MOVE_KNIGHT', player: HUMAN,
@@ -627,12 +640,12 @@ function computeHighlights() {
     ({ type: 'PLAY_PROGRESS_CARD', player: HUMAN, index: ui.progIndex, params });
   if (m === 'prog-hex') {
     return {
-      hexes: LAYOUT.hexIds.filter((h) => validateAction(state, progAct({ hexId: h })) === null),
+      hexes: state.board.hexIds.filter((h) => validateAction(state, progAct({ hexId: h })) === null),
     };
   }
   if (m === 'prog-vertex') {
     return {
-      vertices: Object.keys(LAYOUT.vertices).filter(
+      vertices: boardVertexIds(state.board).filter(
         (v) => validateAction(state, progAct({ vertexId: v })) === null,
       ),
     };
@@ -647,14 +660,14 @@ function computeHighlights() {
   if (m === 'prog-hex2') {
     if (ui.pendingHexes.length === 0) {
       return {
-        hexes: LAYOUT.hexIds.filter((h) => {
+        hexes: state.board.hexIds.filter((h) => {
           const t = state.board.hexes[h].token;
           return t && ![2, 6, 8, 12].includes(t);
         }),
       };
     }
     return {
-      hexes: LAYOUT.hexIds.filter(
+      hexes: state.board.hexIds.filter(
         (h) => validateAction(state, progAct({ a: ui.pendingHexes[0], b: h })) === null,
       ),
     };
@@ -1172,7 +1185,17 @@ function boardClick(pick) {
       ui.pendingVertex = vid;
       ui.mode = 'setup-road';
     }
-  } else if (m === 'setup-road' || m === 'build-road' || m === 'fish-road') {
+  } else if (m === 'setup-road' || m === 'build-road' || m === 'fish-road' || m === 'build-ship') {
+    const eid = pick('edge', ui.highlights.edges ?? []);
+    if (eid) ui.pending = { edgeId: eid };
+  } else if (m === 'move-ship') {
+    const eid = pick('edge', ui.highlights.edges ?? []);
+    if (eid) {
+      ui.shipFrom = eid;
+      ui.mode = 'move-ship-to';
+      ui.pending = null;
+    }
+  } else if (m === 'move-ship-to') {
     const eid = pick('edge', ui.highlights.edges ?? []);
     if (eid) ui.pending = { edgeId: eid };
   } else if (m === 'build-settlement' || m === 'build-city') {
@@ -1181,10 +1204,13 @@ function boardClick(pick) {
   } else if (m === 'move-robber') {
     const hid = pick('hex', ui.highlights.hexes ?? []);
     if (hid) {
-      const targets = stealableTargets(state, hid, HUMAN);
+      // 航海者たち: 海のヘックスなら海賊。奪える相手は「その海に船を出している人」
+      const targets = isSeaHex(state.board, hid)
+        ? pirateTargets(state, hid, HUMAN).filter((t) => totalCards(state.players[t]) > 0)
+        : stealableTargets(state, hid, HUMAN);
       if (targets.length > 0) {
         ui.pending = null;
-        ui.dialog = { type: 'steal', hexId: hid, targets };
+        ui.dialog = { type: 'steal', hexId: hid, targets, pirate: isSeaHex(state.board, hid) };
       } else {
         ui.pending = { hexId: hid };
       }
@@ -1264,6 +1290,10 @@ function confirmPending() {
     });
   } else if (m === 'build-road' && ui.pending?.edgeId) {
     doAction({ type: 'BUILD_ROAD', player: HUMAN, edgeId: ui.pending.edgeId });
+  } else if (m === 'build-ship' && ui.pending?.edgeId) {
+    doAction({ type: 'BUILD_SHIP', player: HUMAN, edgeId: ui.pending.edgeId });
+  } else if (m === 'move-ship-to' && ui.shipFrom && ui.pending?.edgeId) {
+    doAction({ type: 'MOVE_SHIP', player: HUMAN, from: ui.shipFrom, to: ui.pending.edgeId });
   } else if (m === 'fish-road' && ui.pending?.edgeId) {
     doAction({
       type: 'SPEND_FISH', player: HUMAN, use: 'road',
@@ -1329,7 +1359,8 @@ function cancelMode() {
     ui.pendingVertex = null;
     ui.pending = null;
   } else if ([
-    'build-road', 'fish-road', 'build-settlement', 'build-city', 'play-road-building',
+    'build-road', 'fish-road', 'build-ship', 'move-ship', 'move-ship-to',
+    'build-settlement', 'build-city', 'play-road-building',
     'build-knight', 'build-wall', 'build-tower', 'move-knight',
     'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads',
   ].includes(ui.mode)) {
@@ -1338,6 +1369,7 @@ function cancelMode() {
     ui.pendingEdges = [];
     ui.pendingHexes = [];
     ui.knightFrom = null;
+    ui.shipFrom = null;
     ui.progIndex = null;
   }
   refresh();
@@ -1499,8 +1531,10 @@ document.addEventListener('click', (e) => {
     case 'cancel': cancelMode(); return;
 
     case 'mode': {
-      ui.mode = `build-${arg}`;
+      // 船の移動だけは build- を付けない専用モード
+      ui.mode = arg === 'moveship' ? 'move-ship' : `build-${arg}`;
       ui.pending = null;
+      ui.shipFrom = null;
       refresh();
       return;
     }
@@ -1566,6 +1600,9 @@ document.addEventListener('click', (e) => {
       return;
     case 'aq':
       doAction({ type: 'PICK_AQUEDUCT', player: HUMAN, resource: arg });
+      return;
+    case 'gold':
+      doAction({ type: 'PICK_GOLD', player: HUMAN, resource: arg });
       return;
 
     // ---- 漁師たち ----

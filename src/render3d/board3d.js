@@ -7,7 +7,9 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { LAYOUT, PIPS, LAKE_NUMBERS } from '../rules/board.js';
+import {
+  LAYOUT, PIPS, LAKE_NUMBERS, boardVertexIds, boardEdgeIds, boardGeometry, hexIdsWithin,
+} from '../rules/board.js';
 import { RES_JP_SHORT } from '../state.js';
 import { BARBARIAN_TRACK_LENGTH as BARB_TRACK } from '../rules/cak/barbarians.js';
 
@@ -22,7 +24,21 @@ const TERRAIN_COLORS = {
   mountain: 0x8d99ab,
   desert: 0xe2d2a0,
   lake: 0x3fa8cf, // 漁師たちの湖
+  // 航海者たち
+  sea: 0x1f6f9e,
+  gold: 0xe8c34a,
 };
+
+// 基本の盤(半径2)の頂点の広がり。カメラの構図の基準にする。
+const BASE_EXTENT = (() => {
+  let x = 0, y = 0;
+  for (const vid of boardGeometry(hexIdsWithin(2)).vertexIds) {
+    const v = LAYOUT.vertices[vid];
+    x = Math.max(x, Math.abs(v.x));
+    y = Math.max(y, Math.abs(v.y));
+  }
+  return { x, y };
+})();
 
 const TILE_TOP = 0.26; // タイル上面の高さ
 const SEA_Y = 0.02;
@@ -412,6 +428,7 @@ const CAP_PARAMS = {
   mountain: { amp: 0.10, freq: 5.8, jitter: 0.14, tint: 0x93a0b2 },
   desert: { amp: 0.05, freq: 2.6, jitter: 0.06, tint: 0xe6d7a6 },
   lake: { amp: 0.012, freq: 3.4, jitter: 0.03, tint: 0x49b2d6 }, // さざ波程度
+  gold: { amp: 0.035, freq: 5.0, jitter: 0.09, tint: 0xf0cf63 },
 };
 
 function coordHash(x, z) {
@@ -596,6 +613,52 @@ function makeRoad(eid, pid, opacity = 1) {
   m.rotation.y = -Math.atan2(dir.z, dir.x);
   m.castShadow = true;
   return m;
+}
+
+// 航海者たち: 船(辺の上に浮かぶ小舟)
+function makeShip(pid, opacity = 1) {
+  const g = new THREE.Group();
+  const matOf = (color) => (opacity < 1
+    ? new THREE.MeshStandardMaterial({ color, transparent: true, opacity, flatShading: true })
+    : pieceMat(color));
+  const hull = new THREE.Mesh(GEO.box, matOf(PLAYER_COLORS_DARK_3D[pid]));
+  hull.scale.set(0.34, 0.09, 0.16);
+  hull.position.y = 0.05;
+  const mast = new THREE.Mesh(GEO.box, matOf(0x6b4d2c));
+  mast.scale.set(0.03, 0.26, 0.03);
+  mast.position.y = 0.2;
+  const sail = new THREE.Mesh(GEO.box, matOf(PLAYER_COLORS_3D[pid]));
+  sail.scale.set(0.02, 0.19, 0.16);
+  sail.position.set(0.02, 0.22, 0);
+  g.add(hull, mast, sail);
+  g.traverse((o) => { o.castShadow = true; });
+  return g;
+}
+
+function placeShip(g, eid) {
+  const [v1, v2] = LAYOUT.edges[eid].v.map(vpos);
+  const dir = v2.clone().sub(v1);
+  g.position.copy(v1).add(v2).multiplyScalar(0.5);
+  g.position.y = SEA_Y + 0.03;
+  g.rotation.y = -Math.atan2(dir.z, dir.x);
+  return g;
+}
+
+// 航海者たち: 海賊船(黒い帆)
+function makePirate() {
+  const g = new THREE.Group();
+  const hull = new THREE.Mesh(GEO.box, mat(0x3a2b20));
+  hull.scale.set(0.44, 0.12, 0.2);
+  hull.position.y = 0.06;
+  const mast = new THREE.Mesh(GEO.box, mat(0x2a2018));
+  mast.scale.set(0.035, 0.4, 0.035);
+  mast.position.y = 0.3;
+  const sail = new THREE.Mesh(GEO.box, mat(0x22202a));
+  sail.scale.set(0.025, 0.3, 0.22);
+  sail.position.set(0.03, 0.33, 0);
+  g.add(hull, mast, sail);
+  g.traverse((o) => { o.castShadow = true; });
+  return g;
 }
 
 function makeSettlement(pid) {
@@ -1829,12 +1892,14 @@ export class Board3D {
   _tickAmbient(now) {
     const EX = 1.35; // 楕円の長軸倍率(構図で見える側の海に長く滞在させる)
     const EZ = 0.78;
+    // 盤が広いモードでは遠景も外側へ逃がす(島に重ならないように)
+    const k = this.boardK ?? 1;
     for (const b of this.boats) {
       const a = b.phase + now * b.speed * b.dir;
       b.mesh.position.set(
-        Math.cos(a) * b.radius * EX,
+        Math.cos(a) * b.radius * k * EX,
         SEA_Y + 0.02 + Math.sin(now / 700 + b.phase) * 0.03,
-        Math.sin(a) * b.radius * EZ,
+        Math.sin(a) * b.radius * k * EZ,
       );
       // 進行方向(楕円の接線)を向く
       const dx = -Math.sin(a) * EX * b.dir;
@@ -1845,7 +1910,7 @@ export class Board3D {
 
     for (const c of this.clouds) {
       const a = c.phase + now * c.speed;
-      c.mesh.position.set(Math.cos(a) * c.radius * 1.3, c.y, Math.sin(a) * c.radius * 0.85);
+      c.mesh.position.set(Math.cos(a) * c.radius * k * 1.3, c.y * k, Math.sin(a) * c.radius * k * 0.85);
     }
 
     if (this.planeFlight) {
@@ -1982,6 +2047,12 @@ export class Board3D {
   // アスペクト比に合わせて構図を調整する。
   // カタンの島は横長の六角形なので、縦持ちでは 90° 回した構図にして
   // 長軸を縦に向ける(横長のまま幅に収めると小さく「横向き」に見える)。
+  // 盤の広がり。基本の盤(半径2)を 1.0 とした倍率で構図を合わせる。
+  // 航海者たちは半径3なので、そのぶんカメラを引く。
+  _boardScale() {
+    return this.boardK ?? 1;
+  }
+
   _fitCamera(w, h) {
     const aspect = w / h;
     const portrait = aspect < 0.8;
@@ -2001,9 +2072,11 @@ export class Board3D {
       this._layoutBarbTrack(); // 蛮族の航路も構図の奥側へ置き直す
     }
 
-    // 画面横方向に収めるべき半径: 縦構図では島の短軸(≈4.5)、横構図では長軸(≈5.8)
-    const Rh = portrait ? 4.6 : 5.8;
-    const Rv = portrait ? 5.6 : 5.0;
+    // 画面横方向に収めるべき半径: 縦構図では島の短軸(≈4.5)、横構図では長軸(≈5.8)。
+    // 盤が広いモード(航海者たち)ではその倍率ぶん引く。
+    const k = this._boardScale();
+    const Rh = (portrait ? 4.6 : 5.8) * k;
+    const Rv = (portrait ? 5.6 : 5.0) * k;
     const halfV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
     const dist = Math.max(Rv / halfV, Rh / (halfV * aspect));
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
@@ -2022,6 +2095,17 @@ export class Board3D {
     const key = `${state.seed}:${state.mode}:${state.board.version ?? 0}`;
     if (this.gameKey === key) return;
     this.gameKey = key;
+    // 盤の広がりを測っておく(カメラの引き具合に使う)
+    let maxX = 0, maxY = 0;
+    for (const vid of boardVertexIds(state.board)) {
+      const v = LAYOUT.vertices[vid];
+      maxX = Math.max(maxX, Math.abs(v.x));
+      maxY = Math.max(maxY, Math.abs(v.y));
+    }
+    const prevK = this.boardK;
+    this.boardK = Math.max(maxX / BASE_EXTENT.x, maxY / BASE_EXTENT.y, 1);
+    // 盤の広さが変わったらカメラを取り直す(モードを切り替えたとき)
+    if (prevK !== this.boardK && this._w && this._h) this._fitCamera(this._w, this._h);
     this.staticGroup.clear();
     this.pickGroup.clear();
     this.diceGroup.clear();
@@ -2043,10 +2127,12 @@ export class Board3D {
     this._disposeBreath();
 
     // 海(シェーダー): 深さのグラデーション・波・岸辺の泡
-    const centersXZ = LAYOUT.hexIds.map((hid) => {
-      const c = hexCenterOf(hid);
-      return new THREE.Vector2(c.x, c.y);
-    });
+    const centersXZ = state.board.hexIds
+      .filter((hid) => state.board.hexes[hid].terrain !== 'sea')
+      .map((hid) => {
+        const c = hexCenterOf(hid);
+        return new THREE.Vector2(c.x, c.y);
+      });
     const sea = makeSea(centersXZ);
     this.seaUniforms = sea.uniforms;
     this.staticGroup.add(sea.mesh);
@@ -2062,9 +2148,18 @@ export class Board3D {
     this.staticGroup.add(shadowCatcher);
 
     // 砂浜 + タイル + 装飾 + トークン
-    for (const hid of LAYOUT.hexIds) {
+    for (const hid of state.board.hexIds) {
       const c = hexCenterOf(hid);
       const hex = state.board.hexes[hid];
+
+      // 航海者たち: 海のヘックスは当たり判定だけ置いて、見た目は海のまま
+      if (hex.terrain === 'sea') {
+        const seaPicker = new THREE.Mesh(GEO.hexFlat, PICK_MAT);
+        seaPicker.position.set(c.x, SEA_Y + 0.02, c.y);
+        seaPicker.userData = { kind: 'hex', id: hid };
+        this.pickGroup.add(seaPicker);
+        continue;
+      }
 
       const beach = new THREE.Mesh(GEO.beach, mat(0xd9bf82, { roughness: 1 }));
       beach.position.set(c.x, 0.02, c.y);
@@ -2155,10 +2250,11 @@ export class Board3D {
     }
 
     // ピッキング用: 頂点・辺
-    for (const vid of Object.keys(LAYOUT.vertices)) {
+    for (const vid of boardVertexIds(state.board)) {
       this.pickGroup.add(this._pickerAt('vertex', vid, vpos(vid), 1));
     }
-    for (const [eid, e] of Object.entries(LAYOUT.edges)) {
+    for (const eid of boardEdgeIds(state.board)) {
+      const e = LAYOUT.edges[eid];
       const p = this._pickerAt('edge', eid, new THREE.Vector3(e.x, TILE_TOP, e.y), 0.7);
       this.pickGroup.add(p);
     }
@@ -2190,6 +2286,15 @@ export class Board3D {
     }
     for (const eid of ui.pendingEdges ?? []) {
       addPiece(`pending:${eid}`, makeRoad(eid, 0, 0.5));
+    }
+    for (const [eid, ship] of Object.entries(state.ships ?? {})) {
+      addPiece(`ship:${eid}:${ship.player}`, placeShip(makeShip(ship.player), eid));
+    }
+    if (state.board.pirate != null) {
+      const c = hexCenterOf(state.board.pirate);
+      const p = makePirate();
+      p.position.set(c.x, SEA_Y + 0.02, c.y);
+      addPiece(`pirate:${state.board.pirate}`, p);
     }
 
     for (const vid of Object.keys(state.walls ?? {})) {
