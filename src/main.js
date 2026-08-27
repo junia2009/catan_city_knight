@@ -116,13 +116,14 @@ function setScreen(s) {
 function renderSelectPanel() {
   const panel = document.getElementById('select-panel');
   if (!panel || screen !== 'select') return;
+  // 選択肢が4つ以上ならタイル状(2列)に畳む
   const seg = (act, options, current) =>
-    `<div class="seg">${options
+    `<div class="seg ${options.length >= 4 ? 'seg-grid' : ''}">${options
       .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}">${label}</button>`)
       .join('')}</div>`;
   panel.innerHTML = `
     <h3>⬡ ゲーム設定</h3>
-    <div class="srow"><span>ルール</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン']], settings.mode)}</div>
+    <div class="srow"><span>ルール</span>${seg('set-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師']], settings.mode)}</div>
     <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(settings.cpuCount))}</div>
     <div class="srow"><span>強さ</span>${seg('set-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], settings.difficulty)}</div>
     <div class="srow"><span>出目</span>${seg('set-dice', [['random', '純ランダム'], ['balanced', 'バランス']], settings.diceMode)}</div>
@@ -192,7 +193,7 @@ function renderOnlinePanel() {
   // ロビー: 参加者を待ってホストが開始する
   const lb = online.lobby;
   const seg = (act, options, current, disabled) =>
-    `<div class="seg">${options
+    `<div class="seg ${options.length >= 4 ? 'seg-grid' : ''}">${options
       .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}" ${disabled ? 'disabled' : ''}>${label}</button>`)
       .join('')}</div>`;
   const seats = lb.seats.map((s) => {
@@ -216,7 +217,7 @@ function renderOnlinePanel() {
       <small>この合言葉を友達に伝えてください</small>
     </div>
     <div class="seat-list">${seats}</div>
-    <div class="srow"><span>ルール</span>${seg('net-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン']], lb.settings.mode, !host)}</div>
+    <div class="srow"><span>ルール</span>${seg('net-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師']], lb.settings.mode, !host)}</div>
     <div class="srow"><span>空席</span>${seg('net-fill', [['on', 'CPUで埋める'], ['off', '人だけ']], lb.settings.cpuFill ? 'on' : 'off', !host)}</div>
     ${lb.settings.cpuFill ? `<div class="srow"><span>強さ</span>${seg('net-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], lb.settings.difficulty, !host)}</div>` : ''}
     <div class="srow"><span>出目</span>${seg('net-dice', [['random', '純ランダム'], ['balanced', 'バランス']], lb.settings.diceMode ?? 'random', !host)}</div>
@@ -577,7 +578,7 @@ function computeHighlights() {
   if (m === 'setup-road' && ui.pendingVertex) {
     return { edges: legalSetupEdges(state, ui.pendingVertex) };
   }
-  if (m === 'build-road') return { edges: legalRoadEdges(state, HUMAN) };
+  if (m === 'build-road' || m === 'fish-road') return { edges: legalRoadEdges(state, HUMAN) };
   if (m === 'build-settlement') return { vertices: legalSettlementVertices(state, HUMAN) };
   if (m === 'build-city') return { vertices: legalCityVertices(state, HUMAN) };
   if (m === 'move-robber') return { hexes: legalRobberHexes(state) };
@@ -1171,7 +1172,7 @@ function boardClick(pick) {
       ui.pendingVertex = vid;
       ui.mode = 'setup-road';
     }
-  } else if (m === 'setup-road' || m === 'build-road') {
+  } else if (m === 'setup-road' || m === 'build-road' || m === 'fish-road') {
     const eid = pick('edge', ui.highlights.edges ?? []);
     if (eid) ui.pending = { edgeId: eid };
   } else if (m === 'build-settlement' || m === 'build-city') {
@@ -1263,6 +1264,11 @@ function confirmPending() {
     });
   } else if (m === 'build-road' && ui.pending?.edgeId) {
     doAction({ type: 'BUILD_ROAD', player: HUMAN, edgeId: ui.pending.edgeId });
+  } else if (m === 'fish-road' && ui.pending?.edgeId) {
+    doAction({
+      type: 'SPEND_FISH', player: HUMAN, use: 'road',
+      params: { edgeId: ui.pending.edgeId },
+    });
   } else if (m === 'build-settlement' && ui.pending?.vertexId) {
     doAction({ type: 'BUILD_SETTLEMENT', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'build-city' && ui.pending?.vertexId) {
@@ -1323,7 +1329,7 @@ function cancelMode() {
     ui.pendingVertex = null;
     ui.pending = null;
   } else if ([
-    'build-road', 'build-settlement', 'build-city', 'play-road-building',
+    'build-road', 'fish-road', 'build-settlement', 'build-city', 'play-road-building',
     'build-knight', 'build-wall', 'build-tower', 'move-knight',
     'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads',
   ].includes(ui.mode)) {
@@ -1560,6 +1566,39 @@ document.addEventListener('click', (e) => {
       return;
     case 'aq':
       doAction({ type: 'PICK_AQUEDUCT', player: HUMAN, resource: arg });
+      return;
+
+    // ---- 漁師たち ----
+    case 'fish-open':
+      ui.dialog = { type: 'fish', pick: null };
+      refresh();
+      return;
+    case 'fish-back':
+      ui.dialog.pick = null;
+      refresh();
+      return;
+    case 'fish-use':
+      if (arg === 'steal' || arg === 'resource') {
+        ui.dialog.pick = arg;
+        refresh();
+      } else if (arg === 'road') {
+        // 道は盤面から辺を選ぶのでダイアログを閉じる
+        ui.dialog = null;
+        ui.mode = 'fish-road';
+        ui.pending = null;
+        refresh();
+      } else {
+        doAction({ type: 'SPEND_FISH', player: HUMAN, use: arg });
+      }
+      return;
+    case 'fish-steal':
+      doAction({ type: 'SPEND_FISH', player: HUMAN, use: 'steal', params: { target: Number(arg) } });
+      return;
+    case 'fish-res':
+      doAction({ type: 'SPEND_FISH', player: HUMAN, use: 'resource', params: { resource: arg } });
+      return;
+    case 'pass-shoe':
+      doAction({ type: 'PASS_SHOE', player: HUMAN, target: Number(arg) });
       return;
 
     case 'offer-accept':

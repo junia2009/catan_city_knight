@@ -40,6 +40,7 @@ dispatch(state, action)
 | 基本のみ | `BUY_DEV_CARD` `PLAY_DEV_CARD` |
 | 都市と騎士 | `BUILD_KNIGHT` `ACTIVATE_KNIGHT` `PROMOTE_KNIGHT` `MOVE_KNIGHT` `CHASE_ROBBER` `BUILD_WALL` `BUY_IMPROVEMENT` `PLAY_PROGRESS_CARD` `RAZE_CITY` `PICK_AQUEDUCT` |
 | ドラゴンの島 | `BUILD_TOWER` |
+| 漁師たち | `SPEND_FISH`(魚を使う) `PASS_SHOE`(古い靴を渡す) |
 
 ### 割り込み(awaiting 状態機械)
 
@@ -69,11 +70,11 @@ dispatch(state, action)
   phase,                   // 'setup' | 'main' | 'ended'
   turn, currentPlayer,
   awaiting,                // 上記の割り込み(null = 通常フロー)
-  board,                   // hexes(terrain/token)・robber・ports
+  board,                   // hexes(terrain/token)・robber・ports・fisheries/lake(漁師たち)
   buildings, roads,        // vertexId/edgeId -> { player, ... }
   players: [{ resources, devCards, commodities, improvements,
-              progressCards, progressVP, defenderPoints, treasures, ... }],
-  bank,                    // resources 各19・devDeck・commodities 各12・progressDecks
+              progressCards, progressVP, defenderPoints, treasures, fish, ... }],
+  bank,                    // resources 各19・devDeck・commodities 各12・progressDecks・fishPool
   dice, eventDie,          // eventDie は cak のみ('ship' | 各進歩デッキ)
   diceMode, diceDeck,      // 'random'(毎回独立。既定) | 'balanced'(36通りの山札から引く)
   diceCounts,              // 出目(2〜12)が何回出たか。📊の棒グラフに使う
@@ -81,6 +82,7 @@ dispatch(state, action)
   longestRoad, largestArmy,
   knights, walls, merchant, barbarians, metropolis,   // 都市と騎士
   dragon, towers, burned,                             // ドラゴンの島
+  // 漁師たち: 魚は players[].fish(公開)と bank.fishPool のみ。専用のトップレベル状態はない
   winner, log,
 }
 ```
@@ -102,7 +104,8 @@ src/
 │   ├── trade.js      # tradeRate(港・商船隊・商人・商業Lv3)
 │   ├── victory.js    # computePoints / pointsToWin / 最長交易路
 │   ├── cak/          # barbarians / knights / improvements / progress-cards(54枚)
-│   └── dragon.js     # 暴走・炎上・見張り塔・財宝
+│   ├── dragon.js     # 暴走・炎上・見張り塔・財宝
+│   └── fish.js       # 漁師たち: 魚トークンの山・獲得・支払い・古い靴
 ├── ai/
 │   ├── cpu-player.js  # chooseAction(全ての判断の入口)
 │   ├── evaluator.js   # 盤面評価・evalNoise(難易度)

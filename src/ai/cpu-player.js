@@ -8,6 +8,7 @@ import {
   COSTS, WALL_COST, canAfford, countPieces, PIECE_LIMITS, totalResources, totalCards,
 } from '../rules/build.js';
 import { stealableTargets } from '../rules/robber.js';
+import { fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
 import { tradeRate } from '../rules/trade.js';
 import { computePoints } from '../rules/victory.js';
 import { RESOURCES } from '../state.js';
@@ -190,6 +191,77 @@ export function cpuAcceptsTrade(state, pid, incoming, outgoing) {
   // 弱いCPUは多少不利な取引にも応じる
   const margin = state.difficulty === 'easy' ? 0.1 : state.difficulty === 'normal' ? 0.35 : 0.5;
   return inValue >= outValue + margin + Math.max(0, countDiff) * 0.3;
+}
+
+// ---- 漁師たち: 魚トークン ----
+
+// 盗賊が自分の産地に居座っているか
+function robberHurtsMe(state, pid) {
+  const hex = state.board.robber;
+  if (hex == null || hex === state.board.lake) return false;
+  return (LAYOUT.hexVertices[hex] ?? []).some((v) => state.buildings[v]?.player === pid);
+}
+
+// 魚の使い道を決める。お釣りが出ないので、払える中でいちばん高い使い道から試す。
+function trySpendFish(state, pid, goal) {
+  if (state.mode !== 'fish') return null;
+  const p = state.players[pid];
+  const n = fishCount(p);
+  if (n < 2) return null;
+
+  // 2匹: 盗賊が自分の産地にいるなら真っ先に追い払う(ロール前にも使える)
+  if (robberHurtsMe(state, pid)) {
+    const a = valid(state, { type: 'SPEND_FISH', player: pid, use: 'robber' });
+    if (a) return a;
+  }
+  if (!state.turnFlags.rolled) return null;
+
+  // 7匹: 発展カード
+  if (n >= 7) {
+    const a = valid(state, { type: 'SPEND_FISH', player: pid, use: 'dev' });
+    if (a) return a;
+  }
+  // 5匹: 道を1本無料で
+  if (n >= 5) {
+    const eid = best(legalRoadEdges(state, pid), (e) => roadEdgeValue(state, pid, e));
+    if (eid && roadEdgeValue(state, pid, eid) > 1) {
+      const a = valid(state, {
+        type: 'SPEND_FISH', player: pid, use: 'road', params: { edgeId: eid },
+      });
+      if (a) return a;
+    }
+  }
+  // 4匹: 目標に足りない資源を1枚
+  if (n >= 4 && goal) {
+    const r = Object.keys(missingFor(p, goal.cost)).find((x) => state.bank.resources[x] > 0);
+    if (r) {
+      const a = valid(state, {
+        type: 'SPEND_FISH', player: pid, use: 'resource', params: { resource: r },
+      });
+      if (a) return a;
+    }
+  }
+  // 3匹: 手札の厚い相手から1枚(薄い相手に使うと割に合わない)
+  if (n >= 3) {
+    const rich = state.players.filter((o) => o.id !== pid && totalCards(o) >= 3).map((o) => o.id);
+    const target = best(rich, (id) => computePoints(state, id) + totalCards(state.players[id]) / 20);
+    if (target != null) {
+      const a = valid(state, {
+        type: 'SPEND_FISH', player: pid, use: 'steal', params: { target },
+      });
+      if (a) return a;
+    }
+  }
+  return null;
+}
+
+// 古い靴は持っているだけ損なので、渡せる相手(自分と同点以上)がいれば渡す。
+function tryPassShoe(state, pid) {
+  if (state.mode !== 'fish' || !hasOldShoe(state.players[pid])) return null;
+  const targets = shoeTargets(state, pid, (id) => computePoints(state, id));
+  const target = best(targets, (id) => computePoints(state, id));
+  if (target == null) return null;
+  return valid(state, { type: 'PASS_SHOE', player: pid, target });
 }
 
 // CPU が全員に 1:1 交易を持ちかける(不足資源 ⇄ 余剰資源)。
@@ -438,8 +510,15 @@ export function chooseAction(state, pid) {
       const alch = pickAlchemist(state, pid);
       if (alch) return alch;
     }
+    // 漁師たち: 盗賊が自分の産地にいるならロール前に魚でどかす
+    const fish = trySpendFish(state, pid, null);
+    if (fish) return fish;
     return tryPlayDevCard(state, pid) ?? { type: 'ROLL_DICE', player: pid };
   }
+
+  // 0'. 漁師たち: 古い靴は渡せるうちに渡す(勝利条件が1点重いままだと詰む)
+  const shoe = tryPassShoe(state, pid);
+  if (shoe) return shoe;
 
   // 0. cak: 蛮族への防衛(降格は都市2点の損失なので最優先)
   if (cak) {
@@ -487,6 +566,10 @@ export function chooseAction(state, pid) {
       return { type: 'BUILD_TOWER', player: pid, vertexId: vid };
     }
   }
+
+  // 3'''. 漁師たち: 魚トークンを使う
+  const fish = trySpendFish(state, pid, nextGoal(state, pid));
+  if (fish) return fish;
 
   // 4. 入植先がないなら道で拡張(資源を貯めすぎない範囲で)
   const hasSpot = legalSettlementVertices(state, pid).length > 0;

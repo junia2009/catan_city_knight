@@ -7,10 +7,14 @@ export const VICTORY_POINTS_TO_WIN = 10;
 export const VICTORY_POINTS_TO_WIN_CAK = 13;
 export const VICTORY_POINTS_TO_WIN_DRAGON = 12;
 
-export function pointsToWin(state) {
-  if (state.mode === 'cak') return VICTORY_POINTS_TO_WIN_CAK;
-  if (state.mode === 'dragon') return VICTORY_POINTS_TO_WIN_DRAGON;
-  return VICTORY_POINTS_TO_WIN;
+// pid を渡すと、その人に必要な点数を返す。
+// 漁師たちの「古い靴」を持っている間だけ 1 点重くなる(公式)。
+export function pointsToWin(state, pid = null) {
+  let goal = VICTORY_POINTS_TO_WIN;
+  if (state.mode === 'cak') goal = VICTORY_POINTS_TO_WIN_CAK;
+  else if (state.mode === 'dragon') goal = VICTORY_POINTS_TO_WIN_DRAGON;
+  if (pid != null && state.players[pid]?.fish?.includes('shoe')) goal += 1;
+  return goal;
 }
 
 // pid の最長交易路(辺の本数)。敵の建物がある頂点は通り抜けられない。

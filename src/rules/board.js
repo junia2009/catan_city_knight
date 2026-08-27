@@ -19,7 +19,8 @@ export const DIRS = [
   [0, 1],
 ];
 
-export const TERRAINS = ['forest', 'pasture', 'field', 'hill', 'mountain', 'desert'];
+// lake は漁師たちだけに出る(砂漠の置き換え)。資源は産まず、魚を産む。
+export const TERRAINS = ['forest', 'pasture', 'field', 'hill', 'mountain', 'desert', 'lake'];
 
 export const TERRAIN_RESOURCE = {
   forest: 'wood',
@@ -28,6 +29,7 @@ export const TERRAIN_RESOURCE = {
   hill: 'brick',
   mountain: 'ore',
   desert: null,
+  lake: null,
 };
 
 // 出目 → 確率の目安(36分率の分子)。評価関数・トークン描画に使う。
@@ -186,8 +188,27 @@ function tokensValid(hexes) {
   return true;
 }
 
+// 漁師たち: 湖(元の砂漠)が魚を産む出目と、漁場タイルの数字(公式と同じ)
+export const LAKE_NUMBERS = [2, 3, 11, 12];
+export const FISHERY_NUMBERS = [4, 5, 6, 8, 9, 10];
+
+// 漁場: 港のない海岸辺へ、等間隔になるように6か所置く。
+// 公式は「港でない海岸マスすべて」だが、本作の盤は海岸辺30本・港9本なので
+// 数字1つにつき1か所ずつ(計6か所)に絞る。
+function placeFisheries(rng, ports) {
+  const used = new Set(ports.map((p) => p.edgeId));
+  const free = LAYOUT.coastalEdges.filter((eid) => !used.has(eid));
+  let numbers;
+  [rng, numbers] = shuffled(rng, FISHERY_NUMBERS);
+  const fisheries = numbers.map((number, i) => ({
+    edgeId: free[Math.floor((i * free.length) / numbers.length)],
+    number,
+  }));
+  return [rng, fisheries];
+}
+
 // 盤面生成: [rng, board] を返す
-export function generateBoard(rng) {
+export function generateBoard(rng, { fish = false } = {}) {
   let terrains, tokens;
   let hexes = null;
 
@@ -219,5 +240,11 @@ export function generateBoard(rng) {
     type,
   }));
 
-  return [rng, { hexes, robber: desert, ports }];
+  if (!fish) return [rng, { hexes, robber: desert, ports }];
+
+  // 漁師たち: 砂漠を湖に置き換える。湖も資源は産まないので盗賊の初期位置はそのまま。
+  hexes[desert].terrain = 'lake';
+  let fisheries;
+  [rng, fisheries] = placeFisheries(rng, ports);
+  return [rng, { hexes, robber: desert, ports, fisheries, lake: desert }];
 }
