@@ -1,13 +1,17 @@
 // 盤面の座標系と生成(設計書 §3)
 //
-// - ヘックス: axial 座標 (q, r)、pointy-top、半径2の六角形配置 = 19ヘックス
+// - ヘックス: axial 座標 (q, r)、pointy-top。基本の盤は半径2 = 19ヘックス
 // - 頂点ID: 接する最大3ヘックス(盤外の仮想座標を含む)の座標をソート連結
 // - 辺ID:   両端の頂点IDをソート連結
-// - 隣接テーブルは盤面レイアウトが固定なのでモジュール定数として一度だけ構築する
+// - 隣接テーブル(LAYOUT)は幾何だけなので、使いうる最大半径まで一度だけ構築する。
+//   「どのヘックスを実際に使うか」は盤(board.hexIds)が決める ── モードごとに
+//   盤の形を変えられるのはこのため。頂点・辺・海岸辺は board.hexIds から導出する。
 
 import { shuffled } from '../rng.js';
 
 export const BOARD_RADIUS = 2;
+// レイアウトを作る最大半径。航海者たちが半径3(37マス)まで使う。
+export const MAX_BOARD_RADIUS = 3;
 
 // pointy-top の6方向 (E, NE, NW, W, SW, SE)
 export const DIRS = [
@@ -83,23 +87,39 @@ export function axialToXY(q, r) {
   return [Math.sqrt(3) * (q + r / 2), 1.5 * r];
 }
 
-function buildLayout(radius) {
-  const hexCoords = [];
-  for (let q = -radius; q <= radius; q++) {
-    for (let r = -radius; r <= radius; r++) {
-      if (Math.abs(q + r) <= radius) hexCoords.push([q, r]);
+// 半径 r 以内のヘックス座標(q昇順 → r昇順)
+function coordsWithin(r) {
+  const out = [];
+  for (let q = -r; q <= r; q++) {
+    for (let s = -r; s <= r; s++) {
+      if (Math.abs(q + s) <= r) out.push([q, s]);
     }
   }
+  return out;
+}
+
+// レイアウトは最大半径まで作るが、並び順は「半径2の盤 → その外側」にする。
+// こうすると頂点IDや辺IDの列が基本の盤のものと完全に前方一致するので、
+// 盤を広げても既存モードの同点処理(先に見つけたものを採る)が変わらない。
+function layoutCoords(maxRadius) {
+  const inner = coordsWithin(BOARD_RADIUS);
+  const seen = new Set(inner.map(([q, r]) => hexKey(q, r)));
+  const outer = coordsWithin(maxRadius).filter(([q, r]) => !seen.has(hexKey(q, r)));
+  return [...inner, ...outer];
+}
+
+function buildLayout(maxRadius) {
+  const hexCoords = layoutCoords(maxRadius);
   const hexIds = hexCoords.map(([q, r]) => hexKey(q, r));
   const onBoard = new Set(hexIds);
 
   const vertices = {}; // vid -> { x, y }
   const hexVertices = {}; // hexId -> vid[6](コーナー順)
-  const vertexHexes = {}; // vid -> hexId[](盤内のみ)
-  const edges = {}; // eid -> { v: [v1, v2], hexes: hexId[](盤内のみ), x, y }
+  const vertexHexes = {}; // vid -> hexId[](レイアウト内のみ)
+  const edges = {}; // eid -> { v: [v1, v2], hexes: hexId[](レイアウト内のみ), x, y }
   const vertexEdges = {}; // vid -> eid[]
   const vertexAdj = {}; // vid -> vid[]
-  const hexNeighbors = {}; // hexId -> hexId[](盤内のみ)
+  const hexNeighbors = {}; // hexId -> hexId[](レイアウト内のみ)
 
   for (const [q, r] of hexCoords) {
     const hid = hexKey(q, r);
@@ -148,17 +168,8 @@ function buildLayout(radius) {
     e.y = (vertices[v1].y + vertices[v2].y) / 2;
   }
 
-  // 海岸辺(盤内ヘックスが1つだけの辺)を中心角順に並べる → 港の配置候補
-  const coastalEdges = Object.keys(edges)
-    .filter((eid) => edges[eid].hexes.length === 1)
-    .sort((a, b) => {
-      const ea = edges[a];
-      const eb = edges[b];
-      return Math.atan2(ea.y, ea.x) - Math.atan2(eb.y, eb.x);
-    });
-
   return {
-    radius,
+    maxRadius,
     hexIds,
     hexCoords,
     vertices,
@@ -168,20 +179,98 @@ function buildLayout(radius) {
     vertexEdges,
     vertexAdj,
     hexNeighbors,
-    coastalEdges,
   };
 }
 
-// 盤面レイアウト(不変)。地形・トークンだけが GameState 側で変わる。
-export const LAYOUT = buildLayout(BOARD_RADIUS);
+// 盤面レイアウト(不変)。どのヘックスを実際に使うかは盤(board)側が決める。
+// 航海者たちは半径3まで使うので、レイアウトはそこまで作っておく。
+export const LAYOUT = buildLayout(MAX_BOARD_RADIUS);
 
-function tokensValid(hexes) {
+// 半径 r 以内のヘックスID(レイアウトの並び順のまま)
+export function hexIdsWithin(r) {
+  const ids = new Set(coordsWithin(r).map(([q, s]) => hexKey(q, s)));
+  return LAYOUT.hexIds.filter((hid) => ids.has(hid));
+}
+
+// 盤の形から導けるものは state に持たせない(オンライン対戦で毎手番
+// 状態を配るので、頂点IDの配列を積むと通信量が跳ね上がる)。
+// 盤の形は1ゲームで変わらないため、ヘックスID列をキーにして覚えておく。
+const geoCache = new Map();
+
+// 盤に「実際にある」ヘックスから、使う頂点・辺・海岸辺を割り出す。
+// 順序はレイアウト構築時と同じ規則(ヘックス順 → コーナー順)にそろえるので、
+// 基本の盤なら従来の Object.keys(LAYOUT.vertices) と完全に同じ並びになる。
+export function boardGeometry(hexIds) {
+  const key = hexIds.join('|');
+  const hit = geoCache.get(key);
+  if (hit) return hit;
+  const onBoard = new Set(hexIds);
+
+  const vertexIds = [];
+  const seenV = new Set();
+  const edgeIds = [];
+  const seenE = new Set();
+  for (const hid of hexIds) {
+    for (const vid of LAYOUT.hexVertices[hid]) {
+      if (seenV.has(vid)) continue;
+      seenV.add(vid);
+      vertexIds.push(vid);
+    }
+  }
+  for (const hid of hexIds) {
+    const corners = LAYOUT.hexVertices[hid];
+    for (let i = 0; i < 6; i++) {
+      const eid = edgeIdOf(corners[i], corners[(i + 1) % 6]);
+      if (seenE.has(eid)) continue;
+      seenE.add(eid);
+      edgeIds.push(eid);
+    }
+  }
+
+  // 海岸辺(盤のヘックスが1つだけ接する辺)を中心角順に → 港・漁場の配置候補
+  const coastalEdges = edgeIds
+    .filter((eid) => LAYOUT.edges[eid].hexes.filter((h) => onBoard.has(h)).length === 1)
+    .sort((a, b) => {
+      const ea = LAYOUT.edges[a];
+      const eb = LAYOUT.edges[b];
+      return Math.atan2(ea.y, ea.x) - Math.atan2(eb.y, eb.x);
+    });
+
+  const geo = { hexIds, vertexIds, edgeIds, coastalEdges };
+  geoCache.set(key, geo);
+  return geo;
+}
+
+// 盤で使う頂点・辺・海岸辺(board.hexIds から導出。state には持たせない)
+export function boardVertexIds(board) {
+  return boardGeometry(board.hexIds).vertexIds;
+}
+
+export function boardEdgeIds(board) {
+  return boardGeometry(board.hexIds).edgeIds;
+}
+
+export function coastalEdgesOf(board) {
+  return boardGeometry(board.hexIds).coastalEdges;
+}
+
+// vid に接する「盤の」ヘックス(レイアウトには盤外のヘックスも含まれるため)
+export function vertexHexesOf(board, vid) {
+  return LAYOUT.vertexHexes[vid].filter((h) => board.hexes[h]);
+}
+
+// hid に隣接する「盤の」ヘックス
+export function hexNeighborsOf(board, hid) {
+  return LAYOUT.hexNeighbors[hid].filter((h) => board.hexes[h]);
+}
+
+function tokensValid(hexes, hexIds) {
   // 6 と 8 が隣接しないこと
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of hexIds) {
     const t = hexes[hid].token;
     if (t !== 6 && t !== 8) continue;
     for (const nid of LAYOUT.hexNeighbors[hid]) {
-      const nt = hexes[nid].token;
+      const nt = hexes[nid]?.token;
       if (nt === 6 || nt === 8) return false;
     }
   }
@@ -195,9 +284,9 @@ export const FISHERY_NUMBERS = [4, 5, 6, 8, 9, 10];
 // 漁場: 港のない海岸辺へ、等間隔になるように6か所置く。
 // 公式は「港でない海岸マスすべて」だが、本作の盤は海岸辺30本・港9本なので
 // 数字1つにつき1か所ずつ(計6か所)に絞る。
-function placeFisheries(rng, ports) {
+function placeFisheries(rng, ports, coastalEdges) {
   const used = new Set(ports.map((p) => p.edgeId));
-  const free = LAYOUT.coastalEdges.filter((eid) => !used.has(eid));
+  const free = coastalEdges.filter((eid) => !used.has(eid));
   let numbers;
   [rng, numbers] = shuffled(rng, FISHERY_NUMBERS);
   const fisheries = numbers.map((number, i) => ({
@@ -209,6 +298,8 @@ function placeFisheries(rng, ports) {
 
 // 盤面生成: [rng, board] を返す
 export function generateBoard(rng, { fish = false } = {}) {
+  const hexIds = hexIdsWithin(BOARD_RADIUS);
+  const coastal = boardGeometry(hexIds).coastalEdges;
   let terrains, tokens;
   let hexes = null;
 
@@ -217,34 +308,34 @@ export function generateBoard(rng, { fish = false } = {}) {
     [rng, tokens] = shuffled(rng, NUMBER_TOKENS);
     const h = {};
     let ti = 0;
-    LAYOUT.hexIds.forEach((hid, i) => {
-      const [q, r] = LAYOUT.hexCoords[i];
+    hexIds.forEach((hid, i) => {
+      const [q, r] = parseHexKey(hid);
       const terrain = terrains[i];
       h[hid] = { q, r, terrain, token: terrain === 'desert' ? null : tokens[ti++] };
     });
-    if (tokensValid(h)) {
+    if (tokensValid(h, hexIds)) {
       hexes = h;
       break;
     }
   }
   if (!hexes) throw new Error('盤面生成に失敗しました');
 
-  const desert = LAYOUT.hexIds.find((hid) => hexes[hid].terrain === 'desert');
+  const desert = hexIds.find((hid) => hexes[hid].terrain === 'desert');
 
   // 港: 海岸辺30本から9本を等間隔に選び、シャッフルした種類を割り当てる
   let portTypes;
   [rng, portTypes] = shuffled(rng, PORT_POOL);
-  const n = LAYOUT.coastalEdges.length;
+  const n = coastal.length;
   const ports = portTypes.map((type, i) => ({
-    edgeId: LAYOUT.coastalEdges[Math.floor((i * n) / portTypes.length)],
+    edgeId: coastal[Math.floor((i * n) / portTypes.length)],
     type,
   }));
 
-  if (!fish) return [rng, { hexes, robber: desert, ports }];
+  if (!fish) return [rng, { hexIds, hexes, robber: desert, ports }];
 
   // 漁師たち: 砂漠を湖に置き換える。湖も資源は産まないので盗賊の初期位置はそのまま。
   hexes[desert].terrain = 'lake';
   let fisheries;
-  [rng, fisheries] = placeFisheries(rng, ports);
-  return [rng, { hexes, robber: desert, ports, fisheries, lake: desert }];
+  [rng, fisheries] = placeFisheries(rng, ports, coastal);
+  return [rng, { hexIds, hexes, robber: desert, ports, fisheries, lake: desert }];
 }

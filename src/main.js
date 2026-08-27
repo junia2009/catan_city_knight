@@ -12,7 +12,7 @@ import {
   legalSettlementVertices,
   legalSetupEdges,
 } from './ai/legal-moves.js';
-import { LAYOUT } from './rules/board.js';
+import { LAYOUT, boardVertexIds } from './rules/board.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
 import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-render.js';
@@ -590,7 +590,7 @@ function computeHighlights() {
   // ---- 都市と騎士 ----
   if (m === 'build-knight') {
     return {
-      vertices: Object.keys(LAYOUT.vertices).filter(
+      vertices: boardVertexIds(state.board).filter(
         (v) => validateAction(state, { type: 'BUILD_KNIGHT', player: HUMAN, vertexId: v }) === null,
       ),
     };
@@ -604,7 +604,7 @@ function computeHighlights() {
   }
   if (m === 'move-knight' && ui.knightFrom) {
     return {
-      vertices: Object.keys(LAYOUT.vertices).filter(
+      vertices: boardVertexIds(state.board).filter(
         (v) =>
           validateAction(state, {
             type: 'MOVE_KNIGHT', player: HUMAN,
@@ -627,12 +627,12 @@ function computeHighlights() {
     ({ type: 'PLAY_PROGRESS_CARD', player: HUMAN, index: ui.progIndex, params });
   if (m === 'prog-hex') {
     return {
-      hexes: LAYOUT.hexIds.filter((h) => validateAction(state, progAct({ hexId: h })) === null),
+      hexes: state.board.hexIds.filter((h) => validateAction(state, progAct({ hexId: h })) === null),
     };
   }
   if (m === 'prog-vertex') {
     return {
-      vertices: Object.keys(LAYOUT.vertices).filter(
+      vertices: boardVertexIds(state.board).filter(
         (v) => validateAction(state, progAct({ vertexId: v })) === null,
       ),
     };
@@ -647,14 +647,14 @@ function computeHighlights() {
   if (m === 'prog-hex2') {
     if (ui.pendingHexes.length === 0) {
       return {
-        hexes: LAYOUT.hexIds.filter((h) => {
+        hexes: state.board.hexIds.filter((h) => {
           const t = state.board.hexes[h].token;
           return t && ![2, 6, 8, 12].includes(t);
         }),
       };
     }
     return {
-      hexes: LAYOUT.hexIds.filter(
+      hexes: state.board.hexIds.filter(
         (h) => validateAction(state, progAct({ a: ui.pendingHexes[0], b: h })) === null,
       ),
     };

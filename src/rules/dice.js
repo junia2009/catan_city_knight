@@ -62,7 +62,7 @@ export function distributeForRoll(state, total) {
   const comDemands = {}; // commodity -> { pid: count }(cak のみ)
   const cak = state.mode === 'cak';
 
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of state.board.hexIds) {
     const hex = state.board.hexes[hid];
     if (hex.token !== total || state.board.robber === hid) continue;
     // ドラゴンの島: 炎上中のヘックスは産出しない

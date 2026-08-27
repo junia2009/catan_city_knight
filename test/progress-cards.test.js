@@ -78,7 +78,7 @@ test('山札構成: 3系統×18枚、合計54枚', () => {
 
 test('商人: 配置で2:1交易と+1点、別プレイヤーの配置で移動', () => {
   let s = readyGame();
-  const hid = LAYOUT.hexIds.find(
+  const hid = s.board.hexIds.find(
     (h) =>
       s.board.hexes[h].terrain !== 'desert' &&
       LAYOUT.hexVertices[h].some((v) => s.buildings[v]?.player === 0),
@@ -281,7 +281,7 @@ test('技師: 城壁を無料建設', () => {
 
 test('発明家: 数字トークンを交換(2,6,8,12は不可)し、盤面バージョンが進む', () => {
   let s = readyGame();
-  const movable = LAYOUT.hexIds.filter((h) => {
+  const movable = s.board.hexIds.filter((h) => {
     const t = s.board.hexes[h].token;
     return t && ![2, 6, 8, 12].includes(t);
   });
@@ -289,7 +289,7 @@ test('発明家: 数字トークンを交換(2,6,8,12は不可)し、盤面バ�
   const b = movable.find((h) => s.board.hexes[h].token !== s.board.hexes[a].token);
   const ta = s.board.hexes[a].token;
   const tb = s.board.hexes[b].token;
-  const locked = LAYOUT.hexIds.find((h) => [6, 8].includes(s.board.hexes[h].token));
+  const locked = s.board.hexIds.find((h) => [6, 8].includes(s.board.hexes[h].token));
   assert.notEqual(
     validateAction(s, {
       type: 'PLAY_PROGRESS_CARD', player: 0,

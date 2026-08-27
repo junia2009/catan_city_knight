@@ -1,6 +1,6 @@
 // 盤面評価関数(設計書 §7.2)
 
-import { LAYOUT, PIPS, TERRAIN_RESOURCE } from '../rules/board.js';
+import { LAYOUT, PIPS, TERRAIN_RESOURCE, vertexHexesOf } from '../rules/board.js';
 import { RESOURCES } from '../state.js';
 
 // わずかな資源希少度の重み(小麦・鉱石を優先)
@@ -29,7 +29,7 @@ export function evalNoise(state, key) {
 // 頂点に接するヘックスの出目確率合計(pips)
 export function pipsOfVertex(state, vid) {
   let sum = 0;
-  for (const hid of LAYOUT.vertexHexes[vid]) {
+  for (const hid of vertexHexesOf(state.board, vid)) {
     const hex = state.board.hexes[hid];
     if (hex.token) sum += PIPS[hex.token];
   }
@@ -42,7 +42,7 @@ export function playerProduction(state, pid) {
   for (const [vid, b] of Object.entries(state.buildings)) {
     if (b.player !== pid) continue;
     const mult = b.type === 'city' ? 2 : 1;
-    for (const hid of LAYOUT.vertexHexes[vid]) {
+    for (const hid of vertexHexesOf(state.board, vid)) {
       const hex = state.board.hexes[hid];
       const res = TERRAIN_RESOURCE[hex.terrain];
       if (res && hex.token) prod[res] += PIPS[hex.token] * mult;
@@ -57,7 +57,7 @@ export function vertexValue(state, pid, vid) {
   let value = 0;
   const newRes = new Set();
 
-  for (const hid of LAYOUT.vertexHexes[vid]) {
+  for (const hid of vertexHexesOf(state.board, vid)) {
     const hex = state.board.hexes[hid];
     const res = TERRAIN_RESOURCE[hex.terrain];
     if (!res || !hex.token) continue;

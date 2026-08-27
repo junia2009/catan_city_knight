@@ -25,7 +25,7 @@ function othersOf(state, pid) {
 
 // 自分の建物が隣接する土地ヘックス一覧
 function myLandHexes(state, pid) {
-  return LAYOUT.hexIds.filter((hid) => {
+  return state.board.hexIds.filter((hid) => {
     if (!TERRAIN_RESOURCE[state.board.hexes[hid].terrain]) return false;
     return LAYOUT.hexVertices[hid].some((v) => state.buildings[v]?.player === pid);
   });
@@ -209,7 +209,7 @@ const SCORERS = {
     for (let total = 2; total <= 12; total++) {
       if (total === 7) continue;
       let gain = 0;
-      for (const hid of LAYOUT.hexIds) {
+      for (const hid of state.board.hexIds) {
         const hex = state.board.hexes[hid];
         if (hex.token !== total || state.board.robber === hid) continue;
         gain += myWeightOn(state, pid, hid);
@@ -249,7 +249,7 @@ const SCORERS = {
 
   inventor(state, pid) {
     // 自分の建物が多いヘックスに強い数字を持ってくる入れ替えを探す
-    const movable = LAYOUT.hexIds.filter((hid) => {
+    const movable = state.board.hexIds.filter((hid) => {
       const t = state.board.hexes[hid].token;
       return t && ![2, 6, 8, 12].includes(t);
     });

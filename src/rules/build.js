@@ -1,7 +1,7 @@
 // 建設可否判定・コスト(設計書 §5)
 // すべて純粋関数。エラー理由の文字列 or null(合法)を返す。
 
-import { LAYOUT } from './board.js';
+import { LAYOUT, vertexHexesOf } from './board.js';
 import { RESOURCES } from '../state.js';
 
 export const COSTS = {
@@ -84,6 +84,8 @@ export function countPieces(state, pid, type) {
 // 開拓地: 空き頂点 + 距離ルール + (通常時)自分の道に接続
 export function canPlaceSettlement(state, pid, vertexId, { needRoad = true } = {}) {
   if (!LAYOUT.vertices[vertexId]) return '不正な頂点です';
+  // レイアウトには盤外の頂点も含まれるので、盤に接しているかを見る
+  if (vertexHexesOf(state.board, vertexId).length === 0) return '盤の外です';
   if (state.buildings[vertexId]) return 'その頂点には建物があります';
   if (state.knights?.[vertexId]) return 'その頂点には騎士がいます';
   for (const adj of LAYOUT.vertexAdj[vertexId]) {
@@ -107,6 +109,7 @@ export function canPlaceSettlement(state, pid, vertexId, { needRoad = true } = {
 export function canPlaceRoad(state, pid, edgeId, { requireVertex = null, extraRoads = null } = {}) {
   const edge = LAYOUT.edges[edgeId];
   if (!edge) return '不正な辺です';
+  if (!edge.hexes.some((h) => state.board.hexes[h])) return '盤の外です';
   if (state.roads[edgeId] || extraRoads?.[edgeId]) return 'その辺には道があります';
   const extraCount = extraRoads ? Object.keys(extraRoads).length : 0;
   if (countPieces(state, pid, 'road') + extraCount >= PIECE_LIMITS.road) {

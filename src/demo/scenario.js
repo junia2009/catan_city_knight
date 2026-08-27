@@ -10,7 +10,7 @@
 import { createGame, RESOURCES } from '../state.js';
 import { dispatch } from '../actions.js';
 import { chooseAction } from '../ai/cpu-player.js';
-import { LAYOUT, TERRAIN_RESOURCE } from '../rules/board.js';
+import { LAYOUT, TERRAIN_RESOURCE, vertexHexesOf } from '../rules/board.js';
 import { rngInt } from '../rng.js';
 import { COMMODITIES } from '../rules/cak/progress-cards.js';
 
@@ -165,7 +165,7 @@ export function bestRollFor(state, pid, { redDie = null } = {}) {
 
 function yieldOf(state, pid, total) {
   let score = 0;
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of state.board.hexIds) {
     const hex = state.board.hexes[hid];
     if (hex.token !== total || state.board.robber === hid) continue;
     if (!TERRAIN_RESOURCE[hex.terrain]) continue;
@@ -189,7 +189,7 @@ export function pipsOf(state, hid) {
 
 // その頂点に建てたときのおいしさ
 export function vertexValue(state, vid) {
-  return (LAYOUT.vertexHexes[vid] ?? []).reduce(
+  return vertexHexesOf(state.board, vid).reduce(
     (s, hid) => s + (TERRAIN_RESOURCE[state.board.hexes[hid].terrain] ? pipsOf(state, hid) : 0),
     0,
   );

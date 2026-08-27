@@ -3,7 +3,7 @@
 // 静的レイヤー(海・島・地形・トークン・港)はオフスクリーンにキャッシュし、
 // 動的レイヤー(盗賊・道・建物・ハイライト)を毎回上描きする。
 
-import { LAYOUT, PIPS, LAKE_NUMBERS } from '../rules/board.js';
+import { LAYOUT, PIPS, LAKE_NUMBERS, boardVertexIds } from '../rules/board.js';
 
 export const PLAYER_COLORS = ['#e04848', '#3d7dd8', '#f0973c', '#9d5fd8'];
 export const PLAYER_COLORS_DARK = ['#9c2626', '#22508f', '#b3651a', '#6a3a99'];
@@ -39,9 +39,12 @@ function localRng(seed) {
 
 // ---- ビュー変換 ----
 
-export function computeView(width, height) {
+// 盤に実際にあるヘックスだけに合わせて拡大率と原点を決める。
+// レイアウトは航海者たち用に広めに作ってあるので、盤の頂点だけを見ること。
+export function computeView(width, height, board) {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const v of Object.values(LAYOUT.vertices)) {
+  for (const vid of boardVertexIds(board)) {
+    const v = LAYOUT.vertices[vid];
     minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
     minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
   }
@@ -329,11 +332,11 @@ function drawSea(ctx, width, height, view) {
   }
 }
 
-function drawIslandBase(ctx, view) {
-  // 砂浜(全ヘックスを拡大して下敷きに)
+function drawIslandBase(ctx, view, board) {
+  // 砂浜(盤のヘックスを拡大して下敷きに)
   for (const [color, scale] of [['rgba(0,0,0,0.28)', 1.13], ['#e8d5a0', 1.1], ['#d9bf82', 1.045]]) {
     ctx.fillStyle = color;
-    for (const hid of LAYOUT.hexIds) {
+    for (const hid of board.hexIds) {
       hexPath(ctx, view, hid, scale);
       ctx.fill();
     }
@@ -534,14 +537,14 @@ function getStaticLayer(state, width, height, dpr) {
   off.height = Math.round(height * dpr);
   const ctx = off.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const view = computeView(width, height);
+  const view = computeView(width, height, state.board);
 
   drawSea(ctx, width, height, view);
-  drawIslandBase(ctx, view);
-  for (const hid of LAYOUT.hexIds) {
+  drawIslandBase(ctx, view, state.board);
+  for (const hid of state.board.hexIds) {
     drawHexTile(ctx, view, hid, state.board.hexes[hid].terrain);
   }
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of state.board.hexIds) {
     drawTerrainDecor(ctx, view, hid, state.board.hexes[hid].terrain);
     const hex = state.board.hexes[hid];
     if (hex.token) drawToken(ctx, view, hid, hex.token);
@@ -952,7 +955,7 @@ function drawHighlights(ctx, view, highlights, selected, time) {
 // メイン描画。time はパルスアニメーション用(ms)。
 export function drawBoard(ctx, width, height, state, ui, time = 0) {
   const dpr = window.devicePixelRatio || 1;
-  const view = computeView(width, height);
+  const view = computeView(width, height, state.board);
 
   const staticLayer = getStaticLayer(state, width, height, dpr);
   ctx.drawImage(staticLayer, 0, 0, width, height);

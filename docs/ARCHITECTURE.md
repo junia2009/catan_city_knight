@@ -17,6 +17,27 @@
 4. **ビルド工程なし**
    ES Modules を直接ブラウザで読む。Three.js は `vendor/` にベンダリングし importmap で解決。
 
+## 盤面の形(`src/rules/board.js`)
+
+盤の**幾何**と、**どのヘックスを実際に使うか**を分けている。
+
+- `LAYOUT` … ヘックス・頂点・辺の隣接表。モジュール定数として一度だけ構築する。
+  幾何しか持たないので、使いうる最大半径(`MAX_BOARD_RADIUS = 3`、37ヘックス)まで作っておく。
+- `board.hexIds` … その対戦で実際に使うヘックスのID列。基本の盤は半径2の19ヘックス。
+  **盤の形を変えられるのはここだけ**で、モードごとに違う形の盤を作れる。
+- 頂点・辺・海岸辺は `board.hexIds` から導出する(`boardVertexIds` / `boardEdgeIds` /
+  `coastalEdgesOf`)。導出結果はヘックスID列をキーにメモ化してあり、**state には持たせない**
+  ── オンライン対戦は毎手番 state を配るので、頂点IDの配列を積むと通信量が跳ね上がるため。
+
+`LAYOUT` の並び順は「基本の盤 → その外側」。こうすると頂点IDや辺IDの列が
+基本の盤のものと**完全に前方一致**するので、盤を広げても既存モードの同点処理
+(先に見つけたものを採る)が一切変わらない。`test/board-regression.test.js` が
+モード×シードごとに盤面と対戦の全展開をハッシュで固定しており、
+ここを触って既存モードの挙動が変わったら落ちる。
+
+`LAYOUT.vertexHexes` / `LAYOUT.hexNeighbors` には盤外のヘックスも入るので、
+盤の中身を引くときは `vertexHexesOf(board, vid)` / `hexNeighborsOf(board, hid)` を使う。
+
 ## アクションパイプライン
 
 全ての状態変更は 1 本道:
@@ -70,7 +91,8 @@ dispatch(state, action)
   phase,                   // 'setup' | 'main' | 'ended'
   turn, currentPlayer,
   awaiting,                // 上記の割り込み(null = 通常フロー)
-  board,                   // hexes(terrain/token)・robber・ports・fisheries/lake(漁師たち)
+  board,                   // hexIds・hexes(terrain/token)・robber・ports
+                           //  + fisheries/lake(漁師たち)
   buildings, roads,        // vertexId/edgeId -> { player, ... }
   players: [{ resources, devCards, commodities, improvements,
               progressCards, progressVP, defenderPoints, treasures, fish, ... }],
@@ -97,7 +119,7 @@ src/
 ├── rng.js        # makeRng / rngNext / rngInt / shuffled(mulberry32)
 ├── input.js      # ポインタ入力の正規化
 ├── rules/
-│   ├── board.js      # 盤面生成・LAYOUT(hex/vertex/edge の隣接表)・PIPS
+│   ├── board.js      # LAYOUT(hex/vertex/edge の隣接表)・盤の形の導出・盤面生成・PIPS
 │   ├── build.js      # 建設コスト・配置判定・手札上限
 │   ├── dice.js       # 資源分配(distributeForRoll)
 │   ├── robber.js     # 略奪対象・ランダムスチール
@@ -180,7 +202,7 @@ CPU 側も同じ思想で `progress-ai.js` の `SCORERS[id]` に「今使うと�
 
 - **staticGroup**: 地形・海・装飾。キー `${seed}:${mode}:${board.version ?? 0}` で再構築。
 - **dynamicGroup**: 建物・騎士・塔など。state のキー列を diff して増減分だけ生成/破棄。
-- **海**: カスタム ShaderMaterial。19ヘックス中心への最短距離で深度グラデーション、
+- **海**: カスタム ShaderMaterial。盤のヘックス中心への最短距離で深度グラデーション、
   value ノイズの波・岸辺の泡・雲影・頂点うねり。影は同一ジオメトリの
   ShadowMaterial(`seaShadowMat`)を重ねて受ける。
 - **空**: BackSide の球に地平線→天頂グラデーション+太陽グロー+ハッシュ星空。
@@ -314,7 +336,9 @@ main.js ── 通常の refresh・dispatch・演出がそのまま動く
 
 | 層 | 手段 |
 |---|---|
-| ルール単体 | `node --test test/`(85+ テスト)。validate の拒否理由・apply の結果・保存則 |
+| ルール単体 | `node --test test/`(145+ テスト)。validate の拒否理由・apply の結果・保存則 |
+| 回帰 | `test/board-regression.test.js`。モード×シードごとに盤面と対戦の全展開をハッシュで固定。
+盤面まわり(LAYOUT・生成・合法手の列挙順)を触って既存モードが変わったら落ちる |
 | 統計 | `test/rng.test.js` + `scripts/dice-audit.mjs`(χ² バッテリー。対の検定は**非重複**ペアで) |
 | 結合 | セルフプレイ: CPU のみで数百ゲーム完走・無限ループ検出・資源/商品の保存則・勝者の点数検証 |
 | オンライン | `test/room.test.js` で部屋のロジック(席・ホスト・伏せ処理・肩代わり・復元)を検証。

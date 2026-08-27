@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createGame, RESOURCES } from '../src/state.js';
 import { dispatch, validateAction } from '../src/actions.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
-import { LAYOUT, LAKE_NUMBERS, FISHERY_NUMBERS } from '../src/rules/board.js';
+import { LAYOUT, LAKE_NUMBERS, FISHERY_NUMBERS, coastalEdgesOf } from '../src/rules/board.js';
 import { computePoints, pointsToWin } from '../src/rules/victory.js';
 import {
   FISH_POOL, FISH_USES, drawFish, fishCount, fishGainForRoll, hasOldShoe, payFish, shoeTargets,
@@ -33,11 +33,11 @@ function readyTurn(state, pid = 0) {
 
 test('fish: 砂漠が湖に置き換わり、漁場が6か所できる', () => {
   const s = newFish();
-  const lakes = LAYOUT.hexIds.filter((h) => s.board.hexes[h].terrain === 'lake');
+  const lakes = s.board.hexIds.filter((h) => s.board.hexes[h].terrain === 'lake');
   assert.equal(lakes.length, 1);
   assert.equal(s.board.lake, lakes[0]);
   assert.equal(s.board.robber, s.board.lake); // 盗賊の初期位置は湖のまま
-  assert.equal(LAYOUT.hexIds.filter((h) => s.board.hexes[h].terrain === 'desert').length, 0);
+  assert.equal(s.board.hexIds.filter((h) => s.board.hexes[h].terrain === 'desert').length, 0);
 
   assert.equal(s.board.fisheries.length, FISHERY_NUMBERS.length);
   assert.deepEqual(
@@ -47,7 +47,7 @@ test('fish: 砂漠が湖に置き換わり、漁場が6か所できる', () => {
   // 漁場は港と重ならない海岸辺
   const portEdges = new Set(s.board.ports.map((p) => p.edgeId));
   for (const f of s.board.fisheries) {
-    assert.ok(LAYOUT.coastalEdges.includes(f.edgeId), '漁場が海岸辺にない');
+    assert.ok(coastalEdgesOf(s.board).includes(f.edgeId), '漁場が海岸辺にない');
     assert.ok(!portEdges.has(f.edgeId), '漁場が港と重なっている');
   }
 });
@@ -57,7 +57,7 @@ test('fish: 基本モードでは湖も漁場も魚の山もできない', () =>
   assert.equal(s.board.lake, undefined);
   assert.equal(s.board.fisheries, undefined);
   assert.equal(s.bank.fishPool, null);
-  assert.equal(LAYOUT.hexIds.filter((h) => s.board.hexes[h].terrain === 'lake').length, 0);
+  assert.equal(s.board.hexIds.filter((h) => s.board.hexes[h].terrain === 'lake').length, 0);
 });
 
 test('fish: 魚トークンの山は30枚で古い靴は1枚だけ', () => {
@@ -73,7 +73,7 @@ test('fish: 開拓地は1枚・都市は2枚、盗賊が湖にいると産まな
   const [v1, v2] = LAYOUT.hexVertices[lake];
   s.buildings[v1] = { player: 0, type: 'settlement' };
   s.buildings[v2] = { player: 1, type: 'city' };
-  s.board.robber = LAYOUT.hexIds.find((h) => h !== lake);
+  s.board.robber = s.board.hexIds.find((h) => h !== lake);
 
   const gains = fishGainForRoll(s, LAKE_NUMBERS[0]);
   assert.equal(gains[0], 1);
@@ -101,7 +101,7 @@ test('fish: ロールで魚が配られる', () => {
   let s = finishSetup(newFish());
   const lake = s.board.lake;
   s = structuredClone(s);
-  s.board.robber = LAYOUT.hexIds.find((h) => h !== lake);
+  s.board.robber = s.board.hexIds.find((h) => h !== lake);
   s.currentPlayer = 0;
   s.awaiting = null;
   s.turnFlags = { rolled: false, playedDev: false };
@@ -138,7 +138,7 @@ test('fish: fishCount は古い靴を0匹として数える', () => {
 
 test('fish: 2匹で盗賊を湖へ戻す', () => {
   let s = readyTurn(finishSetup(newFish()));
-  s.board.robber = LAYOUT.hexIds.find((h) => h !== s.board.lake);
+  s.board.robber = s.board.hexIds.find((h) => h !== s.board.lake);
   s.players[0].fish = [2, 2];
   s = dispatch(s, { type: 'SPEND_FISH', player: 0, use: 'robber' });
   assert.equal(s.board.robber, s.board.lake);
@@ -153,7 +153,7 @@ test('fish: 2匹で盗賊を湖へ戻す', () => {
 test('fish: 盗賊を戻すのはロール前でも使える(他の使い道は不可)', () => {
   const s = readyTurn(finishSetup(newFish()));
   s.turnFlags.rolled = false;
-  s.board.robber = LAYOUT.hexIds.find((h) => h !== s.board.lake);
+  s.board.robber = s.board.hexIds.find((h) => h !== s.board.lake);
   s.players[0].fish = [3, 3, 3];
   assert.equal(validateAction(s, { type: 'SPEND_FISH', player: 0, use: 'robber' }), null);
   assert.match(
@@ -290,7 +290,7 @@ test('fish: 古い靴は同時に1枚しか場に出ない', () => {
   s.players[1].fish = ['shoe'];
   // 山札の一番上を靴にしても、すでに誰かが持っていれば引かれない
   s.bank.fishPool = ['shoe', 1, 2];
-  s.board.robber = LAYOUT.hexIds.find((h) => h !== s.board.lake);
+  s.board.robber = s.board.hexIds.find((h) => h !== s.board.lake);
   s.currentPlayer = 0;
   s.awaiting = null;
   s.turnFlags = { rolled: false, playedDev: false };

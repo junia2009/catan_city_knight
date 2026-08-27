@@ -6,7 +6,7 @@
 //   3. postHooks(最長交易路・最大騎士力・勝利判定)
 // CPU も人間も UI も同じアクションを発行する。
 
-import { LAYOUT, TERRAIN_RESOURCE } from './rules/board.js';
+import { LAYOUT, TERRAIN_RESOURCE, vertexHexesOf } from './rules/board.js';
 import {
   COSTS,
   WALL_COST,
@@ -537,7 +537,7 @@ function applyAction(state, action) {
 
       if (round === 2) {
         // 2軒目の開拓地から初期資源
-        for (const hid of LAYOUT.vertexHexes[action.vertexId]) {
+        for (const hid of vertexHexesOf(state.board, action.vertexId)) {
           const res = TERRAIN_RESOURCE[state.board.hexes[hid].terrain];
           if (res) grantResource(state, pid, res, 1);
         }

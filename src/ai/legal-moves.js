@@ -1,17 +1,17 @@
 // 合法手列挙(設計書 §7.1)
 // validate 系の再利用だけで書く。UI のハイライトにも使う。
 
-import { LAYOUT } from '../rules/board.js';
+import { LAYOUT, boardVertexIds, boardEdgeIds } from '../rules/board.js';
 import { canPlaceCity, canPlaceRoad, canPlaceSettlement } from '../rules/build.js';
 
 export function legalSettlementVertices(state, pid, opts = {}) {
-  return Object.keys(LAYOUT.vertices).filter(
+  return boardVertexIds(state.board).filter(
     (vid) => canPlaceSettlement(state, pid, vid, opts) === null,
   );
 }
 
 export function legalRoadEdges(state, pid, opts = {}) {
-  return Object.keys(LAYOUT.edges).filter(
+  return boardEdgeIds(state.board).filter(
     (eid) => canPlaceRoad(state, pid, eid, opts) === null,
   );
 }
@@ -23,7 +23,7 @@ export function legalCityVertices(state, pid) {
 }
 
 export function legalRobberHexes(state) {
-  return LAYOUT.hexIds.filter((hid) => hid !== state.board.robber);
+  return state.board.hexIds.filter((hid) => hid !== state.board.robber);
 }
 
 // 初期配置で選んだ開拓地に接続できる空き辺

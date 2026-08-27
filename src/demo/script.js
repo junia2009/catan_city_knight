@@ -11,7 +11,7 @@
 // 盤面依存の場所(どの辺・どの頂点)は毎回 state から選び直す。
 // 座標を台本に焼き込まないので、盤面生成が変わっても壊れない。
 
-import { LAYOUT, TERRAIN_RESOURCE } from '../rules/board.js';
+import { LAYOUT, TERRAIN_RESOURCE, vertexHexesOf } from '../rules/board.js';
 import { validateAction } from '../actions.js';
 import { canPlaceSettlement, piecesLeft, totalCards } from '../rules/build.js';
 import { tradeRate } from '../rules/trade.js';
@@ -102,13 +102,13 @@ function newResourcesAt(state, vid) {
   const mine = new Set();
   for (const [v, b] of Object.entries(state.buildings)) {
     if (b.player !== P) continue;
-    for (const hid of LAYOUT.vertexHexes[v] ?? []) {
+    for (const hid of vertexHexesOf(state.board, v)) {
       const res = TERRAIN_RESOURCE[state.board.hexes[hid].terrain];
       if (res) mine.add(res);
     }
   }
   const gained = new Set();
-  for (const hid of LAYOUT.vertexHexes[vid] ?? []) {
+  for (const hid of vertexHexesOf(state.board, vid)) {
     const res = TERRAIN_RESOURCE[state.board.hexes[hid].terrain];
     if (res && !mine.has(res)) gained.add(res);
   }

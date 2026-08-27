@@ -3,7 +3,7 @@
 // awaiting への応答は即時に決定できる。返す前に必ず validate を通す。
 
 import { validateAction } from '../actions.js';
-import { LAYOUT } from '../rules/board.js';
+import { LAYOUT, boardVertexIds } from '../rules/board.js';
 import {
   COSTS, WALL_COST, canAfford, countPieces, PIECE_LIMITS, totalResources, totalCards,
 } from '../rules/build.js';
@@ -408,7 +408,7 @@ function tryDefense(state, pid) {
   // 2. 騎士の建設(都市を持ったら早めに1体は構える)
   const myKnights = Object.values(state.knights).filter((k) => k.player === pid).length;
   if (myKnights < Math.min(cities, 2) && canAfford(state.players[pid], KNIGHT_COSTS.build)) {
-    const spots = Object.keys(LAYOUT.vertices).filter(
+    const spots = boardVertexIds(state.board).filter(
       (v) => canPlaceKnight(state, pid, v) === null,
     );
     const vid = best(spots, (v) => vertexValue(state, pid, v) * 0.1 + 1);

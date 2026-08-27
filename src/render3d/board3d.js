@@ -7,7 +7,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { LAYOUT, PIPS, LAKE_NUMBERS } from '../rules/board.js';
+import { LAYOUT, PIPS, LAKE_NUMBERS, boardVertexIds, boardEdgeIds } from '../rules/board.js';
 import { RES_JP_SHORT } from '../state.js';
 import { BARBARIAN_TRACK_LENGTH as BARB_TRACK } from '../rules/cak/barbarians.js';
 
@@ -2043,7 +2043,7 @@ export class Board3D {
     this._disposeBreath();
 
     // 海(シェーダー): 深さのグラデーション・波・岸辺の泡
-    const centersXZ = LAYOUT.hexIds.map((hid) => {
+    const centersXZ = state.board.hexIds.map((hid) => {
       const c = hexCenterOf(hid);
       return new THREE.Vector2(c.x, c.y);
     });
@@ -2062,7 +2062,7 @@ export class Board3D {
     this.staticGroup.add(shadowCatcher);
 
     // 砂浜 + タイル + 装飾 + トークン
-    for (const hid of LAYOUT.hexIds) {
+    for (const hid of state.board.hexIds) {
       const c = hexCenterOf(hid);
       const hex = state.board.hexes[hid];
 
@@ -2155,10 +2155,11 @@ export class Board3D {
     }
 
     // ピッキング用: 頂点・辺
-    for (const vid of Object.keys(LAYOUT.vertices)) {
+    for (const vid of boardVertexIds(state.board)) {
       this.pickGroup.add(this._pickerAt('vertex', vid, vpos(vid), 1));
     }
-    for (const [eid, e] of Object.entries(LAYOUT.edges)) {
+    for (const eid of boardEdgeIds(state.board)) {
+      const e = LAYOUT.edges[eid];
       const p = this._pickerAt('edge', eid, new THREE.Vector3(e.x, TILE_TOP, e.y), 0.7);
       this.pickGroup.add(p);
     }

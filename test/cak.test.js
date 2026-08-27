@@ -42,13 +42,13 @@ test('cak: 初期配置は開拓地1 + 都市1、勝利点は13点', () => {
 
 test('cak: 都市は商品の出る地形で資源1+商品1を産出', () => {
   let s = newCak();
-  const hid = LAYOUT.hexIds.find(
+  const hid = s.board.hexIds.find(
     (h) => s.board.hexes[h].terrain === 'forest' && s.board.hexes[h].token,
   );
   assert.ok(hid, '森林ヘックスがある');
   const vid = LAYOUT.hexVertices[hid][0];
   s.buildings[vid] = { player: 0, type: 'city' };
-  s.board.robber = LAYOUT.hexIds.find((h) => h !== hid); // 盗賊をどける
+  s.board.robber = s.board.hexIds.find((h) => h !== hid); // 盗賊をどける
   distributeForRoll(s, s.board.hexes[hid].token);
   assert.equal(s.players[0].resources.wood, 1);
   assert.equal(s.players[0].commodities.paper, 1);
@@ -56,12 +56,12 @@ test('cak: 都市は商品の出る地形で資源1+商品1を産出', () => {
 
 test('cak: 丘陵の都市は資源2(商品なし)', () => {
   let s = newCak();
-  const hid = LAYOUT.hexIds.find(
+  const hid = s.board.hexIds.find(
     (h) => s.board.hexes[h].terrain === 'hill' && s.board.hexes[h].token,
   );
   const vid = LAYOUT.hexVertices[hid][0];
   s.buildings[vid] = { player: 0, type: 'city' };
-  s.board.robber = LAYOUT.hexIds.find((h) => h !== hid);
+  s.board.robber = s.board.hexIds.find((h) => h !== hid);
   distributeForRoll(s, s.board.hexes[hid].token);
   assert.equal(s.players[0].resources.brick, 2);
 });
@@ -142,7 +142,7 @@ test('cak: 水道橋(科学Lv3)は収入0のとき好きな資源を1枚もら�
   s.players[0].improvements.science = 3;
   // player0 が何ももらえない出目を探す(7以外)
   const myTotals = new Set();
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of s.board.hexIds) {
     const t = s.board.hexes[hid].token;
     if (t && LAYOUT.hexVertices[hid].some((v) => s.buildings[v]?.player === 0)) {
       myTotals.add(t);
@@ -170,7 +170,7 @@ test('cak: 水道橋は科学Lv3未満や収入ありでは発動しない', () 
   let s = finishSetup(newCak());
   // 科学Lv3なし → 誰も対象にならない出目でも awaiting は立たない
   const myTotals = new Set();
-  for (const hid of LAYOUT.hexIds) {
+  for (const hid of s.board.hexIds) {
     const t = s.board.hexes[hid].token;
     if (t && LAYOUT.hexVertices[hid].some((v) => s.buildings[v]?.player === 0)) {
       myTotals.add(t);
