@@ -808,6 +808,12 @@ function dialogHtml(state, ui) {
   return '';
 }
 
+// 直前に流し込んだダイアログの HTML。中身が同じなら DOM を作り直さない。
+// 作り直すと開きっぱなしのダイアログでも表示アニメーションが鳴り直してしまい、
+// 「ポップアップが何度も出てくる」ように見える ── 交易の一斉提案や捨て札のように
+// 自分が答える前に他の人の応答で再描画が走る場面で起きる。
+let lastDialogHtml = null;
+
 function renderDialog(state, ui) {
   const root = el('dialog-root');
   let html;
@@ -820,7 +826,10 @@ function renderDialog(state, ui) {
     ui.dialog = null;
     html = '';
   }
-  root.innerHTML = html ? `<div class="overlay"><div class="dialog">${html}</div></div>` : '';
+  const wrapped = html ? `<div class="overlay"><div class="dialog">${html}</div></div>` : '';
+  if (wrapped === lastDialogHtml) return;
+  lastDialogHtml = wrapped;
+  root.innerHTML = wrapped;
 }
 
 export function renderHUD(state, ui) {
