@@ -1,6 +1,7 @@
 // 航海者たち(公式拡張)。基本ルールに海と船を足す。
 //
-// - 盤は半径3(37マス)。本島16マス + 1マスの小島3つ + 海18マス
+// - 盤は半径4(61マス)。本島19マス + 2マスの小島5つ + 海32マス
+//   本島(半径2)と小島(リング4)のあいだにリング3が丸ごと海の「堀」として入る
 // - 船は海に面した辺に建てる。道とは「自分の建物の上でだけ」つながる
 // - 開いた航路の先端にある船は、1手番に1隻だけ動かせる
 // - 海賊は海のヘックスに居座り、隣の辺への船の建設と移動を止める
@@ -18,46 +19,48 @@ export const SHIP_COST = { wood: 1, sheep: 1 };
 export const SHIP_LIMIT = 15;
 export const NEW_ISLAND_VP = 2;
 
-// 本島: 半径2から3つの角を落とした16マス。
-// 角を海にすると、その先(半径3)のマスが本島から切り離されて小島になる。
-// 落とす角は1つおき ── 3方向にだけ島を作り、本島はなるべく広く保つ。
-const SEA_CORNERS = [[2, -2], [-2, 0], [0, 2]];
-// 小島: 落とした角の先にある3マス。それぞれ四方を海に囲まれた1マスの島。
-const ISLAND_COORDS = [[3, -3], [-3, 0], [0, 3]];
+// 小島: リング4(盤のいちばん外側)に2マスずつ5つ。
+// リング3が丸ごと海なので、本島とは自動的に切り離される。
+// 島どうしのあいだにも海を3マスずつ空けてある。
+const ISLAND_COORDS = [
+  [[4, 0], [4, -1]],
+  [[3, -4], [2, -4]],
+  [[-2, -2], [-3, -1]],
+  [[-4, 2], [-4, 3]],
+  [[-1, 4], [0, 4]],
+];
 
-function hexDistance(q, r) {
-  return (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
-}
-
+// 本島: 半径2まるごと(19マス)。基本の盤と同じ形なので、
+// 海岸線も港の置き方も基本モードと同じ感覚になる。
 export function seaMainIslandHexes() {
-  const seaCorners = new Set(SEA_CORNERS.map(([q, r]) => hexKey(q, r)));
-  return hexIdsWithin(BOARD_RADIUS).filter((hid) => {
-    const [q, r] = hid.split(',').map(Number);
-    return hexDistance(q, r) <= BOARD_RADIUS && !seaCorners.has(hid);
-  });
+  return hexIdsWithin(BOARD_RADIUS);
 }
 
 export function seaIslandHexes() {
-  return ISLAND_COORDS.map(([q, r]) => hexKey(q, r));
+  return ISLAND_COORDS.flat().map(([q, r]) => hexKey(q, r));
 }
 
-// 本島の地形15+砂漠1。小島は金鉱を含む3マス。
+// 本島19マスは基本の盤と同じ地形分布。小島10マスには金鉱2つを混ぜる。
 const MAIN_TERRAINS = [
-  ...Array(3).fill('forest'),
-  ...Array(3).fill('pasture'),
-  ...Array(3).fill('field'),
+  ...Array(4).fill('forest'),
+  ...Array(4).fill('pasture'),
+  ...Array(4).fill('field'),
   ...Array(3).fill('hill'),
   ...Array(3).fill('mountain'),
   'desert',
 ];
-const ISLAND_TERRAINS = ['gold', 'mountain', 'pasture'];
+const ISLAND_TERRAINS = [
+  'gold', 'gold',
+  'forest', 'forest', 'pasture', 'pasture', 'field', 'field', 'hill', 'mountain',
+];
 
-// 数字は標準の18枚を分ける。小島は「渡る価値」が要るので強い目を割り当てる。
-const ISLAND_TOKENS = [5, 6, 8];
-const MAIN_TOKENS = [2, 3, 3, 4, 4, 5, 6, 8, 9, 9, 10, 10, 11, 11, 12];
+// 数字は28枚(産出する陸の数)。標準の分布を保ったまま増やしてある。
+// 小島は「渡る価値」が要るので、強い目を厚めに割り当てる。
+const ISLAND_TOKENS = [4, 5, 5, 6, 8, 9, 9, 10, 10, 11];
+const MAIN_TOKENS = [2, 2, 3, 3, 3, 4, 4, 5, 6, 6, 8, 8, 9, 10, 11, 11, 12, 12];
 
-// 港: 本島の海岸線に等間隔で置く
-const SEA_PORT_POOL = ['3:1', '3:1', '3:1', 'wood', 'brick', 'sheep', 'wheat', 'ore'];
+// 港: 本島の海岸線に等間隔で置く。本島は基本の盤と同じ形なので構成も同じ9つ。
+const SEA_PORT_POOL = ['3:1', '3:1', '3:1', '3:1', 'wood', 'brick', 'sheep', 'wheat', 'ore'];
 
 export function isSeaHex(board, hid) {
   return board.hexes[hid]?.terrain === 'sea';
@@ -192,7 +195,8 @@ export function generateSeaBoard(rng) {
 
   // 盗賊は本島の砂漠、海賊は本島から離れた海(北の外洋)から始める
   board.robber = mainIsland.find((hid) => hexes[hid].terrain === 'desert');
-  board.pirate = hexIds.find((hid) => hexes[hid].terrain === 'sea' && hexes[hid].r === -3)
+  // 海賊は本島から離れた外洋(盤の北の縁)から始める
+  board.pirate = hexIds.find((hid) => hexes[hid].terrain === 'sea' && hexes[hid].r === -4)
     ?? hexIds.find((hid) => hexes[hid].terrain === 'sea');
   return [rng, board];
 }

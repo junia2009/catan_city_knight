@@ -14,11 +14,12 @@ test('基本の盤: 19ヘックス・54頂点・72辺・海岸辺30本', () => {
   assert.equal(coastalEdgesOf(board).length, 30);
 });
 
-test('レイアウト: 航海者たち用に半径3(37ヘックス)まで用意されている', () => {
+test('レイアウト: 航海者たち用に半径4(61ヘックス)まで用意されている', () => {
   assert.equal(LAYOUT.maxRadius, MAX_BOARD_RADIUS);
-  assert.equal(LAYOUT.hexIds.length, 37);
+  assert.equal(LAYOUT.hexIds.length, 61);
   assert.equal(hexIdsWithin(2).length, 19);
   assert.equal(hexIdsWithin(3).length, 37);
+  assert.equal(hexIdsWithin(4).length, 61);
 });
 
 // 盤を広げても既存モードの同点処理が変わらないための不変条件。
@@ -77,7 +78,7 @@ test('頂点は最大3ヘックスに共有される', () => {
     (s, vid) => s + LAYOUT.vertexHexes[vid].filter((h) => onBoard.has(h)).length, 0,
   );
   assert.equal(total, 19 * 6);
-  assert.equal(LAYOUT.hexIds.length * 6, 37 * 6);
+  assert.equal(LAYOUT.hexIds.length * 6, 61 * 6);
 });
 
 test('盤面生成: 地形・トークン分布が標準どおり', () => {

@@ -26,6 +26,13 @@ function finishSetup(state) {
   return state;
 }
 
+// 合計 total になる正しいサイコロの目(どちらも1〜6)。
+// 錬金術師と同じ経路で出目を仕込むので、ありえない目を入れないようにする。
+function dicePair(total) {
+  const a = Math.max(1, total - 6);
+  return [a, total - a];
+}
+
 function readyTurn(state, pid = 0) {
   const s = structuredClone(state);
   s.currentPlayer = pid;
@@ -45,34 +52,34 @@ function blank(state, pid = 0) {
   return s;
 }
 
-test('sea: 盤は37ヘックス、本島16・小島3つ・海18', () => {
+test('sea: 盤は61ヘックス、本島19・2マスの小島5つ・海32', () => {
   const s = newSea();
-  assert.equal(s.board.hexIds.length, 37);
+  assert.equal(s.board.hexIds.length, 61);
 
   const counts = {};
   for (const hid of s.board.hexIds) {
     const t = s.board.hexes[hid].terrain;
     counts[t] = (counts[t] ?? 0) + 1;
   }
-  assert.equal(counts.sea, 18);
-  assert.equal(counts.gold, 1);
+  assert.equal(counts.sea, 32);
+  assert.equal(counts.gold, 2);
   assert.equal(counts.desert, 1);
 
-  // 島の連結成分: 本島(16マス)+ 1マスの島が3つ
+  // 島の連結成分: 本島(19マス)+ 2マスの島が5つ
   const sizes = {};
   for (const id of Object.values(s.board.islandOf)) sizes[id] = (sizes[id] ?? 0) + 1;
-  assert.equal(sizes[0], 16, '本島は16マス');
-  assert.deepEqual(Object.values(sizes).sort((a, b) => b - a), [16, 1, 1, 1]);
+  assert.equal(sizes[0], 19, '本島は19マス');
+  assert.deepEqual(Object.values(sizes).sort((a, b) => b - a), [19, 2, 2, 2, 2, 2]);
 
-  assert.deepEqual(seaMainIslandHexes().length, 16);
-  assert.deepEqual(seaIslandHexes().length, 3);
+  assert.equal(seaMainIslandHexes().length, 19);
+  assert.equal(seaIslandHexes().length, 10);
 });
 
-test('sea: 数字トークンは18枚、6と8は隣接しない', () => {
+test('sea: 数字トークンは28枚、6と8は隣接しない', () => {
   for (let seed = 1; seed <= 20; seed++) {
     const s = newSea(seed);
     const tokens = s.board.hexIds.map((h) => s.board.hexes[h].token).filter(Boolean);
-    assert.equal(tokens.length, 18, `seed=${seed}`);
+    assert.equal(tokens.length, 28, `seed=${seed}`);
     for (const hid of s.board.hexIds) {
       const t = s.board.hexes[hid].token;
       if (t !== 6 && t !== 8) continue;
@@ -84,16 +91,27 @@ test('sea: 数字トークンは18枚、6と8は隣接しない', () => {
   }
 });
 
-test('sea: 小島は海に囲まれていて本島とつながっていない', () => {
+test('sea: 小島は海で隔てられ、本島とも他の島ともつながっていない', () => {
   const s = newSea();
+  const islandSet = new Set(seaIslandHexes());
   for (const hid of seaIslandHexes()) {
     assert.ok(isLandHex(s.board, hid), `${hid} は陸`);
     assert.notEqual(s.board.islandOf[hid], 0, `${hid} は本島ではない`);
     for (const nb of LAYOUT.hexNeighbors[hid]) {
       if (!s.board.hexes[nb]) continue;
-      assert.ok(isSeaHex(s.board, nb), `${hid} の隣 ${nb} は海であるべき`);
+      // 隣は海か、同じ島のもう1マスだけ
+      if (isSeaHex(s.board, nb)) continue;
+      assert.ok(islandSet.has(nb), `${hid} の隣 ${nb} は海か小島`);
+      assert.equal(s.board.islandOf[nb], s.board.islandOf[hid], '別の島と地続きになっている');
     }
   }
+  // 島はそれぞれ2マス
+  const sizes = {};
+  for (const hid of seaIslandHexes()) {
+    const id = s.board.islandOf[hid];
+    sizes[id] = (sizes[id] ?? 0) + 1;
+  }
+  assert.deepEqual(Object.values(sizes), [2, 2, 2, 2, 2]);
 });
 
 test('sea: 港は本島の海岸線にあり、重複しない', () => {
@@ -312,7 +330,7 @@ test('sea: ロールで金鉱の割り込みが立ち、PICK_GOLD で資源を�
   s.buildings[LAYOUT.hexVertices[gold][0]] = { player: 0, type: 'settlement' };
   s.board.robber = s.board.hexIds.find((h) => h !== gold && isLandHex(s.board, h));
   s.turnFlags = { rolled: false, playedDev: false };
-  s.turnFlags.alchemist = [total - 1, 1];
+  s.turnFlags.alchemist = dicePair(total);
 
   s = dispatch(s, { type: 'ROLL_DICE', player: 0 });
   assert.equal(s.awaiting?.type, 'goldChoice');

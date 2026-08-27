@@ -10,8 +10,8 @@
 import { shuffled } from '../rng.js';
 
 export const BOARD_RADIUS = 2;
-// レイアウトを作る最大半径。航海者たちが半径3(37マス)まで使う。
-export const MAX_BOARD_RADIUS = 3;
+// レイアウトを作る最大半径。航海者たちが半径4(61マス)まで使う。
+export const MAX_BOARD_RADIUS = 4;
 
 // pointy-top の6方向 (E, NE, NW, W, SW, SE)
 export const DIRS = [
