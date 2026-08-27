@@ -9,6 +9,7 @@ import {
 } from '../rules/build.js';
 import { stealableTargets } from '../rules/robber.js';
 import { tradeRate } from '../rules/trade.js';
+import { computePoints } from '../rules/victory.js';
 import { RESOURCES } from '../state.js';
 import { KNIGHT_COSTS, canPlaceKnight } from '../rules/cak/knights.js';
 import { TOWER_COST } from '../rules/dragon.js';
@@ -191,10 +192,14 @@ export function cpuAcceptsTrade(state, pid, incoming, outgoing) {
   return inValue >= outValue + margin + Math.max(0, countDiff) * 0.3;
 }
 
-// CPU が他の CPU に 1:1 交易を持ちかける(不足資源 ⇄ 余剰資源)
+// CPU が全員に 1:1 交易を持ちかける(不足資源 ⇄ 余剰資源)。
+// 誰が持っているかは見ずに提案し、応じた人の中から後で選ぶ。
+// 人間から見て提案が連打にならないよう、CPU は1手番に1回だけ持ちかける。
 function tryTradeWithPlayers(state, pid, goal) {
   if (!goal) return null;
   const p = state.players[pid];
+  if ((state.turnFlags.offers ?? 0) > 0) return null; // この手番はもう提案した
+  if ((p.offerCooldown ?? 0) > state.turn) return null; // 直前の提案が全員に断られた
   const missing = missingFor(p, goal.cost);
   const missingRes = Object.keys(missing);
   if (!missingRes.length) return null;
@@ -202,40 +207,33 @@ function tryTradeWithPlayers(state, pid, goal) {
   const surpluses = RESOURCES.filter(
     (r) => p.resources[r] - (goal.cost[r] ?? 0) >= 2 && !missing[r],
   );
-  // CPU同士は即時成立、人間には提案(応答待ち割り込み)を送る
-  const rest = state.players.filter((o) => o.id !== pid);
-  const cpus = rest.filter((o) => o.isCPU); // まずCPUと当たる(即時成立で手番が滞らない)
-  const humans = rest.filter((o) => !o.isCPU);
-  // 人間が複数いるとき、席順のままだと常に若い席にだけ提案が行ってしまう。
-  // 手番と提案者で回転させて、決定的なまま提案先が一巡するようにする。
-  if (humans.length > 1) {
-    const k = (state.turn + pid) % humans.length;
-    humans.push(...humans.splice(0, k));
-  }
-  const others = [...cpus, ...humans];
+  // 誰が何を持っているかは見ない(人間の手札を覗かないため)。
+  // 空振りは1手番1回の制限とクールダウンで抑える。
   for (const want of missingRes) {
     for (const give of surpluses) {
-      for (const other of others) {
-        if (cardCountOf(other, want) < 1) continue;
-        if (other.isCPU) {
-          if (!cpuAcceptsTrade(state, other.id, { [give]: 1 }, { [want]: 1 })) continue;
-          const action = {
-            type: 'TRADE_PLAYERS', player: pid, partner: other.id,
-            give: { [give]: 1 }, receive: { [want]: 1 },
-          };
-          if (valid(state, action)) return action;
-        } else {
-          if ((p.offerCooldown?.[other.id] ?? 0) > state.turn) continue; // この相手に直近で断られた
-          const action = {
-            type: 'OFFER_TRADE', player: pid, partner: other.id,
-            give: { [give]: 1 }, receive: { [want]: 1 },
-          };
-          if (valid(state, action)) return action;
-        }
-      }
+      const action = {
+        type: 'OFFER_TRADE', player: pid,
+        give: { [give]: 1 }, receive: { [want]: 1 },
+      };
+      if (valid(state, action)) return action;
     }
   }
   return null;
+}
+
+// 複数が応じたときに、CPU がどの相手と成立させるか。
+// 内容は全員同じなので、盤面で最も遅れている(勝利点が低い)相手を選び、
+// 同点なら手札の少ない相手 → 席順で決定的に決める。
+function pickTradePartner(state, pid, accepted) {
+  return [...accepted].sort((a, b) => {
+    const pa = computePoints(state, a, { includeHidden: true });
+    const pb = computePoints(state, b, { includeHidden: true });
+    if (pa !== pb) return pa - pb;
+    const ca = totalCards(state.players[a]);
+    const cb = totalCards(state.players[b]);
+    if (ca !== cb) return ca - cb;
+    return a - b;
+  })[0];
 }
 
 // ---- 基本カタン: 発展カード ----
@@ -419,6 +417,13 @@ export function chooseAction(state, pid) {
       return (
         valid(state, { type: 'RESPOND_TRADE', player: pid, accept }) ??
         { type: 'RESPOND_TRADE', player: pid, accept: false }
+      );
+    }
+    if (aw.type === 'tradeChoose') {
+      const partner = pickTradePartner(state, pid, aw.context.accepted);
+      return (
+        valid(state, { type: 'CHOOSE_TRADE', player: pid, partner }) ??
+        { type: 'CHOOSE_TRADE', player: pid, partner: null }
       );
     }
     return null;

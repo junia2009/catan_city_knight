@@ -36,7 +36,7 @@ dispatch(state, action)
 | 分類 | アクション |
 |---|---|
 | 共通 | `PLACE_INITIAL` `ROLL_DICE` `DISCARD` `MOVE_ROBBER` `BUILD_ROAD` `BUILD_SETTLEMENT` `BUILD_CITY` `TRADE_BANK` `END_TURN` |
-| 交易 | `TRADE_PLAYERS`(CPU↔CPU 即時) `OFFER_TRADE`(人間へ提案) `RESPOND_TRADE` |
+| 交易 | `OFFER_TRADE`(全員へ一斉提案) `RESPOND_TRADE` `CHOOSE_TRADE`(応じた中から相手を決める) |
 | 基本のみ | `BUY_DEV_CARD` `PLAY_DEV_CARD` |
 | 都市と騎士 | `BUILD_KNIGHT` `ACTIVATE_KNIGHT` `PROMOTE_KNIGHT` `MOVE_KNIGHT` `CHASE_ROBBER` `BUILD_WALL` `BUY_IMPROVEMENT` `PLAY_PROGRESS_CARD` `RAZE_CITY` `PICK_AQUEDUCT` |
 | ドラゴンの島 | `BUILD_TOWER` |
@@ -52,7 +52,8 @@ dispatch(state, action)
 | `discard` | 7ロール / 破壊工作員(`context.cause` で区別) | `DISCARD` |
 | `moveRobber` | 7ロール / 騎士追い払い | `MOVE_ROBBER` |
 | `barbarianDefense` | 蛮族侵攻で敗北した都市所有者 | `RAZE_CITY` |
-| `tradeOffer` | CPU→人間の交易提案 | `RESPOND_TRADE` |
+| `tradeOffer` | 交易の一斉提案(提案者以外の全員が待ち) | `RESPOND_TRADE` |
+| `tradeChoose` | 一斉提案に2人以上が応じた(提案者が待ち) | `CHOOSE_TRADE` |
 | `aqueduct` | 水道橋(科学Lv3)所持者が無産出の出目 | `PICK_AQUEDUCT` |
 
 複数プレイヤー待ち(捨て札など)は `players` 配列から解決済みを取り除き、
@@ -76,7 +77,7 @@ dispatch(state, action)
   dice, eventDie,          // eventDie は cak のみ('ship' | 各進歩デッキ)
   diceMode, diceDeck,      // 'random'(毎回独立。既定) | 'balanced'(36通りの山札から引く)
   diceCounts,              // 出目(2〜12)が何回出たか。📊の棒グラフに使う
-  turnFlags,               // rolled / playedDev / fleet / offeredTo / alchemist ...
+  turnFlags,               // rolled / playedDev / fleet / offers / alchemist ...
   longestRoad, largestArmy,
   knights, walls, merchant, barbarians, metropolis,   // 都市と騎士
   dragon, towers, burned,                             // ドラゴンの島
@@ -157,8 +158,9 @@ CPU 側も同じ思想で `progress-ai.js` の `SCORERS[id]` に「今使うと�
   振幅 0(強い)/ 0.9(普通)/ 3.0(弱い)で加算する。state の rng を消費しないため
   難易度が変わってもゲームの乱数列は同一。
   交易の応諾マージンとカード使用閾値も難易度で変わる。
-- プレイヤー間交易: CPU↔CPU は `TRADE_PLAYERS` で即時成立。人間へは `OFFER_TRADE`
-  (1手番1回、断られると4手番のクールダウン)。
+- プレイヤー間交易: 誰であれ `OFFER_TRADE` で**全員に一斉提案**し、返事が揃ってから相手を決める。
+  CPU は誰が何を持っているかを見ずに提案し(人間の手札を覗かないため)、
+  空振りは「1手番1回・1巡あけ(全員に断られたら2巡)」の自制で抑える。
 
 ## レンダラー
 

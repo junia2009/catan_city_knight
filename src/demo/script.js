@@ -83,9 +83,10 @@ function pickRobberHex(state) {
   });
 }
 
-// プレイヤー間交易のデモの中身。相手・渡すもの・もらうものを固定して、
-// 字幕と画面のチップが必ず一致するようにする(prep で両者の手札を用意する)。
-const PT = { partner: 1, give: 'wood', giveN: 2, receive: 'ore', receiveN: 1 };
+// プレイヤー間交易のデモの中身。渡すもの・もらうものを固定して、
+// 字幕と画面のチップが必ず一致するようにする(prep で全員の手札を用意する)。
+// 複数が応じる状況を作り、「相手を選ぶ」ところまで見せる。
+const PT = { give: 'wood', giveN: 2, receive: 'ore', receiveN: 1 };
 
 // 銀行と2:1〜4:1で交換できるだけの資源を持たせ、その資源と交換先を決める
 function bankTradePlan(state) {
@@ -351,7 +352,10 @@ const basicBeats = [
     say: '🤝 相手と直接やりとりもできます。もう一度「交易」を開いて、「プレイヤー」タブへ。',
     prep: (s) => {
       ensure(s, P, { [PT.give]: PT.giveN });
-      ensure(s, PT.partner, { [PT.receive]: PT.receiveN });
+      // 全員に持たせて、2人とも応じる(=相手を選ぶ)状況を作る
+      for (const o of s.players) {
+        if (o.id !== P) ensure(s, o.id, { [PT.receive]: PT.receiveN });
+      }
     },
     tap: () => ({ btn: 'trade-open' }),
     ui: () => ({ dialog: { type: 'trade', tab: 'bank', give: null, receive: null, pgive: {}, precv: {} } }),
@@ -376,17 +380,30 @@ const basicBeats = [
     hold: 1100,
   },
   {
-    say: '相手を選んで提案。同じ相手には1手番に1回までですが、別の相手にはあらためて持ちかけられます。',
-    tap: () => ({ sel: `[data-act="pt-offer:${PT.partner}"]` }),
+    say: '「🤝 全員に提案」で、同じ内容を一度に全員へ持ちかけます(1手番3回まで)。',
+    tap: () => ({ sel: '[data-act="pt-offer"]' }),
     action: () => ({
-      type: 'OFFER_TRADE', player: P, partner: PT.partner,
+      type: 'OFFER_TRADE', player: P,
       give: { [PT.give]: PT.giveN }, receive: { [PT.receive]: PT.receiveN },
     }),
-    hold: 1600,
+    hold: 1800,
   },
   {
-    say: '相手の手元には「🤝 交換する / 断る」が出ます。今回は受けてもらえました。',
-    action: () => ({ type: 'RESPOND_TRADE', player: PT.partner, accept: true }),
+    say: '相手それぞれの手元に「🤝 交換する / 断る」が出ます。返事が揃うまで待ちます。',
+    action: (s) => ({ type: 'RESPOND_TRADE', player: s.awaiting.players[0], accept: true }),
+    hold: 1400,
+  },
+  {
+    say: '2人とも応じてくれました。',
+    action: (s) => ({ type: 'RESPOND_TRADE', player: s.awaiting.players[0], accept: true }),
+    hold: 1200,
+  },
+  {
+    say: '複数が応じたときは、どの相手と成立させるかを自分で選べます。',
+    tap: (s) => ({ sel: `[data-act="trade-pick:${s.awaiting.context.accepted[0]}"]` }),
+    action: (s) => ({
+      type: 'CHOOSE_TRADE', player: P, partner: s.awaiting.context.accepted[0],
+    }),
     hold: 1800,
   },
   {

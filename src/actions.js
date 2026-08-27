@@ -97,8 +97,12 @@ const AWAITING_ACTIONS = {
   moveRobber: 'MOVE_ROBBER',
   barbarianDefense: 'RAZE_CITY',
   tradeOffer: 'RESPOND_TRADE',
+  tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
 };
+
+// 交易の一斉提案は1手番にこの回数まで(内容を変えて出し直せる)
+export const MAX_OFFERS_PER_TURN = 3;
 
 // 交易内容の形(種類と枚数)だけを見る。誰の手札も参照しない。
 function validateTradeShape(state, give, receive) {
@@ -229,20 +233,11 @@ export function validateAction(state, action) {
       return null;
     }
 
-    case 'TRADE_PLAYERS': {
-      if (!state.turnFlags.rolled) return '先にダイスを振ってください';
-      const partner = state.players[action.partner];
-      if (!partner || action.partner === pid) return '交易相手が不正です';
-      return validateTradeContents(state, p, partner, action.give, action.receive);
-    }
-
     case 'OFFER_TRADE': {
       if (!state.turnFlags.rolled) return '先にダイスを振ってください';
-      const partner = state.players[action.partner];
-      if (!partner || action.partner === pid) return '交易相手が不正です';
-      // 同じ相手への提案は1手番に1回まで(相手が違えば提案できる)
-      if (state.turnFlags.offeredTo?.[action.partner]) {
-        return 'この相手にはこの手番ですでに提案しました';
+      if (state.players.length < 2) return '交易相手がいません';
+      if ((state.turnFlags.offers ?? 0) >= MAX_OFFERS_PER_TURN) {
+        return `交易の提案はこの手番であと0回です(1手番${MAX_OFFERS_PER_TURN}回まで)`;
       }
       // 相手が持っているかは見ない(持っていなければ相手が断る)
       return validateOfferContents(state, p, action.give, action.receive);
@@ -259,6 +254,14 @@ export function validateAction(state, action) {
       if (!hasCards(p, receive)) return '手札が足りません';
       if (!hasCards(state.players[from], give)) return '相手の手札が足りません';
       return null;
+    }
+
+    case 'CHOOSE_TRADE': {
+      if (aw?.type !== 'tradeChoose') return '選ぶ交易がありません';
+      if (action.partner == null) return null; // 全部やめる
+      if (!aw.context.accepted.includes(action.partner)) return 'その相手は応じていません';
+      const { give, receive } = aw.context;
+      return validateTradeContents(state, p, state.players[action.partner], give, receive);
     }
 
     case 'PICK_AQUEDUCT': {
@@ -669,21 +672,20 @@ function applyAction(state, action) {
       break;
     }
 
-    case 'TRADE_PLAYERS':
-      applyPlayerTrade(state, pid, action.partner, action.give, action.receive);
-      break;
-
+    // 一斉提案: 自分以外の全員に同じ内容を持ちかけ、返事が揃ってから相手を決める
     case 'OFFER_TRADE': {
-      const partner = state.players[action.partner];
-      state.turnFlags.offeredTo = { ...(state.turnFlags.offeredTo ?? {}), [action.partner]: true };
+      state.turnFlags.offers = (state.turnFlags.offers ?? 0) + 1;
+      // 提案の間隔。turn は1人の手番ごとに増えるので、人数ぶん空ける = 次の自分の手番は見送る。
+      // (CPU の自制用。人間は1手番あたりの回数制限だけで縛る)
+      p.offerCooldown = state.turn + state.players.length;
       state.awaiting = {
         type: 'tradeOffer',
-        players: [action.partner],
-        context: { from: pid, give: action.give, receive: action.receive },
+        players: state.players.filter((o) => o.id !== pid).map((o) => o.id),
+        context: { from: pid, give: action.give, receive: action.receive, replies: {} },
       };
       addLog(
         state,
-        `💬 ${p.name}が${partner.name}に交易を提案: ${fmtCards(action.give)} ⇄ ${fmtCards(action.receive)}`,
+        `💬 ${p.name}が全員に交易を提案: ${fmtCards(action.give)} ⇄ ${fmtCards(action.receive)}`,
       );
       break;
     }
@@ -697,15 +699,46 @@ function applyAction(state, action) {
     }
 
     case 'RESPOND_TRADE': {
-      const { from, give, receive } = state.awaiting.context;
+      const ctx = state.awaiting.context;
+      ctx.replies = { ...ctx.replies, [pid]: !!action.accept };
+      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+      addLog(
+        state,
+        action.accept
+          ? `🙋 ${p.name}が${state.players[ctx.from].name}の提案に応じました`
+          : `🚫 ${p.name}は${state.players[ctx.from].name}の提案を断りました`,
+      );
+      if (state.awaiting.players.length > 0) break; // まだ返事待ちの人がいる
+
+      const { from, give, receive } = ctx;
+      const accepted = Object.keys(ctx.replies)
+        .filter((k) => ctx.replies[k])
+        .map(Number);
       state.awaiting = null;
-      if (action.accept) {
-        applyPlayerTrade(state, from, pid, give, receive);
+      if (accepted.length === 0) {
+        // 全員に断られたら、次の提案までさらに間を空ける(2巡ぶん)
+        state.players[from].offerCooldown = state.turn + state.players.length * 2;
+        addLog(state, `🚫 ${state.players[from].name}の提案には誰も応じませんでした`);
+      } else if (accepted.length === 1) {
+        applyPlayerTrade(state, from, accepted[0], give, receive);
       } else {
-        // 断られた提案者はしばらく「この相手には」持ちかけない(他の人へは提案できる)
-        const offerer = state.players[from];
-        offerer.offerCooldown = { ...(offerer.offerCooldown ?? {}), [pid]: state.turn + 4 };
-        addLog(state, `🚫 ${p.name}は${state.players[from].name}の提案を断りました`);
+        // 複数が応じたので、提案者がどの相手と成立させるかを選ぶ
+        state.awaiting = {
+          type: 'tradeChoose',
+          players: [from],
+          context: { from, give, receive, accepted },
+        };
+      }
+      break;
+    }
+
+    case 'CHOOSE_TRADE': {
+      const { give, receive } = state.awaiting.context;
+      state.awaiting = null;
+      if (action.partner == null) {
+        addLog(state, `🚫 ${p.name}は交易を取りやめました`);
+      } else {
+        applyPlayerTrade(state, pid, action.partner, give, receive);
       }
       break;
     }
