@@ -503,11 +503,12 @@ function newGame() {
 // 割り込み(awaiting)に紐づくダイアログ。割り込みが変わったら必ず閉じる。
 // 閉じ忘れると「捨て札ダイアログのまま盗賊移動になる」ような食い違いが起き、
 // ダイアログの描画が state を読めずに例外で落ちて操作不能になる。
-const INTERRUPT_DIALOGS = ['discard', 'steal', 'tradeOffer', 'aqueduct'];
+const INTERRUPT_DIALOGS = ['discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct'];
 // awaiting の種類ごとに、開いたままでよいダイアログ
 const DIALOG_FOR_AWAITING = {
   discard: 'discard',
   tradeOffer: 'tradeOffer',
+  tradeChoose: 'tradeChoose',
   aqueduct: 'aqueduct',
   moveRobber: 'steal', // 略奪相手の選択(自分で開くのでここでは自動で開かない)
 };
@@ -939,35 +940,38 @@ function showTradeFx(aName, bName, give, receive) {
     <div class="tf-line"><b>${aName}</b><span class="tf-arrow">⬅</span><span class="tf-items">${tradeItems(receive)}</span><b>${bName}</b></div>`);
 }
 
-// 断られたときのバナー。提案しっぱなしで結果が分からないままにしない。
-function showTradeDenyFx(byName, give, receive) {
+// 不成立のバナー。提案しっぱなしで結果が分からないままにしない。
+function showTradeDenyFx(line, give, receive) {
   tradeBanner('tradefx deny', `
     <div class="tf-title">🚫 交易は不成立</div>
-    <div class="tf-line"><b>${byName}</b>が提案を断りました</div>
+    <div class="tf-line">${line}</div>
     <div class="tf-line"><span class="tf-items">${tradeItems(give)}</span><span class="tf-arrow">⇄</span><span class="tf-items">${tradeItems(receive)}</span></div>`);
 }
 
-// 交易アクションならバナーを出す(人間・CPUどちらの取引でも、成立・不成立とも)
+// 一斉提案の決着でバナーを出す(人間・CPU どちらの取引でも、成立・不成立とも)。
+// 返事が全員ぶん揃った最後の RESPOND_TRADE か、複数応諾後の CHOOSE_TRADE が決着点。
 function maybeTradeFx(action, prevAwaiting) {
-  if (action.type === 'TRADE_PLAYERS') {
-    showTradeFx(
-      state.players[action.player].name, state.players[action.partner].name,
-      action.give, action.receive,
-    );
+  if (action.type === 'RESPOND_TRADE' && prevAwaiting?.type === 'tradeOffer') {
+    if (prevAwaiting.players.length > 1) return; // まだ返事待ちの人が残っている
+    const { from, give, receive, replies } = prevAwaiting.context;
+    const accepted = Object.entries({ ...replies, [action.player]: !!action.accept })
+      .filter(([, yes]) => yes)
+      .map(([id]) => Number(id));
+    if (accepted.length === 0) {
+      showTradeDenyFx('誰も応じませんでした', give, receive);
+    } else if (accepted.length === 1) {
+      showTradeFx(state.players[from].name, state.players[accepted[0]].name, give, receive);
+    }
+    // 2人以上応じたときは相手を選ぶダイアログが開くので、まだバナーは出さない
     return;
   }
-  if (action.type !== 'RESPOND_TRADE') return;
-  const ctx = prevAwaiting?.type === 'tradeOffer' ? prevAwaiting.context : null;
-  if (!ctx) return;
-  if (action.accept) {
-    showTradeFx(
-      state.players[ctx.from].name, state.players[action.player].name,
-      ctx.give, ctx.receive,
-    );
-  } else {
-    // 断ったのが自分なら「あなた」と呼ぶ(オンラインでは自分の表示名が出て紛らわしいため)
-    const by = action.player === HUMAN ? 'あなた' : state.players[action.player].name;
-    showTradeDenyFx(by, ctx.give, ctx.receive);
+  if (action.type === 'CHOOSE_TRADE' && prevAwaiting?.type === 'tradeChoose') {
+    const { from, give, receive } = prevAwaiting.context;
+    if (action.partner == null) {
+      showTradeDenyFx(`<b>${state.players[from].name}</b>が取りやめました`, give, receive);
+    } else {
+      showTradeFx(state.players[from].name, state.players[action.partner].name, give, receive);
+    }
   }
 }
 
@@ -1537,16 +1541,23 @@ document.addEventListener('click', (e) => {
       if (--ui.dialog.precv[arg] <= 0) delete ui.dialog.precv[arg];
       refresh();
       return;
-    // 相手を選んで提案する。CPU も人間も同じ「提案 → 応答」の流れで扱うので、
+    // 全員に一斉提案する。CPU も人間も同じ「提案 → 応答 → 相手決定」の流れなので、
     // オンライン対戦でも相手のプレイヤーに交易を持ちかけられる。
     case 'pt-offer': {
       const { pgive, precv } = ui.dialog;
       doAction({
-        type: 'OFFER_TRADE', player: HUMAN, partner: Number(arg),
+        type: 'OFFER_TRADE', player: HUMAN,
         give: { ...pgive }, receive: { ...precv },
       });
       return;
     }
+    // 応じた相手の中から成立させる1人を選ぶ('none' で全部やめる)
+    case 'trade-pick':
+      doAction({
+        type: 'CHOOSE_TRADE', player: HUMAN,
+        partner: arg === 'none' ? null : Number(arg),
+      });
+      return;
     case 'aq':
       doAction({ type: 'PICK_AQUEDUCT', player: HUMAN, resource: arg });
       return;

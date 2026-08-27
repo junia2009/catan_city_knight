@@ -14,7 +14,7 @@ import {
   improvementCost, canBuyImprovement,
 } from '../rules/cak/improvements.js';
 import { COMMODITIES, COM_JP, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
-import { validateAction } from '../actions.js';
+import { validateAction, MAX_OFFERS_PER_TURN } from '../actions.js';
 import { rulesHtml } from './rules-content.js';
 import { PLAYER_COLORS } from './board-render.js';
 import { avatarSvg } from './avatars.js';
@@ -356,8 +356,15 @@ function statusText(state, ui) {
         : '🥷 盗賊の移動先ヘックスを選んでください';
     }
     if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
+    if (aw.type === 'tradeChoose') return '🤝 交換する相手を選んでください';
   } else if (aw) {
-    return `⏳ ${aw.players.map((i) => state.players[i].name).join('・')}の応答待ち...`;
+    const waiting = aw.players.map((i) => state.players[i].name).join('・');
+    if (aw.type === 'tradeOffer') {
+      // 何人が応じたかはこの時点で全員に見えている情報(成立すれば公開される)
+      const yes = Object.values(aw.context.replies ?? {}).filter(Boolean).length;
+      return `⏳ 交易の返事待ち: ${waiting}(応じた ${yes}人)`;
+    }
+    return `⏳ ${waiting}の応答待ち...`;
   }
   switch (ui.mode) {
     case 'build-road': return '🛤️ 道を建てる辺を選んでください';
@@ -443,31 +450,25 @@ function dialogHtml(state, ui) {
           ${n ? `<span class="tbadge" data-act="${subAct}:${r}">− ${n}</span>` : showMax ? `<small>${maxOf(r)}</small>` : ''}
         </button>`;
       }).join('');
-      // 提案先は1人ずつ選ぶ(CPU も人も同じ「提案 → 応答」の流れで扱う)
+      // 提案は全員へ一斉に送る。誰が応じたかを見てから相手を決める。
       const ready = sum(d.pgive) > 0 && sum(d.precv) > 0;
-      const partners = state.players
-        .filter((o) => o.id !== HUMAN)
-        .map((o) => {
-          const err = ready
-            ? validateAction(state, {
-                type: 'OFFER_TRADE', player: HUMAN, partner: o.id,
-                give: { ...d.pgive }, receive: { ...d.precv },
-              })
-            : '渡すものともらうものを選んでください';
-          return `<button class="pick" data-act="pt-offer:${o.id}" style="--pc:${PLAYER_COLORS[o.id]}"
-            ${err ? 'disabled' : ''} title="${err ?? ''}">
-            <span class="chip">${avatarSvg(o.id)}</span>${o.name}<small>${totalCards(o)}枚</small></button>`;
-        })
-        .join('');
+      const err = ready
+        ? validateAction(state, {
+            type: 'OFFER_TRADE', player: HUMAN,
+            give: { ...d.pgive }, receive: { ...d.precv },
+          })
+        : '渡すものともらうものを選んでください';
+      const left = MAX_OFFERS_PER_TURN - (state.turnFlags.offers ?? 0);
       return `<h3>⚖️ 交易</h3>${tabs}
         <p>渡すもの(タップで追加、バッジで減らす)</p>
         <div class="row">${chipRow(d.pgive, 'ptg-add', 'ptg-sub', (r) => have(r), true)}</div>
         <p>もらうもの</p>
         <div class="row">${chipRow(d.precv, 'ptr-add', 'ptr-sub', () => 6, false)}</div>
-        <p>提案する相手(同じ相手には1手番に1回まで)<br>
-          <small>相手が持っているかは分かりません。持っていなければ断られます。</small></p>
-        <div class="row">${partners}</div>
+        <p><small>全員に同じ内容で持ちかけます。応じた人が複数なら、そのあと相手を選べます。
+          相手が持っているかは分かりません。</small></p>
         <div class="row end">
+          <button class="primary" data-act="pt-offer" ${err ? 'disabled' : ''} title="${err ?? ''}">
+            🤝 全員に提案<span class="stock ${left === 0 ? 'out' : ''}">${left}</span></button>
           <button data-act="dialog-cancel">閉じる</button>
         </div>`;
     }
@@ -521,10 +522,36 @@ function dialogHtml(state, ui) {
     return `<h3>💬 <span class="chip">${avatarSvg(from.id)}</span> ${from.name}からの交易提案</h3>
       <p>もらえるもの</p><div class="row">${chips(aw.context.give)}</div>
       <p>渡すもの${short ? '(手札が足りません)' : ''}</p><div class="row">${chips(aw.context.receive)}</div>
+      <p><small>同じ提案が全員に届いています。応じた人が複数なら、${from.name}が相手を選びます。</small></p>
       <div class="row end">
         <button class="primary" data-act="offer-accept" ${short ? 'disabled' : ''}>🤝 交換する</button>
         <button data-act="offer-decline">断る</button>
       </div>`;
+  }
+
+  // 一斉提案に複数が応じたとき、提案者がどの相手と成立させるかを選ぶ
+  if (d.type === 'tradeChoose') {
+    const aw = state.awaiting;
+    if (aw?.type !== 'tradeChoose') return '';
+    const chips = (obj) =>
+      Object.entries(obj)
+        .map(
+          ([r, n]) => `<span class="pick tchip sel">
+            <span class="picon">${RES_ICON[r] ?? COM_ICON[r]}</span>${RES_JP[r] ?? COM_JP[r]}<small>×${n}</small></span>`,
+        )
+        .join('');
+    const picks = aw.context.accepted
+      .map(
+        (id) => `<button class="pick" data-act="trade-pick:${id}" style="--pc:${PLAYER_COLORS[id]}">
+          <span class="chip">${avatarSvg(id)}</span>${state.players[id].name}
+          <small>${totalCards(state.players[id])}枚</small></button>`,
+      )
+      .join('');
+    return `<h3>🤝 誰と交換する?</h3>
+      <p>渡すもの</p><div class="row">${chips(aw.context.give)}</div>
+      <p>もらうもの</p><div class="row">${chips(aw.context.receive)}</div>
+      <p>応じた相手</p><div class="row">${picks}</div>
+      <div class="row end"><button data-act="trade-pick:none">やめる</button></div>`;
   }
 
   if (d.type === 'improve') {
