@@ -757,11 +757,24 @@ function drawRobber(ctx, view, hid) {
   ctx.restore();
 }
 
-// 航海者たち: 船(辺の真ん中に浮かぶ小舟)
-function drawShip(ctx, view, eid, pid, alpha = 1) {
+// 航海者たち: 船(辺の真ん中に浮かぶ小舟)。
+// 海岸線の辺では中点が岸そのものなので、海側へ少しずらして水に浮かべる。
+const SHIP_SHORE_OFFSET = 0.22;
+
+function drawShip(ctx, view, eid, pid, board, alpha = 1) {
   const e = LAYOUT.edges[eid];
   const [v1, v2] = e.v.map((v) => LAYOUT.vertices[v]);
-  const [px, py] = toPixel(view, e.x, e.y);
+  let ex = e.x;
+  let ey = e.y;
+  const isSea = (h) => board?.hexes[h]?.terrain === 'sea';
+  const seaHex = e.hexes.find(isSea);
+  if (seaHex && e.hexes.some((h) => board?.hexes[h] && !isSea(h))) {
+    const c = hexCenterOf(seaHex);
+    const len = Math.hypot(c.x - ex, c.y - ey) || 1;
+    ex += ((c.x - ex) / len) * SHIP_SHORE_OFFSET;
+    ey += ((c.y - ey) / len) * SHIP_SHORE_OFFSET;
+  }
+  const [px, py] = toPixel(view, ex, ey);
   const angle = Math.atan2(v2.y - v1.y, v2.x - v1.x);
   const s = view.scale * 0.17;
 
@@ -1102,7 +1115,7 @@ export function drawBoard(ctx, width, height, state, ui, time = 0) {
     drawRoad(ctx, view, eid, road.player);
   }
   for (const [eid, ship] of Object.entries(state.ships ?? {})) {
-    drawShip(ctx, view, eid, ship.player);
+    drawShip(ctx, view, eid, ship.player, state.board);
   }
   for (const eid of ui.pendingEdges ?? []) {
     drawRoad(ctx, view, eid, 0, 0.55);

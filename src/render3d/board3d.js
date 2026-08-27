@@ -635,10 +635,27 @@ function makeShip(pid, opacity = 1) {
   return g;
 }
 
-function placeShip(g, eid) {
-  const [v1, v2] = LAYOUT.edges[eid].v.map(vpos);
+// 海岸線の辺(陸と海の境)では、辺の中点は岸そのもの。
+// 船は海面の高さに置くので、そのままだと陸タイル(上面 0.26)と
+// 砂浜(ヘックスの外へ 8% はみ出す)に埋まってしまう。海側へずらして浮かべる。
+const SHIP_SHORE_OFFSET = 0.22;
+
+function placeShip(g, eid, board) {
+  const e = LAYOUT.edges[eid];
+  const [v1, v2] = e.v.map(vpos);
   const dir = v2.clone().sub(v1);
-  g.position.copy(v1).add(v2).multiplyScalar(0.5);
+  const pos = v1.clone().add(v2).multiplyScalar(0.5);
+
+  const isSea = (h) => board?.hexes[h]?.terrain === 'sea';
+  const seaHex = e.hexes.find(isSea);
+  const landHex = e.hexes.find((h) => board?.hexes[h] && !isSea(h));
+  if (seaHex && landHex) {
+    const c = hexCenterOf(seaHex);
+    const toSea = new THREE.Vector3(c.x - pos.x, 0, c.y - pos.z).normalize();
+    pos.addScaledVector(toSea, SHIP_SHORE_OFFSET);
+  }
+
+  g.position.copy(pos);
   g.position.y = SEA_Y + 0.03;
   g.rotation.y = -Math.atan2(dir.z, dir.x);
   return g;
@@ -2293,7 +2310,7 @@ export class Board3D {
       addPiece(`pending:${eid}`, makeRoad(eid, 0, 0.5));
     }
     for (const [eid, ship] of Object.entries(state.ships ?? {})) {
-      addPiece(`ship:${eid}:${ship.player}`, placeShip(makeShip(ship.player), eid));
+      addPiece(`ship:${eid}:${ship.player}`, placeShip(makeShip(ship.player), eid, state.board));
     }
     if (state.board.pirate != null) {
       const c = hexCenterOf(state.board.pirate);
