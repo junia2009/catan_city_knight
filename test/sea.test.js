@@ -10,10 +10,11 @@ import { computePoints, pointsToWin, longestRoadLength } from '../src/rules/vict
 import { canPlaceRoad, canPlaceSettlement } from '../src/rules/build.js';
 import {
   SHIP_COST, SHIP_LIMIT, NEW_ISLAND_VP,
-  canPlaceShip, islandAtVertex, isSeaHex, isLandHex, isShipEdge,
+  canPlaceShip, islandAtVertex, isSeaHex, isLandHex, isRoadEdge, isShipEdge,
   movableShips, pirateTargets, goldGainForRoll,
   seaMainIslandHexes, seaIslandHexes,
 } from '../src/rules/sea.js';
+import { legalSetupEdges, legalSetupVertices } from '../src/ai/legal-moves.js';
 
 function newSea(seed = 3) {
   return createGame({ seed, playerCount: 4, humanIndex: -1, mode: 'sea' });
@@ -464,4 +465,59 @@ test('sea: セルフプレイ10ゲームが完走し、保存則と勝利条件�
     const w = s.winner;
     assert.ok(computePoints(s, w, { includeHidden: true }) >= pointsToWin(s, w));
   }
+});
+
+test('sea: 初期配置で海に向かう辺を選ぶと道ではなく船が置かれる', () => {
+  const s = newSea();
+  // 本島の頂点で、海だけに面した辺(陸に接していない辺)を持つものを探す
+  let vid = null;
+  let seaEdge = null;
+  for (const v of legalSetupVertices(s, 0)) {
+    const e = LAYOUT.vertexEdges[v].find(
+      (eid) => isShipEdge(s.board, eid) && !isRoadEdge(s.board, eid),
+    );
+    if (e) { vid = v; seaEdge = e; break; }
+  }
+  assert.ok(seaEdge, '本島の角には海だけの辺があるはず');
+
+  // 駒を指定しなくても、海だけの辺なら船になる(道は置けない)
+  const auto = { type: 'PLACE_INITIAL', player: 0, vertexId: vid, edgeId: seaEdge };
+  assert.equal(validateAction(s, auto), null);
+  assert.match(validateAction(s, { ...auto, piece: 'road' }), /陸に面した辺/);
+
+  const after = dispatch(s, auto);
+  assert.equal(after.roads[seaEdge], undefined, '海の上に道ができている');
+  assert.equal(after.ships[seaEdge].player, 0, '船が置かれていない');
+});
+
+test('sea: 初期配置の海岸線では道と船のどちらも選べる', () => {
+  const s = newSea();
+  let vid = null;
+  let shore = null;
+  for (const v of legalSetupVertices(s, 0)) {
+    const e = LAYOUT.vertexEdges[v].find(
+      (eid) => isShipEdge(s.board, eid) && isRoadEdge(s.board, eid),
+    );
+    if (e) { vid = v; shore = e; break; }
+  }
+  assert.ok(shore, '本島には海岸線の辺があるはず');
+
+  const base = { type: 'PLACE_INITIAL', player: 0, vertexId: vid, edgeId: shore };
+  assert.equal(validateAction(s, { ...base, piece: 'road' }), null);
+  assert.equal(validateAction(s, { ...base, piece: 'ship' }), null);
+  // 指定がなければ陸に面しているので道(既存モードと同じ既定)
+  assert.equal(dispatch(s, base).roads[shore].player, 0);
+  assert.equal(dispatch(s, { ...base, piece: 'ship' }).ships[shore].player, 0);
+});
+
+test('sea: 初期配置のハイライトは駒ごとに出し分ける', () => {
+  const s = newSea();
+  const vid = legalSetupVertices(s, 0).find(
+    (v) => LAYOUT.vertexEdges[v].some((e) => isShipEdge(s.board, e)),
+  );
+  const roads = legalSetupEdges(s, vid, 'road');
+  const ships = legalSetupEdges(s, vid, 'ship');
+  assert.ok(roads.length > 0 && ships.length > 0);
+  assert.ok(roads.every((e) => isRoadEdge(s.board, e)), '道の候補に海だけの辺が混ざっている');
+  assert.ok(ships.every((e) => isShipEdge(s.board, e)), '船の候補に海のない辺が混ざっている');
 });

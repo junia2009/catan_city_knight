@@ -10,6 +10,7 @@ import { KNIGHT_COSTS } from '../rules/cak/knights.js';
 import { TOWER_COST } from '../rules/dragon.js';
 import { FISH_USES, fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
 import { SHIP_COST, SHIP_LIMIT, movableShips } from '../rules/sea.js';
+import { legalSetupEdges } from '../ai/legal-moves.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
 import {
   TRACKS, TRACK_JP, TRACK_COMMODITY, MAX_IMPROVEMENT,
@@ -377,9 +378,12 @@ function statusText(state, ui) {
   const aw = state.awaiting;
   if (aw?.players.includes(HUMAN)) {
     if (aw.type === 'setupPlacement') {
-      return ui.mode === 'setup-road'
-        ? '🛤️ 開拓地に隣接する道の位置を選んでください'
-        : `🏠 初期配置(${aw.context.round}巡目): 開拓地の位置を選んでください`;
+      if (ui.mode !== 'setup-road') {
+        return `🏠 初期配置(${aw.context.round}巡目): 開拓地の位置を選んでください`;
+      }
+      return ui.setupPiece === 'ship'
+        ? '⛵ 開拓地に隣接する船の位置を選んでください'
+        : '🛤️ 開拓地に隣接する道の位置を選んでください';
     }
     if (aw.type === 'discard') return `🂠 手札を${aw.context.required[HUMAN]}枚捨ててください`;
     if (aw.type === 'aqueduct') return '💧 水道橋: もらう資源を選んでください';
@@ -434,6 +438,18 @@ function statusText(state, ui) {
   }
 }
 
+// 航海者たちの初期配置は「開拓地 + 道 or 船」(公式ルール)。どちらを置くか選ばせる。
+function setupPieceToggle(state, ui) {
+  if (state.mode !== 'sea' || ui.mode !== 'setup-road' || !ui.pendingVertex) return '';
+  const btn = (piece, label) => {
+    const on = ui.setupPiece === piece ? ' class="on"' : '';
+    // 内陸の開拓地には船を出せないので、置ける辺がなければ押せなくする
+    const off = legalSetupEdges(state, ui.pendingVertex, piece).length === 0 ? ' disabled' : '';
+    return `<button data-act="setup-piece:${piece}"${on}${off}>${label}</button>`;
+  };
+  return `<span class="setup-piece">${btn('road', '🛤️ 道')}${btn('ship', '⛵ 船')}</span>`;
+}
+
 function renderStatus(state, ui) {
   const cancellable = [
     'build-road', 'build-settlement', 'build-city', 'play-road-building',
@@ -446,6 +462,7 @@ function renderStatus(state, ui) {
     (ui.mode === 'prog-hex2' && ui.pendingHexes.length === 2);
   el('status').innerHTML = `
     <span class="msg">${statusText(state, ui)}</span>
+    ${setupPieceToggle(state, ui)}
     ${confirmable ? '<button class="primary" data-act="confirm">✓ 確定</button>' : ''}
     ${cancellable ? '<button data-act="cancel">↩ やり直す</button>' : ''}
   `;

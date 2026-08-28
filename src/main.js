@@ -472,6 +472,7 @@ function freshUi() {
     mode: 'idle',
     pending: null, // { vertexId } | { edgeId } | { hexId }
     pendingVertex: null, // 初期配置で選んだ開拓地
+    setupPiece: 'road', // 初期配置で開拓地と一緒に置く駒(航海者たちは船も選べる)
     pendingEdges: [], // 街道建設カード
     pendingHexes: [], // 発明家(数字トークン交換)
     sentAwaiting: null, // オンライン: サーバーへ応答を送った割り込み(返信待ち)
@@ -553,6 +554,7 @@ function syncUi() {
       ui.mode = 'setup-settlement';
       ui.pending = null;
       ui.pendingVertex = null;
+      ui.setupPiece = 'road';
     } else if (wantMode && wantMode !== 'setup-settlement' && ui.mode !== wantMode) {
       ui.mode = wantMode;
       ui.pending = null;
@@ -573,6 +575,7 @@ function syncUi() {
     ui.mode = 'idle';
     ui.pending = null;
     ui.pendingVertex = null;
+    ui.setupPiece = 'road';
   }
 }
 
@@ -582,7 +585,7 @@ function computeHighlights() {
     return { vertices: legalSetupVertices(state, HUMAN) };
   }
   if (m === 'setup-road' && ui.pendingVertex) {
-    return { edges: legalSetupEdges(state, ui.pendingVertex) };
+    return { edges: legalSetupEdges(state, ui.pendingVertex, ui.setupPiece) };
   }
   if (m === 'build-road' || m === 'fish-road') return { edges: legalRoadEdges(state, HUMAN) };
   if (m === 'build-ship') return { edges: legalShipEdges(state, HUMAN) };
@@ -1288,6 +1291,7 @@ function confirmPending() {
       player: HUMAN,
       vertexId: ui.pendingVertex,
       edgeId: ui.pending.edgeId,
+      piece: ui.setupPiece,
     });
   } else if (m === 'build-road' && ui.pending?.edgeId) {
     doAction({ type: 'BUILD_ROAD', player: HUMAN, edgeId: ui.pending.edgeId });
@@ -1359,6 +1363,7 @@ function cancelMode() {
     ui.mode = 'setup-settlement';
     ui.pendingVertex = null;
     ui.pending = null;
+    ui.setupPiece = 'road';
   } else if ([
     'build-road', 'fish-road', 'build-ship', 'move-ship', 'move-ship-to',
     'build-settlement', 'build-city', 'play-road-building',
@@ -1536,6 +1541,14 @@ document.addEventListener('click', (e) => {
       ui.mode = arg === 'moveship' ? 'move-ship' : `build-${arg}`;
       ui.pending = null;
       ui.shipFrom = null;
+      refresh();
+      return;
+    }
+
+    // 初期配置: 開拓地と一緒に置く駒(道 or 船)の切り替え
+    case 'setup-piece': {
+      ui.setupPiece = arg === 'ship' ? 'ship' : 'road';
+      ui.pending = null; // 選び直しになるので候補もいったん外す
       refresh();
       return;
     }
