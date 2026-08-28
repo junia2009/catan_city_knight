@@ -664,3 +664,47 @@ test('外交官: 移設先は「その道を外した状態」で置ける辺に
     '繋がらない辺へ移設できてしまう',
   );
 });
+
+test('陰謀: 追い出された騎士の移動先は持ち主が選ぶ(公式)', () => {
+  const s = readyGame();
+  // 自分の道に隣接する頂点に相手の騎士を置く
+  const target = Object.keys(LAYOUT.vertices).find(
+    (v) => !s.buildings[v] && !s.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 0) &&
+      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 1),
+  ) ?? Object.keys(LAYOUT.vertices).find(
+    (v) => !s.buildings[v] && !s.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 0),
+  );
+  s.knights[target] = { player: 1, level: 1, active: true, activatedTurn: -1 };
+
+  const after = playCard(s, 0, 'intrigue', { vertexId: target });
+  assert.equal(after.knights[target], undefined, '元の位置から消えていない');
+  if (after.awaiting) {
+    // 逃げ先があるときは持ち主(席1)が選ぶ
+    assert.equal(after.awaiting.type, 'knightDisplace');
+    assert.deepEqual(after.awaiting.players, [1]);
+    const spots = after.awaiting.context.spots;
+    assert.ok(spots.length > 0);
+    // 候補以外は選べない
+    const notSpot = Object.keys(LAYOUT.vertices).find(
+      (v) => !spots.includes(v) && !after.buildings[v] && !after.knights[v],
+    );
+    assert.match(
+      validateAction(after, { type: 'PLACE_DISPLACED_KNIGHT', player: 1, vertexId: notSpot }),
+      /そこへは移動できません/,
+    );
+    const done = dispatch(after, {
+      type: 'PLACE_DISPLACED_KNIGHT', player: 1, vertexId: spots[0],
+    });
+    assert.equal(done.knights[spots[0]].player, 1);
+    assert.equal(done.knights[spots[0]].level, 1);
+    assert.equal(done.knights[spots[0]].active, false, '追い出された騎士は不活性のはず');
+    assert.equal(done.awaiting, null);
+  } else {
+    // 逃げ先が無ければ盤上から除去されるだけ
+    assert.equal(
+      Object.values(after.knights).filter((k) => k.player === 1).length, 0,
+    );
+  }
+});

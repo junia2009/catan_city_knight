@@ -395,7 +395,19 @@ export const PROGRESS_CARDS = {
     },
     play(state, pid, params) {
       addLog(state, `🗡️ ${state.players[pid].name}の陰謀!`);
-      displaceKnight(state, params.vertexId);
+      // 追い出された騎士の行き先は持ち主が選ぶ(公式)。
+      // displaceKnight が返した選択待ちを turnFlags 経由で actions.js に渡す。
+      state.turnFlags.displaced = displaceKnight(state, params.vertexId);
+    },
+    awaitAfterPlay(state) {
+      const d = state.turnFlags.displaced;
+      delete state.turnFlags.displaced;
+      if (!d) return null;
+      return {
+        type: 'knightDisplace',
+        players: [d.owner],
+        context: { level: d.level, spots: d.spots },
+      };
     },
   },
 

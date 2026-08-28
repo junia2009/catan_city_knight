@@ -98,26 +98,38 @@ export function canMoveKnight(state, pid, from, to) {
 }
 
 // 追い出された騎士の再配置(自分の道網で到達できる空き頂点、なければ除去)
-export function displaceKnight(state, vid) {
+// 追い出された騎士の行き先(自分の道網でつながる空き頂点)。
+// 公式では移動先を持ち主が選ぶので、候補の列挙だけをここで持つ。
+export function displaceSpots(state, vid) {
   const k = state.knights[vid];
-  const spots = reachableVertices(state, k.player, vid).filter(
-    (v) => !state.buildings[v] && !state.knights[v],
+  if (!k) return [];
+  return reachableVertices(state, k.player, vid).filter(
+    (v) => v !== vid && !state.buildings[v] && !state.knights[v],
   );
-  delete state.knights[vid];
-  if (spots.length) {
-    state.knights[spots[0]] = { ...k, active: false };
-    addLog(state, `${state.players[k.player].name}の騎士が追い出され、移動しました`);
-  } else {
-    addLog(state, `${state.players[k.player].name}の騎士が盤面から除去されました`);
-  }
 }
 
-// 移動の適用(追い出し込み)。移動した騎士は不活性化する。
+// 騎士を盤上から外す。行き先があれば「持ち主が選ぶ待ち」を呼び出し側に返す。
+// 戻り値: { owner, level, spots } | null(行き先が無く除去された場合)
+export function displaceKnight(state, vid) {
+  const k = state.knights[vid];
+  const spots = displaceSpots(state, vid);
+  delete state.knights[vid];
+  if (!spots.length) {
+    addLog(state, `${state.players[k.player].name}の騎士が盤面から除去されました`);
+    return null;
+  }
+  addLog(state, `${state.players[k.player].name}の騎士が追い出されました`);
+  return { owner: k.player, level: k.level, spots };
+}
+
+// 移動の適用。移動した騎士は不活性化する。
+// 追い出しが起きた場合は、その情報(行き先の選択待ち)を返す。
 export function applyKnightMove(state, pid, from, to) {
   const k = state.knights[from];
-  if (state.knights[to]) displaceKnight(state, to);
+  const displaced = state.knights[to] ? displaceKnight(state, to) : null;
   delete state.knights[from];
   state.knights[to] = { ...k, active: false };
+  return displaced;
 }
 
 // 盗賊追い払いが可能か(騎士が盗賊ヘックスに隣接)

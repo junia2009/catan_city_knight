@@ -571,6 +571,11 @@ export function chooseAction(state, pid) {
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
     if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
+    if (aw.type === 'knightDisplace') {
+      // 追い出された騎士の行き先。入植価値の高い頂点へ逃がす。
+      const vid = best(aw.context.spots, (v) => vertexValue(state, pid, v));
+      return { type: 'PLACE_DISPLACED_KNIGHT', player: pid, vertexId: vid };
+    }
     if (aw.type === 'deserterPick') {
       // 差し出す騎士。いちばん惜しくないもの(不活性・低レベル優先)。
       const vid = best(

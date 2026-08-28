@@ -147,6 +147,7 @@ const AWAITING_ACTIONS = {
   harborGive: 'GIVE_HARBOR',
   deserterPick: 'PICK_DESERTER',
   deserterPlace: 'PLACE_DESERTER',
+  knightDisplace: 'PLACE_DISPLACED_KNIGHT',
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
@@ -458,6 +459,15 @@ export function validateAction(state, action) {
 
     case 'DISCARD_PROGRESS': {
       if (!p.progressCards[action.index]) return '捨てるカードを選んでください';
+      return null;
+    }
+
+    // 追い出された騎士の行き先は持ち主が選ぶ
+    case 'PLACE_DISPLACED_KNIGHT': {
+      if (!aw.context.spots.includes(action.vertexId)) return 'そこへは移動できません';
+      if (state.buildings[action.vertexId] || state.knights[action.vertexId]) {
+        return 'その頂点は空いていません';
+      }
       return null;
     }
 
@@ -850,6 +860,16 @@ function applyAction(state, action) {
       break;
     }
 
+    case 'PLACE_DISPLACED_KNIGHT': {
+      const { level } = state.awaiting.context;
+      state.knights[action.vertexId] = {
+        player: pid, level, active: false, activatedTurn: -1,
+      };
+      addLog(state, `${p.name}の騎士が移動しました`);
+      state.awaiting = null;
+      break;
+    }
+
     case 'PICK_DESERTER': {
       const to = state.awaiting.context.to;
       const k = state.knights[action.vertexId];
@@ -1147,7 +1167,16 @@ function applyAction(state, action) {
     }
 
     case 'MOVE_KNIGHT':
-      applyKnightMove(state, pid, action.fromVertexId, action.toVertexId);
+      {
+        const displaced = applyKnightMove(state, pid, action.fromVertexId, action.toVertexId);
+        if (displaced) {
+          state.awaiting = {
+            type: 'knightDisplace',
+            players: [displaced.owner],
+            context: { level: displaced.level, spots: displaced.spots },
+          };
+        }
+      }
       addLog(state, `${p.name}が騎士を移動しました`);
       break;
 

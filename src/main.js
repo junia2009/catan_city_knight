@@ -561,13 +561,14 @@ const MODE_FOR_AWAITING = {
   barbarianDefense: 'raze-city',
   deserterPick: 'desert-pick',
   deserterPlace: 'desert-place',
+  knightDisplace: 'knight-displace',
 };
 
 function syncUi() {
   const aw = state.awaiting;
   const forced = [
     'setup-settlement', 'setup-road', 'move-robber', 'raze-city',
-    'desert-pick', 'desert-place',
+    'desert-pick', 'desert-place', 'knight-displace',
   ].includes(ui.mode);
 
   if (state.phase === 'ended') {
@@ -715,6 +716,7 @@ function computeHighlights() {
       ),
     };
   }
+  if (m === 'knight-displace') return { vertices: state.awaiting?.context?.spots ?? [] };
   if (m === 'desert-pick') return { vertices: deserterKnights(state, HUMAN) };
   if (m === 'desert-place') return { vertices: deserterSpots(state, HUMAN) };
   if (m === 'prog-moveroad') {
@@ -1275,7 +1277,7 @@ function boardClick(pick) {
     if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
   } else if ([
     'build-knight', 'build-wall', 'build-tower', 'move-knight', 'raze-city',
-    'desert-pick', 'desert-place',
+    'desert-pick', 'desert-place', 'knight-displace',
   ].includes(m)) {
     const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid) ui.pending = { vertexId: vid };
@@ -1368,6 +1370,8 @@ function confirmPending() {
     doAction({ type: 'BUILD_SETTLEMENT', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'build-city' && ui.pending?.vertexId) {
     doAction({ type: 'BUILD_CITY', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'knight-displace' && ui.pending?.vertexId) {
+    doAction({ type: 'PLACE_DISPLACED_KNIGHT', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'desert-pick' && ui.pending?.vertexId) {
     doAction({ type: 'PICK_DESERTER', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'desert-place' && ui.pending?.vertexId) {

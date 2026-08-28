@@ -401,6 +401,7 @@ function statusText(state, ui) {
     if (aw.type === 'harborGive') return '⚓ 商業港: 渡す商品を選んでください';
     if (aw.type === 'deserterPick') return '🏳️ 脱走兵: 差し出す騎士を選んでください';
     if (aw.type === 'deserterPlace') return '🏳️ 脱走してきた騎士を置く頂点を選んでください';
+    if (aw.type === 'knightDisplace') return '⚔️ 追い出された騎士の移動先を選んでください';
     if (aw.type === 'tradeChoose') return '🤝 交換する相手を選んでください';
   } else if (aw) {
     const waiting = aw.players.map((i) => state.players[i].name).join('・');
@@ -410,6 +411,7 @@ function statusText(state, ui) {
     if (aw.type === 'harborGive') return `⏳ 商業港の交換待ち: ${waiting}`;
     if (aw.type === 'deserterPick') return `⏳ 脱走させる騎士の選択待ち: ${waiting}`;
     if (aw.type === 'deserterPlace') return `⏳ 騎士の配置待ち: ${waiting}`;
+    if (aw.type === 'knightDisplace') return `⏳ 追い出された騎士の移動先待ち: ${waiting}`;
     if (aw.type === 'tradeOffer') {
       // 何人が応じたかはこの時点で全員に見えている情報(成立すれば公開される)
       const yes = Object.values(aw.context.replies ?? {}).filter(Boolean).length;
@@ -431,6 +433,7 @@ function statusText(state, ui) {
     case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
     case 'desert-pick': return '🏳️ 脱走兵: 差し出す自分の騎士を選んでください';
     case 'desert-place': return '🏳️ 脱走してきた騎士を置く頂点を選んでください';
+    case 'knight-displace': return '⚔️ 追い出された騎士の移動先を選んでください';
     case 'play-road-building':
       return `🛤️ 街道建設: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
     case 'prog-hex': case 'prog-vertex': case 'prog-edge': case 'prog-hex2': case 'prog-roads':
