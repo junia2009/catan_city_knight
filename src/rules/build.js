@@ -19,11 +19,18 @@ export function totalResources(player) {
 }
 
 // 手札総数(資源 + 商品)。7 の捨て札判定に使う。
+// オンライン対戦で他人を見ているときは内訳が伏せられている(hiddenCards が実数)。
+// 枚数そのものは公開情報なので、ここで足して見え方を揃える。
 export function totalCards(player) {
   const com = player.commodities
     ? Object.values(player.commodities).reduce((a, b) => a + b, 0)
     : 0;
-  return totalResources(player) + com;
+  return totalResources(player) + com + (player.hiddenCards ?? 0);
+}
+
+// この手札は伏せられているか(オンラインで他人の手札を見ているとき)
+export function handHidden(player) {
+  return !!player?.hidden;
 }
 
 // 手札上限(基本 7、城壁1枚につき +2。設計書 §9.6)

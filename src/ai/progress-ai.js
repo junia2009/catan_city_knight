@@ -380,6 +380,25 @@ export function pickProgressDiscard(state, pid) {
   return worst;
 }
 
+// スパイで奪う1枚の位置を返す。捨て札の逆で、自分が持ったときの価値が高いもの。
+// (勝利点カードは引いた瞬間に公開されるので、そもそも手札には並ばない)
+export function pickProgressSteal(state, pid, target) {
+  const cards = state.players[target].progressCards;
+  let bestIdx = 0;
+  let bestScore = -Infinity;
+  for (let i = 0; i < cards.length; i++) {
+    const def = PROGRESS_CARDS[cards[i].id];
+    const scorer = SCORERS[cards[i].id];
+    const now = scorer ? (scorer(state, pid)?.score ?? 0) : 0;
+    const score = now + (def.preRoll ? 1 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
 // ロール前の錬金術師使用判断
 export function pickAlchemist(state, pid) {
   const p = state.players[pid];

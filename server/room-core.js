@@ -8,6 +8,7 @@
 import { createGame } from '../src/state.js';
 import { dispatch, validateAction } from '../src/actions.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
+import { totalCards } from '../src/rules/build.js';
 
 export const MAX_SEATS = 4;
 export const MIN_PLAYERS = 2;
@@ -17,6 +18,38 @@ export const IDLE_DISCONNECT_MS = 60 * 60 * 1000;
 // 紛らわしい文字(I/O/0/1)を除いた合言葉用の英字
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 export const CODE_LENGTH = 4;
+
+// 他人のプレイヤー情報から隠し情報を落とす。
+// 資源と商品は「枚数だけ公開・内訳は非公開」なので、中身を 0 にして
+// 実際の枚数を hiddenCards として渡す(totalCards がこれを見る)。
+// hidden: true は「この手札は伏せられている」目印で、クライアント側の
+// 先読み判定(相手が出せるか)を通すために使う。最終判定はサーバーが持つ。
+function maskPlayer(p, { hand = false, progress = false } = {}) {
+  const zero = (obj) => Object.fromEntries(Object.keys(obj).map((k) => [k, 0]));
+  const masked = { ...p };
+  if (!hand) {
+    masked.hidden = true;
+    masked.hiddenCards = totalCards(p);
+    masked.resources = zero(p.resources);
+    if (p.commodities) masked.commodities = zero(p.commodities);
+  }
+  masked.devCards = p.devCards.map(() => ({ type: 'hidden' }));
+  if (!progress) {
+    masked.progressCards = p.progressCards.map(() => ({ id: 'hidden', deck: 'hidden' }));
+  }
+  return masked;
+}
+
+// 「相手の手札を見て選ぶ」カードで、選ぶ本人にだけ開く範囲。
+// 覗ける中身を awaiting.context に入れると全員に配信されてしまうので、
+// 誰の何を開くかだけを見て、この席の配信でだけ伏せを外す。
+function revealFor(state, seat) {
+  const aw = state.awaiting;
+  if (!aw || !aw.players.includes(seat)) return null;
+  if (aw.type === 'merchantPick') return { target: aw.context.target, hand: true };
+  if (aw.type === 'spyPick') return { target: aw.context.target, progress: true };
+  return null;
+}
 
 export function makeRoomCode(rand = Math.random) {
   let s = '';
@@ -260,7 +293,7 @@ export class RoomCore {
     if (!this.state) return null;
     const full = this.state;
     if (full.phase === 'ended') return full;
-    const hiddenList = (arr, filler) => arr.map(() => ({ ...filler }));
+    const reveal = revealFor(full, seat);
     return {
       ...full,
       rng: 0, // 未来の出目を予測させない
@@ -277,15 +310,11 @@ export class RoomCore {
             )
           : null,
       },
-      players: full.players.map((p) =>
-        p.id === seat
-          ? p
-          : {
-              ...p,
-              devCards: hiddenList(p.devCards, { type: 'hidden' }),
-              progressCards: hiddenList(p.progressCards, { id: 'hidden', deck: 'hidden' }),
-            },
-      ),
+      players: full.players.map((p) => {
+        if (p.id === seat) return p;
+        if (reveal && reveal.target === p.id) return maskPlayer(p, reveal);
+        return maskPlayer(p);
+      }),
     };
   }
 

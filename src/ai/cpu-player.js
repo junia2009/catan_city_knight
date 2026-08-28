@@ -25,7 +25,9 @@ import {
   COMMODITIES, PROGRESS_CARDS, weddingGiftSize,
   deserterKnights, deserterSpots,
 } from '../rules/cak/progress-cards.js';
-import { pickProgressPlay, pickAlchemist, pickProgressDiscard } from './progress-ai.js';
+import {
+  pickProgressPlay, pickAlchemist, pickProgressDiscard, pickProgressSteal,
+} from './progress-ai.js';
 import {
   legalCityVertices,
   legalRoadEdges,
@@ -94,6 +96,30 @@ function chooseCardsToGive(state, pid, need) {
       return surplus * 10 + counts[x] + commodityPenalty;
     });
     if (r == null) break; // 手札が尽きた
+    counts[r] -= 1;
+    out[r] = (out[r] ?? 0) + 1;
+  }
+  return out;
+}
+
+// from の手札から need 枚もらう(豪商)。目標に足りない資源を優先し、
+// 同点なら商品を取る(商品は改良にしか使えないぶん手に入りにくい)。
+function chooseCardsToTake(state, from, pid, need) {
+  const src = state.players[from];
+  const goal = nextGoal(state, pid);
+  const want = goal ? missingFor(state.players[pid], goal.cost) : {};
+  const counts = {};
+  for (const r of RESOURCES) counts[r] = src.resources[r];
+  for (const c of COMMODITIES) counts[c] = src.commodities[c];
+  const out = {};
+  const keys = [...RESOURCES, ...COMMODITIES];
+  for (let i = 0; i < need; i++) {
+    const r = best(keys.filter((x) => counts[x] > 0), (x) => {
+      const taken = out[x] ?? 0;
+      const needed = Math.max(0, (want[x] ?? 0) - taken);
+      return needed * 10 + (COMMODITIES.includes(x) ? 3 : 0);
+    });
+    if (r == null) break; // 相手の手札が尽きた
     counts[r] -= 1;
     out[r] = (out[r] ?? 0) + 1;
   }
@@ -607,6 +633,20 @@ export function chooseAction(state, pid) {
       return {
         type: 'GIVE_WEDDING', player: pid,
         cards: chooseCardsToGive(state, pid, weddingGiftSize(state, pid)),
+      };
+    }
+    if (aw.type === 'merchantPick') {
+      // 豪商。覗いた手札から、自分の目標にいちばん効く札を取る。
+      return {
+        type: 'PICK_MERCHANT', player: pid,
+        cards: chooseCardsToTake(state, aw.context.target, pid, aw.context.count),
+      };
+    }
+    if (aw.type === 'spyPick') {
+      // スパイ。覗いた進歩カードから、自分が持って価値の高い1枚を取る。
+      return {
+        type: 'PICK_SPY', player: pid,
+        index: pickProgressSteal(state, pid, aw.context.target),
       };
     }
     if (aw.type === 'progressLimit') {

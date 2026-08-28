@@ -119,9 +119,10 @@ test('資源独占・交易独占: 各プレイヤーから徴収する', () => 
   conservation(s);
 });
 
-test('豪商: 勝利点が上の相手からのみ2枚奪える', () => {
+test('豪商: 勝利点が上の相手の手札を見て、好きな2枚を奪う(公式)', () => {
   let s = readyGame();
   setCards(s, 1, 'wood', 5);
+  setCards(s, 1, 'cloth', 1);
   // CPU1 に都市を追加して点数を上げる
   const vid = Object.keys(LAYOUT.vertices).find(
     (v) => !s.buildings[v] && !s.knights[v],
@@ -140,7 +141,46 @@ test('豪商: 勝利点が上の相手からのみ2枚奪える', () => {
     COMMODITIES.reduce((a, c) => a + p.commodities[c], 0);
   const total = count(s.players[1]);
   s = playCard(s, 0, 'masterMerchant', { target: 1 });
-  assert.equal(count(s.players[1]), total - 2); // ランダムに2枚奪う
+  // すぐには奪わず、「何を取るか」の選択が使った本人に返る
+  assert.equal(s.awaiting.type, 'merchantPick');
+  assert.deepEqual(s.awaiting.players, [0]);
+  assert.equal(s.awaiting.context.target, 1);
+  assert.equal(s.awaiting.context.count, 2);
+  // 覗いた中身は awaiting.context に入れない(オンラインでは全員に配信されるため)
+  assert.equal(s.awaiting.context.cards, undefined);
+  const mineCloth = s.players[0].commodities.cloth;
+  const mineWood = s.players[0].resources.wood;
+  s = dispatch(s, {
+    type: 'PICK_MERCHANT', player: 0, cards: { cloth: 1, wood: 1 },
+  });
+  assert.equal(s.awaiting, null);
+  assert.equal(s.players[0].commodities.cloth, mineCloth + 1);
+  assert.equal(s.players[0].resources.wood, mineWood + 1);
+  assert.equal(count(s.players[1]), total - 2);
+  conservation(s);
+});
+
+test('豪商: 相手が持っていない札は取れない', () => {
+  let s = readyGame();
+  for (const r of RESOURCES) setCards(s, 1, r, 0);
+  for (const c of COMMODITIES) setCards(s, 1, c, 0);
+  setCards(s, 1, 'ore', 1); // 手札1枚だけ → 奪えるのも1枚
+  const vid = Object.keys(LAYOUT.vertices).find(
+    (v) => !s.buildings[v] && !s.knights[v],
+  );
+  s.buildings[vid] = { player: 1, type: 'city' };
+  s = playCard(s, 0, 'masterMerchant', { target: 1 });
+  assert.equal(s.awaiting.context.count, 1);
+  assert.equal(
+    validateAction(s, { type: 'PICK_MERCHANT', player: 0, cards: { wood: 1 } }),
+    '相手はそれだけ持っていません',
+  );
+  assert.equal(
+    validateAction(s, { type: 'PICK_MERCHANT', player: 0, cards: { ore: 2 } }),
+    'ちょうど1枚選んでください',
+  );
+  s = dispatch(s, { type: 'PICK_MERCHANT', player: 0, cards: { ore: 1 } });
+  assert.equal(s.players[1].resources.ore, 0);
   conservation(s);
 });
 
@@ -222,12 +262,23 @@ test('破壊工作員: 同点以上のプレイヤーが手札の半分を捨て
   conservation(s);
 });
 
-test('スパイ: 相手の進歩カードを奪う(奪ったターンは使えない)', () => {
+test('スパイ: 相手の進歩カードを見て1枚選んで奪う(奪ったターンは使えない)', () => {
   let s = readyGame();
   giveCard(s, 1, 'warlord');
+  giveCard(s, 1, 'bishop');
   s = playCard(s, 0, 'spy', { target: 1 });
-  assert.equal(s.players[1].progressCards.length, 0);
+  // 中身を見て選ぶ割り込みが本人に返る。覗いた中身は context に入れない。
+  assert.equal(s.awaiting.type, 'spyPick');
+  assert.deepEqual(s.awaiting.players, [0]);
+  assert.equal(s.awaiting.context.target, 1);
+  assert.equal(s.awaiting.context.cards, undefined);
+  const wanted = s.players[1].progressCards.findIndex((c) => c.id === 'bishop');
+  s = dispatch(s, { type: 'PICK_SPY', player: 0, index: wanted });
+  assert.equal(s.awaiting, null);
+  assert.equal(s.players[1].progressCards.length, 1);
+  assert.equal(s.players[1].progressCards[0].id, 'warlord');
   assert.equal(s.players[0].progressCards.length, 1);
+  assert.equal(s.players[0].progressCards[0].id, 'bishop');
   assert.equal(s.players[0].progressCards[0].boughtTurn, s.turn);
 });
 

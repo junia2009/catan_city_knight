@@ -540,6 +540,7 @@ function newGame() {
 // ダイアログの描画が state を読めずに例外で落ちて操作不能になる。
 const INTERRUPT_DIALOGS = [
   'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck', 'progressLimit', 'weddingGift', 'harborGive',
+  'merchantPick', 'spyPick',
 ];
 // awaiting の種類ごとに、開いたままでよいダイアログ
 const DIALOG_FOR_AWAITING = {
@@ -552,6 +553,8 @@ const DIALOG_FOR_AWAITING = {
   progressLimit: 'progressLimit',
   weddingGift: 'weddingGift',
   harborGive: 'harborGive',
+  merchantPick: 'merchantPick',
+  spyPick: 'spyPick',
   moveRobber: 'steal', // 略奪相手の選択(自分で開くのでここでは自動で開かない)
 };
 // awaiting の種類ごとの盤面入力モード
@@ -600,7 +603,7 @@ function syncUi() {
       ui.pending = null;
     }
     if (keep && keep !== 'steal' && ui.dialog?.type !== keep) {
-      ui.dialog = (keep === 'discard' || keep === 'weddingGift')
+      ui.dialog = ['discard', 'weddingGift', 'merchantPick'].includes(keep)
         ? {
             type: keep,
             // 都市と騎士では商品も捨て札の対象(手札上限に数えるため)
@@ -1779,6 +1782,16 @@ document.addEventListener('click', (e) => {
     case 'wed-minus': ui.dialog.counts[arg]--; refresh(); return;
     case 'wed-confirm':
       doAction({ type: 'GIVE_WEDDING', player: HUMAN, cards: { ...ui.dialog.counts } });
+      return;
+
+    case 'mer-plus': ui.dialog.counts[arg]++; refresh(); return;
+    case 'mer-minus': ui.dialog.counts[arg]--; refresh(); return;
+    case 'mer-confirm':
+      doAction({ type: 'PICK_MERCHANT', player: HUMAN, cards: { ...ui.dialog.counts } });
+      return;
+
+    case 'spy-take':
+      doAction({ type: 'PICK_SPY', player: HUMAN, index: Number(arg) });
       return;
 
     case 'steal':
