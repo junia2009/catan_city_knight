@@ -7,6 +7,7 @@ import { dispatch, validateAction } from '../src/actions.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 import {
   PROGRESS_CARDS, buildProgressDecks, COMMODITIES, distributeProgressCards,
+  diplomatMovable, diplomatDestinations,
 } from '../src/rules/cak/progress-cards.js';
 import { tradeRate } from '../src/rules/trade.js';
 import { computePoints } from '../src/rules/victory.js';
@@ -449,4 +450,66 @@ test('セルフプレイ: 難易度別でも完走する(easy/normal 各5ゲー�
       }
     }
   }
+});
+
+test('外交官: 相手の道の撤去に加えて、自分の道を移設できる(公式)', () => {
+  const base = readyGame();
+  // 自分の道の先端(開いた道)と、相手の開いた道を用意する
+  const myOpen = diplomatMovable(base, 0);
+  assert.ok(myOpen.length > 0, '自分の開いた道がない');
+  const from = myOpen[0];
+  const dests = diplomatDestinations(base, 0, from);
+  assert.ok(dests.length > 0, '移設先がない');
+  const to = dests[0];
+
+  // 移設: 元の辺から消えて、移設先に自分の道ができる
+  let s = playCard(structuredClone(base), 0, 'diplomat', { edgeId: from, to });
+  assert.equal(s.roads[from], undefined, '元の道が残っている');
+  assert.equal(s.roads[to].player, 0);
+  // 道の総数は変わらない(移設なので増えない)
+  const count = (g, pid) => Object.values(g.roads).filter((r) => r.player === pid).length;
+  assert.equal(count(s, 0), count(base, 0));
+
+  // 撤去だけ(to なし)も従来どおり通る
+  s = playCard(structuredClone(base), 0, 'diplomat', { edgeId: from });
+  assert.equal(s.roads[from], undefined);
+  assert.equal(count(s, 0), count(base, 0) - 1);
+
+  // 相手の道は移設できない
+  const t = structuredClone(base);
+  const index = giveCard(t, 0, 'diplomat');
+  const play = (params) =>
+    validateAction(t, { type: 'PLAY_PROGRESS_CARD', player: 0, index, params });
+  const enemyOpen = diplomatMovable(t, 1)[0];
+  if (enemyOpen) {
+    assert.match(play({ edgeId: enemyOpen, to }), /自分の道だけ/);
+    assert.equal(play({ edgeId: enemyOpen }), null, '相手の開いた道は撤去できるはず');
+  }
+  // 同じ場所へは移せない / 繋がらない場所へも移せない
+  assert.match(play({ edgeId: from, to: from }), /別の場所/);
+});
+
+test('外交官: 移設先は「その道を外した状態」で置ける辺に限る', () => {
+  const s = readyGame();
+  const from = diplomatMovable(s, 0)[0];
+  const dests = diplomatDestinations(s, 0, from);
+  const index = giveCard(s, 0, 'diplomat');
+  // 列挙された行き先はすべて通り、それ以外は通らない
+  for (const to of dests.slice(0, 5)) {
+    assert.equal(
+      validateAction(s, { type: 'PLAY_PROGRESS_CARD', player: 0, index, params: { edgeId: from, to } }),
+      null,
+      `移設先 ${to} が通らない`,
+    );
+  }
+  const notDest = Object.keys(LAYOUT.edges).find(
+    (e) => e !== from && !dests.includes(e) && !s.roads[e],
+  );
+  assert.ok(notDest);
+  assert.ok(
+    validateAction(s, {
+      type: 'PLAY_PROGRESS_CARD', player: 0, index, params: { edgeId: from, to: notDest },
+    }) !== null,
+    '繋がらない辺へ移設できてしまう',
+  );
 });

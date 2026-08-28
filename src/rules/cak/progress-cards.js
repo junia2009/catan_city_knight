@@ -74,6 +74,33 @@ function isOpenRoad(state, eid) {
   });
 }
 
+// その辺の道を外した state(判定用の使い捨て。元の state は変えない)
+function roadsWithout(state, eid) {
+  const roads = { ...state.roads };
+  delete roads[eid];
+  return { ...state, roads };
+}
+
+// 外交官で撤去できる道(自分のぶんも含む。開いた道すべて)
+export function diplomatRemovable(state) {
+  return Object.keys(state.roads).filter((eid) => isOpenRoad(state, eid));
+}
+
+// 外交官で移設できる自分の道
+export function diplomatMovable(state, pid) {
+  return Object.keys(state.roads).filter(
+    (eid) => state.roads[eid].player === pid && isOpenRoad(state, eid),
+  );
+}
+
+// その道を移設できる先。外した状態で普通に道を置ける辺。
+export function diplomatDestinations(state, pid, fromEdge) {
+  const sim = roadsWithout(state, fromEdge);
+  return Object.keys(LAYOUT.edges).filter(
+    (eid) => eid !== fromEdge && canPlaceRoad(sim, pid, eid) === null,
+  );
+}
+
 // 自分より勝利点が高い(または以上の)プレイヤー一覧
 function playersAbove(state, pid, { orEqual = false } = {}) {
   const mine = computePoints(state, pid);
@@ -305,18 +332,29 @@ export const PROGRESS_CARDS = {
   diplomat: {
     deck: 'politics', count: 2,
     name: '外交官', icon: '🎖️',
-    desc: '両端が繋がっていない「開いた道」を1本取り除く',
-    needsParams: 'edge',
+    desc: '端が繋がっていない「開いた道」を1本取り除く。自分の道なら別の場所へ無料で移設できる',
+    needsParams: 'diplomat',
     validate(state, pid, params) {
-      if (!state.roads[params?.edgeId]) return '道を選んでください';
-      if (!isOpenRoad(state, params.edgeId)) return '開いた道(端が繋がっていない道)のみ対象です';
-      return null;
+      const eid = params?.edgeId;
+      const road = state.roads[eid];
+      if (!road) return '道を選んでください';
+      if (!isOpenRoad(state, eid)) return '開いた道(端が繋がっていない道)のみ対象です';
+      if (params.to == null) return null; // 撤去だけ(相手の道でも自分の道でもよい)
+      // 移設は自分の道のみ。いったん外した状態で置けるかを見る。
+      if (road.player !== pid) return '移設できるのは自分の道だけです';
+      if (params.to === eid) return '別の場所へ移してください';
+      return canPlaceRoad(roadsWithout(state, eid), pid, params.to);
     },
     play(state, pid, params) {
       const owner = state.roads[params.edgeId].player;
       delete state.roads[params.edgeId];
+      if (params.to != null) {
+        state.roads[params.to] = { player: pid };
+        addLog(state, `🎖️ ${state.players[pid].name}が自分の道を移設`);
+      } else {
+        addLog(state, `🎖️ ${state.players[pid].name}が${state.players[owner].name}の道を撤去`);
+      }
       updateLongestRoad(state);
-      addLog(state, `🎖️ ${state.players[pid].name}が${state.players[owner].name}の道を撤去`);
     },
   },
 

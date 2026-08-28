@@ -19,7 +19,9 @@ import { LAYOUT, boardVertexIds } from './rules/board.js';
 import { isSeaHex, movableShips, pirateTargets } from './rules/sea.js';
 import { lsSet, lsRemove } from './storage.js';
 import { razableCities } from './rules/cak/barbarians.js';
-import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
+import {
+  PROGRESS_CARDS, diplomatMovable, diplomatDestinations,
+} from './rules/cak/progress-cards.js';
 import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-render.js';
 import { avatarSvg } from './render/avatars.js';
 import { renderHUD, RES_ICON, COM_ICON, setHumanSeat } from './render/hud-render.js';
@@ -705,6 +707,14 @@ function computeHighlights() {
       ),
     };
   }
+  if (m === 'prog-moveroad') {
+    // 1本目は自分の開いた道、2本目はその道を外した状態で置ける辺
+    return {
+      edges: ui.pendingEdges.length === 0
+        ? diplomatMovable(state, HUMAN)
+        : diplomatDestinations(state, HUMAN, ui.pendingEdges[0]),
+    };
+  }
   if (m === 'prog-knights') {
     // 選択済みのぶんを当てはめてから、まだ昇格できる騎士を出す
     return {
@@ -1099,6 +1109,9 @@ function startProgressPlay(index) {
   } else if (def.needsParams === 'player') {
     ui.dialog = { type: 'prog-player', index };
     refresh();
+  } else if (def.needsParams === 'diplomat') {
+    ui.dialog = { type: 'diplomat', index };
+    refresh();
   } else if (def.needsParams === 'dice') {
     ui.dialog = { type: 'prog-dice', index, red: null, yellow: null };
     refresh();
@@ -1267,6 +1280,9 @@ function boardClick(pick) {
     if (hid && ui.pendingHexes.length < 2 && !ui.pendingHexes.includes(hid)) {
       ui.pendingHexes.push(hid);
     }
+  } else if (m === 'prog-moveroad') {
+    const eid = pick('edge', ui.highlights.edges ?? []);
+    if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
   } else if (m === 'prog-knights') {
     const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid && ui.pendingVertices.length < 2) ui.pendingVertices.push(vid);
@@ -1381,6 +1397,11 @@ function confirmPending() {
       type: 'PLAY_PROGRESS_CARD', player: HUMAN,
       index: ui.progIndex, params: { a: ui.pendingHexes[0], b: ui.pendingHexes[1] },
     });
+  } else if (m === 'prog-moveroad' && ui.pendingEdges.length === 2 && ui.progIndex != null) {
+    doAction({
+      type: 'PLAY_PROGRESS_CARD', player: HUMAN,
+      index: ui.progIndex, params: { edgeId: ui.pendingEdges[0], to: ui.pendingEdges[1] },
+    });
   } else if (m === 'prog-knights' && ui.pendingVertices.length >= 1 && ui.progIndex != null) {
     doAction({
       type: 'PLAY_PROGRESS_CARD', player: HUMAN,
@@ -1404,7 +1425,7 @@ function cancelMode() {
     'build-road', 'fish-road', 'build-ship', 'move-ship', 'move-ship-to',
     'build-settlement', 'build-city', 'play-road-building',
     'build-knight', 'build-wall', 'build-tower', 'move-knight',
-    'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads', 'prog-knights',
+    'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads', 'prog-knights', 'prog-moveroad',
   ].includes(ui.mode)) {
     ui.mode = 'idle';
     ui.pending = null;
@@ -1663,6 +1684,16 @@ document.addEventListener('click', (e) => {
     case 'ddeck':
       doAction({ type: 'PICK_DEFENDER_DECK', player: HUMAN, track: arg });
       return;
+    case 'diplo': {
+      const index = ui.dialog?.index;
+      ui.dialog = null;
+      ui.progIndex = index;
+      ui.pending = null;
+      ui.pendingEdges = [];
+      ui.mode = arg === 'move' ? 'prog-moveroad' : 'prog-edge';
+      refresh();
+      return;
+    }
     case 'pdisc':
       doAction({ type: 'DISCARD_PROGRESS', player: HUMAN, index: Number(arg) });
       return;

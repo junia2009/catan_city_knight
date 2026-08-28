@@ -11,7 +11,9 @@ import { canPromoteKnight } from '../rules/cak/knights.js';
 import {
   TRACKS, TRACK_COMMODITY, MAX_IMPROVEMENT, canBuyImprovement, improvementCost,
 } from '../rules/cak/improvements.js';
-import { COMMODITIES, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
+import {
+  COMMODITIES, PROGRESS_CARDS, diplomatMovable, diplomatDestinations,
+} from '../rules/cak/progress-cards.js';
 import { validateAction } from '../actions.js';
 import {
   playerProduction, robberHexValue, vertexValue, missingFor, surplusOver,
@@ -142,15 +144,26 @@ const SCORERS = {
   },
 
   diplomat(state, pid) {
-    // 敵の開いた道のみ対象(自分の道は消さない)。交易路首位を優先
+    // 敵の開いた道の撤去(交易路首位を優先)と、自分の開いた道の移設を比べる
     let best = null;
+    const consider = (score, params) => {
+      if (PROGRESS_CARDS.diplomat.validate(state, pid, params)) return;
+      if (!best || score > best.score) best = { score, params };
+    };
     for (const [eid, road] of Object.entries(state.roads)) {
       if (road.player === pid) continue;
-      const a = { type: 'PLAY_PROGRESS_CARD', player: pid, index: 0, params: { edgeId: eid } };
-      if (PROGRESS_CARDS.diplomat.validate(state, pid, a.params)) continue;
-      const isLeader = state.longestRoad.player === road.player;
-      const score = isLeader ? 3 : 1.2;
-      if (!best || score > best.score) best = { score, params: { edgeId: eid } };
+      consider(state.longestRoad.player === road.player ? 3 : 1.2, { edgeId: eid });
+    }
+    // 移設: いま伸びている先より価値の高い辺へ移せるなら
+    const edgeReach = (eid) => Math.max(
+      ...LAYOUT.edges[eid].v.map((v) => (state.buildings[v] ? 0 : vertexValue(state, pid, v))),
+    );
+    for (const from of diplomatMovable(state, pid)) {
+      const now = edgeReach(from);
+      for (const to of diplomatDestinations(state, pid, from)) {
+        const gain = edgeReach(to) - now;
+        if (gain > 0.5) consider(1 + gain, { edgeId: from, to });
+      }
     }
     return best;
   },
