@@ -77,6 +77,9 @@ import {
   PROGRESS_HAND_LIMIT,
   distributeProgressCards,
   drawProgressCard,
+  deserterLevel,
+  deserterSpots,
+  weddingGiftSize,
 } from './rules/cak/progress-cards.js';
 
 const ALL_CARD_KEYS = [...RESOURCES, ...COMMODITIES];
@@ -140,6 +143,11 @@ const AWAITING_ACTIONS = {
   barbarianDefense: 'RAZE_CITY',
   defenderDeck: 'PICK_DEFENDER_DECK',
   progressLimit: 'DISCARD_PROGRESS',
+  weddingGift: 'GIVE_WEDDING',
+  harborGive: 'GIVE_HARBOR',
+  deserterPick: 'PICK_DESERTER',
+  deserterPlace: 'PLACE_DESERTER',
+  knightDisplace: 'PLACE_DISPLACED_KNIGHT',
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
@@ -451,6 +459,49 @@ export function validateAction(state, action) {
 
     case 'DISCARD_PROGRESS': {
       if (!p.progressCards[action.index]) return '捨てるカードを選んでください';
+      return null;
+    }
+
+    // 追い出された騎士の行き先は持ち主が選ぶ
+    case 'PLACE_DISPLACED_KNIGHT': {
+      if (!aw.context.spots.includes(action.vertexId)) return 'そこへは移動できません';
+      if (state.buildings[action.vertexId] || state.knights[action.vertexId]) {
+        return 'その頂点は空いていません';
+      }
+      return null;
+    }
+
+    // 脱走兵: 差し出す騎士は自分で選ぶ
+    case 'PICK_DESERTER': {
+      const k = state.knights[action.vertexId];
+      if (!k || k.player !== pid) return '自分の騎士を選んでください';
+      return null;
+    }
+
+    // 脱走兵: 受け取った騎士を自分の道網に置く
+    case 'PLACE_DESERTER': {
+      if (!deserterSpots(state, pid).includes(action.vertexId)) {
+        return '自分の道に隣接する空き頂点を選んでください';
+      }
+      return null;
+    }
+
+    // 商業港: 渡す商品は自分で選ぶ
+    case 'GIVE_HARBOR': {
+      if (!COMMODITIES.includes(action.commodity)) return '渡す商品を選んでください';
+      if (p.commodities[action.commodity] < 1) return 'その商品を持っていません';
+      return null;
+    }
+
+    // 王家の婚礼: 渡す2枚は自分で選ぶ(手札が1枚しかなければ1枚)
+    case 'GIVE_WEDDING': {
+      const need = weddingGiftSize(state, pid);
+      if (sumRes(action.cards) !== need) return `ちょうど${need}枚選んでください`;
+      for (const r of ALL_CARD_KEYS) {
+        const n = action.cards[r] ?? 0;
+        if (n < 0) return '不正な枚数です';
+        if (n > cardCount(p, r)) return '手札が足りません';
+      }
       return null;
     }
 
@@ -809,6 +860,74 @@ function applyAction(state, action) {
       break;
     }
 
+    case 'PLACE_DISPLACED_KNIGHT': {
+      const { level } = state.awaiting.context;
+      state.knights[action.vertexId] = {
+        player: pid, level, active: false, activatedTurn: -1,
+      };
+      addLog(state, `${p.name}の騎士が移動しました`);
+      state.awaiting = null;
+      break;
+    }
+
+    case 'PICK_DESERTER': {
+      const to = state.awaiting.context.to;
+      const k = state.knights[action.vertexId];
+      delete state.knights[action.vertexId];
+      addLog(state, `🏳️ ${p.name}の騎士(Lv${k.level})が脱走!`);
+      // コマ在庫の許すレベルで、受け取る側が置き場所を選ぶ
+      const level = deserterLevel(state, to, k.level);
+      const spots = level >= 1 ? deserterSpots(state, to) : [];
+      state.awaiting = spots.length
+        ? { type: 'deserterPlace', players: [to], context: { level } }
+        : null;
+      if (!spots.length) {
+        addLog(state, `${state.players[to].name}は騎士を置ける場所がありませんでした`);
+      }
+      break;
+    }
+
+    case 'PLACE_DESERTER': {
+      const { level } = state.awaiting.context;
+      state.knights[action.vertexId] = {
+        player: pid, level, active: false, activatedTurn: -1,
+      };
+      addLog(state, `${p.name}が脱走してきた騎士(Lv${level})を配置`);
+      state.awaiting = null;
+      break;
+    }
+
+    case 'GIVE_HARBOR': {
+      const { to: toPid, resource } = state.awaiting.context;
+      const to = state.players[toPid];
+      const c = action.commodity;
+      // 相手の資源が尽きていたら交換は起きない(公式: 資源1枚と引き換え)
+      if (to.resources[resource] > 0) {
+        p.commodities[c] -= 1; to.commodities[c] += 1;
+        to.resources[resource] -= 1; p.resources[resource] += 1;
+        addLog(state, `⚓ ${p.name}が${COM_JP[c]}を渡し、${RES_JP[resource]}を受け取りました`);
+      } else {
+        addLog(state, `⚓ ${to.name}の${RES_JP[resource]}が尽きたため、${p.name}との交換は成立せず`);
+      }
+      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+      if (state.awaiting.players.length === 0) state.awaiting = null;
+      break;
+    }
+
+    case 'GIVE_WEDDING': {
+      const to = state.players[state.awaiting.context.to];
+      for (const r of ALL_CARD_KEYS) {
+        const n = action.cards[r] ?? 0;
+        if (!n) continue;
+        if (RESOURCES.includes(r)) { p.resources[r] -= n; to.resources[r] += n; }
+        else { p.commodities[r] -= n; to.commodities[r] += n; }
+      }
+      addLog(state, `💒 ${p.name}が${to.name}に${fmtCards(action.cards)}を贈りました`);
+      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+      if (state.awaiting.players.length === 0) state.awaiting = null;
+      break;
+    }
+
     // 防衛の功が同点だったときの報酬。引く山は本人が選ぶ(公式)。
     case 'PICK_DEFENDER_DECK': {
       drawProgressCard(state, pid, action.track);
@@ -1048,7 +1167,16 @@ function applyAction(state, action) {
     }
 
     case 'MOVE_KNIGHT':
-      applyKnightMove(state, pid, action.fromVertexId, action.toVertexId);
+      {
+        const displaced = applyKnightMove(state, pid, action.fromVertexId, action.toVertexId);
+        if (displaced) {
+          state.awaiting = {
+            type: 'knightDisplace',
+            players: [displaced.owner],
+            context: { level: displaced.level, spots: displaced.spots },
+          };
+        }
+      }
       addLog(state, `${p.name}が騎士を移動しました`);
       break;
 
@@ -1080,6 +1208,11 @@ function applyAction(state, action) {
       addLog(state, `${p.name}が進歩カード「${def.name}」を使用`);
       def.play(state, pid, action.params);
       state.bank.progressDecks[card.deck].unshift(card.id); // 使用済みは山札の底へ
+      // 相手に選択を返すカードは、ここで割り込みを立てる(効果は応答時に適用する)
+      if (def.awaitAfterPlay) {
+        const aw = def.awaitAfterPlay(state, pid, action.params);
+        if (aw?.players.length) state.awaiting = aw;
+      }
       break;
     }
 

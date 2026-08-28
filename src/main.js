@@ -21,6 +21,7 @@ import { lsSet, lsRemove } from './storage.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import {
   PROGRESS_CARDS, diplomatMovable, diplomatDestinations,
+  deserterKnights, deserterSpots,
 } from './rules/cak/progress-cards.js';
 import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-render.js';
 import { avatarSvg } from './render/avatars.js';
@@ -538,7 +539,7 @@ function newGame() {
 // 閉じ忘れると「捨て札ダイアログのまま盗賊移動になる」ような食い違いが起き、
 // ダイアログの描画が state を読めずに例外で落ちて操作不能になる。
 const INTERRUPT_DIALOGS = [
-  'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck', 'progressLimit',
+  'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck', 'progressLimit', 'weddingGift', 'harborGive',
 ];
 // awaiting の種類ごとに、開いたままでよいダイアログ
 const DIALOG_FOR_AWAITING = {
@@ -549,6 +550,8 @@ const DIALOG_FOR_AWAITING = {
   goldChoice: 'gold',
   defenderDeck: 'defenderDeck',
   progressLimit: 'progressLimit',
+  weddingGift: 'weddingGift',
+  harborGive: 'harborGive',
   moveRobber: 'steal', // 略奪相手の選択(自分で開くのでここでは自動で開かない)
 };
 // awaiting の種類ごとの盤面入力モード
@@ -556,11 +559,17 @@ const MODE_FOR_AWAITING = {
   setupPlacement: 'setup-settlement',
   moveRobber: 'move-robber',
   barbarianDefense: 'raze-city',
+  deserterPick: 'desert-pick',
+  deserterPlace: 'desert-place',
+  knightDisplace: 'knight-displace',
 };
 
 function syncUi() {
   const aw = state.awaiting;
-  const forced = ['setup-settlement', 'setup-road', 'move-robber', 'raze-city'].includes(ui.mode);
+  const forced = [
+    'setup-settlement', 'setup-road', 'move-robber', 'raze-city',
+    'desert-pick', 'desert-place', 'knight-displace',
+  ].includes(ui.mode);
 
   if (state.phase === 'ended') {
     ui.mode = 'idle';
@@ -591,9 +600,9 @@ function syncUi() {
       ui.pending = null;
     }
     if (keep && keep !== 'steal' && ui.dialog?.type !== keep) {
-      ui.dialog = keep === 'discard'
+      ui.dialog = (keep === 'discard' || keep === 'weddingGift')
         ? {
-            type: 'discard',
+            type: keep,
             // 都市と騎士では商品も捨て札の対象(手札上限に数えるため)
             counts: {
               wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0,
@@ -707,6 +716,9 @@ function computeHighlights() {
       ),
     };
   }
+  if (m === 'knight-displace') return { vertices: state.awaiting?.context?.spots ?? [] };
+  if (m === 'desert-pick') return { vertices: deserterKnights(state, HUMAN) };
+  if (m === 'desert-place') return { vertices: deserterSpots(state, HUMAN) };
   if (m === 'prog-moveroad') {
     // 1本目は自分の開いた道、2本目はその道を外した状態で置ける辺
     return {
@@ -1263,7 +1275,10 @@ function boardClick(pick) {
   } else if (m === 'play-road-building') {
     const eid = pick('edge', ui.highlights.edges ?? []);
     if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
-  } else if (['build-knight', 'build-wall', 'build-tower', 'move-knight', 'raze-city'].includes(m)) {
+  } else if ([
+    'build-knight', 'build-wall', 'build-tower', 'move-knight', 'raze-city',
+    'desert-pick', 'desert-place', 'knight-displace',
+  ].includes(m)) {
     const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid) ui.pending = { vertexId: vid };
   } else if (m === 'prog-hex') {
@@ -1355,6 +1370,12 @@ function confirmPending() {
     doAction({ type: 'BUILD_SETTLEMENT', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'build-city' && ui.pending?.vertexId) {
     doAction({ type: 'BUILD_CITY', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'knight-displace' && ui.pending?.vertexId) {
+    doAction({ type: 'PLACE_DISPLACED_KNIGHT', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'desert-pick' && ui.pending?.vertexId) {
+    doAction({ type: 'PICK_DESERTER', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'desert-place' && ui.pending?.vertexId) {
+    doAction({ type: 'PLACE_DESERTER', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'move-robber' && ui.pending?.hexId) {
     doAction({ type: 'MOVE_ROBBER', player: HUMAN, hexId: ui.pending.hexId, targetPlayer: null });
   } else if (m === 'play-road-building' && ui.pendingEdges.length >= 1) {
@@ -1748,6 +1769,16 @@ document.addEventListener('click', (e) => {
     case 'discard-minus': ui.dialog.counts[arg]--; refresh(); return;
     case 'discard-confirm':
       doAction({ type: 'DISCARD', player: HUMAN, resources: { ...ui.dialog.counts } });
+      return;
+
+    case 'harbor':
+      doAction({ type: 'GIVE_HARBOR', player: HUMAN, commodity: arg });
+      return;
+
+    case 'wed-plus': ui.dialog.counts[arg]++; refresh(); return;
+    case 'wed-minus': ui.dialog.counts[arg]--; refresh(); return;
+    case 'wed-confirm':
+      doAction({ type: 'GIVE_WEDDING', player: HUMAN, cards: { ...ui.dialog.counts } });
       return;
 
     case 'steal':

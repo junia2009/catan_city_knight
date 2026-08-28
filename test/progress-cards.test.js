@@ -144,19 +144,62 @@ test('豪商: 勝利点が上の相手からのみ2枚奪える', () => {
   conservation(s);
 });
 
-test('商業港: 資源1枚と相手の商品1枚を強制交換', () => {
+test('商業港: 渡す商品は相手が選ぶ(公式)', () => {
   let s = readyGame();
-  for (const p of s.players) for (const c of COMMODITIES) setCards(s, p.id, c, 0);
-  for (const p of s.players) setCards(s, p.id, 'wood', 0);
+  for (const p of s.players) {
+    for (const c of COMMODITIES) setCards(s, p.id, c, 0);
+    setCards(s, p.id, 'wood', 0);
+  }
   setCards(s, 0, 'wood', 3);
   setCards(s, 1, 'cloth', 1);
+  setCards(s, 1, 'paper', 2); // 席1 は布と紙のどちらを渡すか選べる
   setCards(s, 2, 'paper', 1);
+
   s = playCard(s, 0, 'commercialHarbor', { resource: 'wood' });
-  assert.equal(s.players[0].commodities.cloth + s.players[0].commodities.paper, 2);
-  assert.equal(s.players[0].resources.wood, 1);
-  assert.equal(s.players[1].resources.wood, 1);
-  assert.equal(s.players[2].resources.wood, 1);
-  conservation(s);
+  assert.equal(s.awaiting?.type, 'harborGive');
+  assert.deepEqual(s.awaiting.players, [1, 2]);
+  assert.equal(s.players[0].resources.wood, 3, '選ぶ前に交換が起きている');
+
+  // 持っていない商品は選べない
+  assert.match(
+    validateAction(s, { type: 'GIVE_HARBOR', player: 1, commodity: 'coin' }),
+    /持っていません/,
+  );
+
+  // 席1 は紙を選ぶ(自動選択ではなく指定どおりに動く)
+  let after = dispatch(s, { type: 'GIVE_HARBOR', player: 1, commodity: 'paper' });
+  assert.equal(after.players[0].commodities.paper, 1);
+  assert.equal(after.players[0].commodities.cloth, 0, '選んでいない商品まで渡っている');
+  assert.equal(after.players[1].resources.wood, 1, '資源が返っていない');
+  assert.equal(after.players[0].resources.wood, 2);
+  assert.deepEqual(after.awaiting.players, [2]);
+
+  after = dispatch(after, { type: 'GIVE_HARBOR', player: 2, commodity: 'paper' });
+  assert.equal(after.players[0].commodities.paper, 2);
+  assert.equal(after.awaiting, null);
+  conservation(after);
+});
+
+test('商業港: 使う側の資源が尽きたら、そこから先は交換されない', () => {
+  let s = readyGame();
+  for (const p of s.players) {
+    for (const c of COMMODITIES) setCards(s, p.id, c, 0);
+    setCards(s, p.id, 'wood', 0);
+  }
+  setCards(s, 0, 'wood', 1); // 1枚しかないので交換できるのは1人まで
+  setCards(s, 1, 'cloth', 1);
+  setCards(s, 2, 'coin', 1);
+
+  s = playCard(s, 0, 'commercialHarbor', { resource: 'wood' });
+  let after = dispatch(s, { type: 'GIVE_HARBOR', player: 1, commodity: 'cloth' });
+  assert.equal(after.players[0].commodities.cloth, 1);
+  assert.equal(after.players[0].resources.wood, 0);
+  // 2人目は資源が尽きているので商品を失わない
+  after = dispatch(after, { type: 'GIVE_HARBOR', player: 2, commodity: 'coin' });
+  assert.equal(after.players[2].commodities.coin, 1, '資源が無いのに商品を取られている');
+  assert.equal(after.players[0].commodities.coin, 0);
+  assert.equal(after.awaiting, null);
+  conservation(after);
 });
 
 // ---- 政治系 ----
@@ -199,18 +242,71 @@ test('将軍: 全騎士を無料で活性化', () => {
   assert.equal(s.knights[vid].active, true);
 });
 
-test('脱走兵: 相手の騎士を除去し自分の騎士を無料配置', () => {
-  let s = readyGame();
-  const enemyVid = Object.keys(LAYOUT.vertices).find(
-    (v) => !s.buildings[v] && !s.knights[v] &&
-      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 1),
+test('脱走兵: 差し出す騎士は相手が選び、置き場所は使った側が選ぶ(公式)', () => {
+  const base = readyGame();
+  const spots = Object.keys(LAYOUT.vertices).filter(
+    (v) => !base.buildings[v] && !base.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => base.roads[e]?.player === 1),
   );
-  s.knights[enemyVid] = { player: 1, level: 2, active: true, activatedTurn: -1 };
-  s = playCard(s, 0, 'deserter', { target: 1 });
-  assert.equal(s.knights[enemyVid], undefined);
-  const mine = Object.values(s.knights).filter((k) => k.player === 0);
-  assert.equal(mine.length, 1);
-  assert.equal(mine[0].level, 2);
+  const [a, b] = spots;
+  const setup = () => {
+    const s = structuredClone(base);
+    s.knights[a] = { player: 1, level: 2, active: true, activatedTurn: -1 };
+    s.knights[b] = { player: 1, level: 1, active: false, activatedTurn: -1 };
+    return s;
+  };
+
+  let s = playCard(setup(), 0, 'deserter', { target: 1 });
+  assert.equal(s.awaiting?.type, 'deserterPick');
+  assert.deepEqual(s.awaiting.players, [1]);
+  assert.equal(Object.keys(s.knights).length, 2, '選ぶ前に騎士が消えている');
+
+  // 自分の騎士しか差し出せない
+  assert.match(
+    validateAction(s, { type: 'PICK_DESERTER', player: 1, vertexId: a.replace(/./, 'X') }),
+    /自分の騎士/,
+  );
+
+  // 相手が Lv2 のほうを差し出すと、こちらは Lv2 を置ける
+  let after = dispatch(s, { type: 'PICK_DESERTER', player: 1, vertexId: a });
+  assert.equal(after.knights[a], undefined);
+  assert.equal(after.knights[b].level, 1, '選ばなかった騎士まで消えている');
+  assert.equal(after.awaiting?.type, 'deserterPlace');
+  assert.deepEqual(after.awaiting.players, [0]);
+  assert.equal(after.awaiting.context.level, 2);
+
+  // 置けるのは自分の道に隣接する空き頂点だけ
+  const mySpots = Object.keys(LAYOUT.vertices).filter(
+    (v) => !after.buildings[v] && !after.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => after.roads[e]?.player === 0),
+  );
+  assert.ok(mySpots.length > 0);
+  assert.match(
+    validateAction(after, { type: 'PLACE_DESERTER', player: 0, vertexId: b }),
+    /自分の道に隣接/,
+  );
+  const done = dispatch(after, { type: 'PLACE_DESERTER', player: 0, vertexId: mySpots[0] });
+  assert.equal(done.knights[mySpots[0]].player, 0);
+  assert.equal(done.knights[mySpots[0]].level, 2);
+  assert.equal(done.knights[mySpots[0]].active, false, '配置直後は不活性のはず');
+  assert.equal(done.awaiting, null);
+
+  // 相手が Lv1 を差し出せば、こちらが置けるのも Lv1
+  const lowered = dispatch(playCard(setup(), 0, 'deserter', { target: 1 }),
+    { type: 'PICK_DESERTER', player: 1, vertexId: b });
+  assert.equal(lowered.awaiting.context.level, 1);
+});
+
+test('脱走兵: 置き場所が無ければ騎士は消えるだけ', () => {
+  const s = readyGame();
+  const enemyVid = Object.keys(LAYOUT.vertices).find((v) => !s.buildings[v] && !s.knights[v]);
+  s.knights[enemyVid] = { player: 1, level: 1, active: false, activatedTurn: -1 };
+  // 自分の道をすべて消す = 置ける頂点が無くなる
+  for (const e of Object.keys(s.roads)) if (s.roads[e].player === 0) delete s.roads[e];
+  const played = playCard(s, 0, 'deserter', { target: 1 });
+  const after = dispatch(played, { type: 'PICK_DESERTER', player: 1, vertexId: enemyVid });
+  assert.equal(after.knights[enemyVid], undefined);
+  assert.equal(after.awaiting, null, '置けないのに配置待ちになっている');
 });
 
 test('外交官: 開いた道のみ除去できる', () => {
@@ -221,16 +317,71 @@ test('外交官: 開いた道のみ除去できる', () => {
   assert.equal(s.roads[eid], undefined);
 });
 
-test('王家の婚礼: 勝利点が上の相手から2枚ずつもらう', () => {
+test('王家の婚礼: 渡す2枚は相手が選ぶ(公式)', () => {
+  let s = readyGame();
+  const vid = Object.keys(LAYOUT.vertices).find((v) => !s.buildings[v] && !s.knights[v]);
+  s.buildings[vid] = { player: 1, type: 'city' }; // 席1だけ勝利点が上
+  for (const pl of s.players) {
+    for (const r of RESOURCES) setCards(s, pl.id, r, 0);
+    for (const c of COMMODITIES) setCards(s, pl.id, c, 0);
+  }
+  setCards(s, 1, 'wood', 3);
+  setCards(s, 1, 'cloth', 2);
+
+  // 使った時点ではまだ動かない。贈り主の選択待ちになる。
+  s = playCard(s, 0, 'wedding');
+  assert.equal(s.awaiting?.type, 'weddingGift');
+  assert.deepEqual(s.awaiting.players, [1]);
+  assert.equal(s.players[0].resources.wood, 0, '選ぶ前に受け取っている');
+
+  // 枚数がちょうど2枚でないと通らない / 持っていない札は選べない
+  const give = (cards) => ({ type: 'GIVE_WEDDING', player: 1, cards });
+  assert.match(validateAction(s, give({ wood: 1 })), /ちょうど2枚/);
+  assert.match(validateAction(s, give({ wood: 3 })), /ちょうど2枚/);
+  assert.match(validateAction(s, give({ ore: 2 })), /手札が足りません/);
+
+  // 相手が選んだ内訳がそのまま渡る(資源と商品を混ぜてもよい)
+  const after = dispatch(s, give({ wood: 1, cloth: 1 }));
+  assert.equal(after.players[0].resources.wood, 1);
+  assert.equal(after.players[0].commodities.cloth, 1);
+  assert.equal(after.players[1].resources.wood, 2);
+  assert.equal(after.players[1].commodities.cloth, 1);
+  assert.equal(after.awaiting, null);
+  conservation(after);
+});
+
+test('王家の婚礼: 手札が1枚の相手は1枚だけ渡す', () => {
   let s = readyGame();
   const vid = Object.keys(LAYOUT.vertices).find((v) => !s.buildings[v] && !s.knights[v]);
   s.buildings[vid] = { player: 1, type: 'city' };
-  for (const pl of s.players) for (const r of RESOURCES) setCards(s, pl.id, r, 0);
-  setCards(s, 1, 'wood', 5);
+  for (const pl of s.players) {
+    for (const r of RESOURCES) setCards(s, pl.id, r, 0);
+    for (const c of COMMODITIES) setCards(s, pl.id, c, 0);
+  }
+  setCards(s, 1, 'wood', 1);
   s = playCard(s, 0, 'wedding');
-  assert.equal(s.players[1].resources.wood, 3);
-  assert.equal(s.players[0].resources.wood >= 2, true);
-  conservation(s);
+  assert.match(validateAction(s, { type: 'GIVE_WEDDING', player: 1, cards: { wood: 2 } }), /ちょうど1枚/);
+  const after = dispatch(s, { type: 'GIVE_WEDDING', player: 1, cards: { wood: 1 } });
+  assert.equal(after.players[0].resources.wood, 1);
+  assert.equal(after.awaiting, null);
+  conservation(after);
+});
+
+test('王家の婚礼: 手札が無い相手は対象外', () => {
+  const s = readyGame();
+  const vid = Object.keys(LAYOUT.vertices).find((v) => !s.buildings[v] && !s.knights[v]);
+  s.buildings[vid] = { player: 1, type: 'city' };
+  for (const pl of s.players) {
+    for (const r of RESOURCES) setCards(s, pl.id, r, 0);
+    for (const c of COMMODITIES) setCards(s, pl.id, c, 0);
+  }
+  // 誰も手札を持っていなければカード自体を使えない
+  assert.match(
+    validateAction(s, {
+      type: 'PLAY_PROGRESS_CARD', player: 0, index: giveCard(s, 0, 'wedding'), params: null,
+    }),
+    /対象となる相手がいません/,
+  );
 });
 
 // ---- 科学系 ----
@@ -512,4 +663,48 @@ test('外交官: 移設先は「その道を外した状態」で置ける辺に
     }) !== null,
     '繋がらない辺へ移設できてしまう',
   );
+});
+
+test('陰謀: 追い出された騎士の移動先は持ち主が選ぶ(公式)', () => {
+  const s = readyGame();
+  // 自分の道に隣接する頂点に相手の騎士を置く
+  const target = Object.keys(LAYOUT.vertices).find(
+    (v) => !s.buildings[v] && !s.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 0) &&
+      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 1),
+  ) ?? Object.keys(LAYOUT.vertices).find(
+    (v) => !s.buildings[v] && !s.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 0),
+  );
+  s.knights[target] = { player: 1, level: 1, active: true, activatedTurn: -1 };
+
+  const after = playCard(s, 0, 'intrigue', { vertexId: target });
+  assert.equal(after.knights[target], undefined, '元の位置から消えていない');
+  if (after.awaiting) {
+    // 逃げ先があるときは持ち主(席1)が選ぶ
+    assert.equal(after.awaiting.type, 'knightDisplace');
+    assert.deepEqual(after.awaiting.players, [1]);
+    const spots = after.awaiting.context.spots;
+    assert.ok(spots.length > 0);
+    // 候補以外は選べない
+    const notSpot = Object.keys(LAYOUT.vertices).find(
+      (v) => !spots.includes(v) && !after.buildings[v] && !after.knights[v],
+    );
+    assert.match(
+      validateAction(after, { type: 'PLACE_DISPLACED_KNIGHT', player: 1, vertexId: notSpot }),
+      /そこへは移動できません/,
+    );
+    const done = dispatch(after, {
+      type: 'PLACE_DISPLACED_KNIGHT', player: 1, vertexId: spots[0],
+    });
+    assert.equal(done.knights[spots[0]].player, 1);
+    assert.equal(done.knights[spots[0]].level, 1);
+    assert.equal(done.knights[spots[0]].active, false, '追い出された騎士は不活性のはず');
+    assert.equal(done.awaiting, null);
+  } else {
+    // 逃げ先が無ければ盤上から除去されるだけ
+    assert.equal(
+      Object.values(after.knights).filter((k) => k.player === 1).length, 0,
+    );
+  }
 });

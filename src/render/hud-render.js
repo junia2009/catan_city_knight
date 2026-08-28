@@ -11,7 +11,7 @@ import { TOWER_COST } from '../rules/dragon.js';
 import { FISH_USES, fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
 import { SHIP_COST, SHIP_LIMIT, movableShips } from '../rules/sea.js';
 import { legalSetupEdges } from '../ai/legal-moves.js';
-import { diplomatMovable } from '../rules/cak/progress-cards.js';
+import { diplomatMovable, weddingGiftSize } from '../rules/cak/progress-cards.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
 import {
   TRACKS, TRACK_JP, TRACK_COMMODITY, MAX_IMPROVEMENT,
@@ -397,11 +397,21 @@ function statusText(state, ui) {
     if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
     if (aw.type === 'defenderDeck') return '🛡 防衛の報酬: 進歩カードを引く系統を選んでください';
     if (aw.type === 'progressLimit') return '📜 進歩カードが多すぎます。1枚捨ててください';
+    if (aw.type === 'weddingGift') return '💒 王家の婚礼: 贈る札を選んでください';
+    if (aw.type === 'harborGive') return '⚓ 商業港: 渡す商品を選んでください';
+    if (aw.type === 'deserterPick') return '🏳️ 脱走兵: 差し出す騎士を選んでください';
+    if (aw.type === 'deserterPlace') return '🏳️ 脱走してきた騎士を置く頂点を選んでください';
+    if (aw.type === 'knightDisplace') return '⚔️ 追い出された騎士の移動先を選んでください';
     if (aw.type === 'tradeChoose') return '🤝 交換する相手を選んでください';
   } else if (aw) {
     const waiting = aw.players.map((i) => state.players[i].name).join('・');
     if (aw.type === 'defenderDeck') return `⏳ 防衛の報酬を選んでいます: ${waiting}`;
     if (aw.type === 'progressLimit') return `⏳ 進歩カードの捨て札待ち: ${waiting}`;
+    if (aw.type === 'weddingGift') return `⏳ 王家の婚礼の贈り物待ち: ${waiting}`;
+    if (aw.type === 'harborGive') return `⏳ 商業港の交換待ち: ${waiting}`;
+    if (aw.type === 'deserterPick') return `⏳ 脱走させる騎士の選択待ち: ${waiting}`;
+    if (aw.type === 'deserterPlace') return `⏳ 騎士の配置待ち: ${waiting}`;
+    if (aw.type === 'knightDisplace') return `⏳ 追い出された騎士の移動先待ち: ${waiting}`;
     if (aw.type === 'tradeOffer') {
       // 何人が応じたかはこの時点で全員に見えている情報(成立すれば公開される)
       const yes = Object.values(aw.context.replies ?? {}).filter(Boolean).length;
@@ -421,6 +431,9 @@ function statusText(state, ui) {
     case 'move-ship': return '🧭 動かす船を選んでください';
     case 'move-ship-to': return '🧭 その船をどこへ動かしますか?';
     case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
+    case 'desert-pick': return '🏳️ 脱走兵: 差し出す自分の騎士を選んでください';
+    case 'desert-place': return '🏳️ 脱走してきた騎士を置く頂点を選んでください';
+    case 'knight-displace': return '⚔️ 追い出された騎士の移動先を選んでください';
     case 'play-road-building':
       return `🛤️ 街道建設: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
     case 'prog-hex': case 'prog-vertex': case 'prog-edge': case 'prog-hex2': case 'prog-roads':
@@ -876,6 +889,44 @@ function dialogHtml(state, ui) {
     return `<h3>🂠 捨て札(${sum}/${need}枚)</h3>${rows}
       <div class="row end">
         <button class="primary" data-act="discard-confirm" ${sum === need ? '' : 'disabled'}>捨てる</button>
+      </div>`;
+  }
+
+  if (d.type === 'harborGive') {
+    const ctx = state.awaiting?.context ?? {};
+    const to = state.players[ctx.to ?? 0];
+    const btns = COMMODITIES.map(
+      (c) => `<button class="pick" data-act="harbor:${c}" ${p.commodities[c] > 0 ? '' : 'disabled'}>
+        <span class="picon">${COM_ICON[c]}</span>${COM_JP[c]}<small>${p.commodities[c]}枚</small></button>`,
+    ).join('');
+    return `<h3>⚓ 商業港</h3>
+      <p><b>${to.name}</b>の商業港です。商品を1枚渡し、代わりに
+      ${RES_ICON[ctx.resource]} <b>${RES_JP[ctx.resource]}</b>を1枚受け取ります。
+      渡す商品は自分で選べます。</p>
+      <div class="row">${btns}</div>`;
+  }
+
+  if (d.type === 'weddingGift') {
+    const to = state.players[state.awaiting?.context?.to ?? 0];
+    const need = weddingGiftSize(state, HUMAN);
+    const keys = [...RESOURCES, ...COMMODITIES];
+    const have = (k) => (RESOURCES.includes(k) ? p.resources[k] : p.commodities[k]);
+    const icon = (k) => RES_ICON[k] ?? COM_ICON[k];
+    const label = (k) => RES_JP[k] ?? COM_JP[k];
+    const sum = keys.reduce((x, k) => x + (d.counts[k] ?? 0), 0);
+    const rows = keys.map(
+      (r) => `<div class="drow">
+        <span>${icon(r)} ${label(r)}(${have(r)})</span>
+        <button data-act="wed-minus:${r}" ${(d.counts[r] ?? 0) > 0 ? '' : 'disabled'}>−</button>
+        <b>${d.counts[r] ?? 0}</b>
+        <button data-act="wed-plus:${r}" ${(d.counts[r] ?? 0) < have(r) && sum < need ? '' : 'disabled'}>+</button>
+      </div>`,
+    ).join('');
+    return `<h3>💒 王家の婚礼(${sum}/${need}枚)</h3>
+      <p><b>${to.name}</b>に贈る札を選んでください。渡すものは自分で決められます。</p>
+      ${rows}
+      <div class="row end">
+        <button class="primary" data-act="wed-confirm" ${sum === need ? '' : 'disabled'}>贈る</button>
       </div>`;
   }
 

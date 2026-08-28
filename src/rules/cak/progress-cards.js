@@ -101,6 +101,44 @@ export function diplomatDestinations(state, pid, fromEdge) {
   );
 }
 
+// 脱走兵で差し出せる騎士(その相手の騎士すべて)
+export function deserterKnights(state, target) {
+  return Object.keys(state.knights).filter((vid) => state.knights[vid].player === target);
+}
+
+// 脱走してきた騎士を置けるレベル(コマ在庫の許す範囲で下げる。0なら置けない)
+export function deserterLevel(state, pid, level) {
+  let lv = level;
+  while (lv >= 1 && countKnights(state, pid, lv) >= KNIGHT_LIMIT_PER_LEVEL) lv--;
+  return lv;
+}
+
+// 脱走してきた騎士を置ける頂点(自分の道に隣接する空き頂点)
+export function deserterSpots(state, pid) {
+  return boardVertexIds(state.board).filter(
+    (v) =>
+      !state.buildings[v] && !state.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => state.roads[e]?.player === pid),
+  );
+}
+
+// 商業港で商品を渡す人(商品を1枚以上持っている相手)
+export function harborGivers(state, pid) {
+  return state.players
+    .filter((o) => o.id !== pid && COMMODITIES.some((c) => o.commodities[c] > 0))
+    .map((o) => o.id);
+}
+
+// 王家の婚礼で贈り物をする人(自分より勝利点が高く、手札がある相手)
+export function weddingGivers(state, pid) {
+  return playersAbove(state, pid).filter((o) => totalCards(o) > 0).map((o) => o.id);
+}
+
+// 王家の婚礼で渡す枚数(手札が1枚しかなければ1枚)
+export function weddingGiftSize(state, pid) {
+  return Math.min(2, totalCards(state.players[pid]));
+}
+
 // 自分より勝利点が高い(または以上の)プレイヤー一覧
 function playersAbove(state, pid, { orEqual = false } = {}) {
   const mine = computePoints(state, pid);
@@ -236,23 +274,19 @@ export const PROGRESS_CARDS = {
       }
       return null;
     },
+    // 渡す商品は相手が選ぶ(公式)。実際の交換は actions.js の GIVE_HARBOR が行う。
     play(state, pid, params) {
-      const p = state.players[pid];
-      const r = params.resource;
-      let swaps = 0;
-      for (const o of state.players) {
-        if (o.id === pid || p.resources[r] < 1) continue;
-        const pool = [];
-        for (const c of COMMODITIES) for (let k = 0; k < o.commodities[c]; k++) pool.push(c);
-        if (!pool.length) continue;
-        let idx;
-        [state.rng, idx] = rngInt(state.rng, pool.length);
-        const c = pool[idx];
-        o.commodities[c]--; p.commodities[c]++;
-        p.resources[r]--; o.resources[r]++;
-        swaps++;
-      }
-      addLog(state, `⚓ ${state.players[pid].name}が商業港で${swaps}人と交換(${RES_JP[r]}⇄商品)`);
+      addLog(
+        state,
+        `⚓ ${state.players[pid].name}が商業港を開きました(${RES_JP[params.resource]}と商品を交換)`,
+      );
+    },
+    awaitAfterPlay(state, pid, params) {
+      return {
+        type: 'harborGive',
+        players: harborGivers(state, pid),
+        context: { to: pid, resource: params.resource },
+      };
     },
   },
 
@@ -306,26 +340,13 @@ export const PROGRESS_CARDS = {
       }
       return null;
     },
+    // 差し出す騎士は相手が選ぶ(公式)。除去と自分の配置は
+    // actions.js の PICK_DESERTER / PLACE_DESERTER が行う。
     play(state, pid, params) {
-      // 相手は自分の最弱騎士を差し出す(不活性・低レベル優先)
-      const entries = Object.entries(state.knights).filter(([, k]) => k.player === params.target);
-      entries.sort(([, a], [, b]) => (a.level - b.level) || (a.active - b.active));
-      const [vid, k] = entries[0];
-      delete state.knights[vid];
-      addLog(state, `🏳️ ${state.players[params.target].name}の騎士(Lv${k.level})が脱走!`);
-
-      // コマ在庫の許すレベルで、自分の道網の空き頂点に配置
-      let level = k.level;
-      while (level >= 1 && countKnights(state, pid, level) >= KNIGHT_LIMIT_PER_LEVEL) level--;
-      if (level < 1) return;
-      const spot = boardVertexIds(state.board).find(
-        (v) =>
-          !state.buildings[v] && !state.knights[v] &&
-          LAYOUT.vertexEdges[v].some((e) => state.roads[e]?.player === pid),
-      );
-      if (!spot) return;
-      state.knights[spot] = { player: pid, level, active: false, activatedTurn: -1 };
-      addLog(state, `${state.players[pid].name}が騎士(Lv${level})を無料配置`);
+      addLog(state, `🏳️ ${state.players[pid].name}が${state.players[params.target].name}に脱走を促しました`);
+    },
+    awaitAfterPlay(state, pid, params) {
+      return { type: 'deserterPick', players: [params.target], context: { to: pid } };
     },
   },
 
@@ -374,7 +395,19 @@ export const PROGRESS_CARDS = {
     },
     play(state, pid, params) {
       addLog(state, `🗡️ ${state.players[pid].name}の陰謀!`);
-      displaceKnight(state, params.vertexId);
+      // 追い出された騎士の行き先は持ち主が選ぶ(公式)。
+      // displaceKnight が返した選択待ちを turnFlags 経由で actions.js に渡す。
+      state.turnFlags.displaced = displaceKnight(state, params.vertexId);
+    },
+    awaitAfterPlay(state) {
+      const d = state.turnFlags.displaced;
+      delete state.turnFlags.displaced;
+      if (!d) return null;
+      return {
+        type: 'knightDisplace',
+        players: [d.owner],
+        context: { level: d.level, spots: d.spots },
+      };
     },
   },
 
@@ -454,36 +487,19 @@ export const PROGRESS_CARDS = {
   wedding: {
     deck: 'politics', count: 2,
     name: '王家の婚礼', icon: '💒',
-    desc: '自分より勝利点が高い各プレイヤーから2枚ずつもらう(相手が選ぶ)',
+    desc: '自分より勝利点が高い各プレイヤーから2枚ずつもらう(渡す札は相手が選ぶ)',
     needsParams: null,
     validate(state, pid) {
-      const targets = playersAbove(state, pid).filter((o) => totalCards(o) > 0);
-      if (!targets.length) return '対象となる相手がいません';
+      if (!weddingGivers(state, pid).length) return '対象となる相手がいません';
       return null;
     },
+    // 渡す札は相手が選ぶ(公式)。ここでは割り込みを立てるだけで、
+    // 実際の受け渡しは actions.js の GIVE_WEDDING が行う。
     play(state, pid) {
-      const p = state.players[pid];
-      for (const o of playersAbove(state, pid)) {
-        // 相手は最も余っている札から渡す(商品より資源を優先して手放す)
-        let given = 0;
-        while (given < 2) {
-          let bestKey = null;
-          let bestN = 0;
-          for (const r of RESOURCES) {
-            if (o.resources[r] > bestN) { bestN = o.resources[r]; bestKey = r; }
-          }
-          if (!bestKey) {
-            for (const c of COMMODITIES) {
-              if (o.commodities[c] > bestN) { bestN = o.commodities[c]; bestKey = c; }
-            }
-          }
-          if (!bestKey) break;
-          if (RESOURCES.includes(bestKey)) { o.resources[bestKey]--; p.resources[bestKey]++; }
-          else { o.commodities[bestKey]--; p.commodities[bestKey]++; }
-          given++;
-        }
-        if (given) addLog(state, `💒 ${o.name}が${p.name}に${given}枚贈りました`);
-      }
+      addLog(state, `💒 ${state.players[pid].name}の王家の婚礼! 贈り物を待っています`);
+    },
+    awaitAfterPlay(state, pid) {
+      return { type: 'weddingGift', players: weddingGivers(state, pid), context: { to: pid } };
     },
   },
 
