@@ -115,13 +115,16 @@ export function canPlaceSettlement(state, pid, vertexId, { needRoad = true } = {
 // 道: 空き辺 + 自分の建物か道に接続(敵の建物を通しての接続は不可)
 // requireVertex: 初期配置用(その頂点に接する辺のみ)
 // extraRoads: 街道建設カードの2本目判定用の仮想追加道 { edgeId: true }
-export function canPlaceRoad(state, pid, edgeId, { requireVertex = null, extraRoads = null } = {}) {
+// extraShips: 同じカードで先に置く船(航海者たち。同じ辺を二重に使わせない)
+export function canPlaceRoad(
+  state, pid, edgeId, { requireVertex = null, extraRoads = null, extraShips = null } = {},
+) {
   const edge = LAYOUT.edges[edgeId];
   if (!edge) return '不正な辺です';
   if (!edge.hexes.some((h) => state.board.hexes[h])) return '盤の外です';
   // 航海者たち: 道は陸に面した辺だけ(海の上は船)
   if (!edge.hexes.some((h) => isLandHex(state.board, h))) return '道は陸に面した辺にだけ置けます';
-  if (state.ships?.[edgeId]) return 'その辺には船があります';
+  if (state.ships?.[edgeId] || extraShips?.[edgeId]) return 'その辺には船があります';
   if (state.roads[edgeId] || extraRoads?.[edgeId]) return 'その辺には道があります';
   const extraCount = extraRoads ? Object.keys(extraRoads).length : 0;
   if (countPieces(state, pid, 'road') + extraCount >= PIECE_LIMITS.road) {

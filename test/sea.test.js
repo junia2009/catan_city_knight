@@ -15,6 +15,7 @@ import {
   seaMainIslandHexes, seaIslandHexes,
 } from '../src/rules/sea.js';
 import { legalSetupEdges, legalSetupVertices } from '../src/ai/legal-moves.js';
+import { roadBuildingCount, roadBuildingSpots } from '../src/rules/road-building.js';
 
 function newSea(seed = 3) {
   return createGame({ seed, playerCount: 4, humanIndex: -1, mode: 'sea' });
@@ -520,4 +521,78 @@ test('sea: 初期配置のハイライトは駒ごとに出し分ける', () => 
   assert.ok(roads.length > 0 && ships.length > 0);
   assert.ok(roads.every((e) => isRoadEdge(s.board, e)), '道の候補に海だけの辺が混ざっている');
   assert.ok(ships.every((e) => isShipEdge(s.board, e)), '船の候補に海のない辺が混ざっている');
+});
+
+// 街道建設(発展カード)は公式の航海者たちでは「道または船を2つ」。
+// 海岸の頂点から出すと、片方を船にできる。
+test('sea: 街道建設は道と船をあわせて2つ置ける', () => {
+  const base = finishSetup(newSea());
+  // 海にも陸にも面した頂点(海岸)に開拓地だけを置いた盤にする
+  const s = blank(base);
+  const vid = boardVertexIds(s.board).find((v) => {
+    const edges = LAYOUT.vertexEdges[v];
+    return edges.some((e) => isRoadEdge(s.board, e)) && edges.some((e) => isShipEdge(s.board, e));
+  });
+  s.buildings[vid] = { player: 0, type: 'settlement' };
+  s.players[0].devCards = [{ type: 'roadBuilding', boughtTurn: -1 }];
+
+  assert.equal(roadBuildingCount(s, 0), 2);
+  const spots = roadBuildingSpots(s, 0);
+  assert.ok(spots.some((x) => x.piece === 'ship'), '船の候補が出ていない');
+  assert.ok(spots.some((x) => x.piece === 'road'), '道の候補が出ていない');
+
+  const road = spots.find((x) => x.piece === 'road');
+  const ship = spots.find((x) => x.piece === 'ship');
+  const act = {
+    type: 'PLAY_DEV_CARD', player: 0, card: 'roadBuilding',
+    params: { edges: [road.edgeId, ship.edgeId], pieces: ['road', 'ship'] },
+  };
+  assert.equal(validateAction(s, act), null);
+  const after = dispatch(s, act);
+  assert.equal(after.roads[road.edgeId].player, 0);
+  assert.equal(after.ships[ship.edgeId].player, 0);
+  assert.equal(Object.keys(after.roads).length, 1);
+  assert.equal(Object.keys(after.ships).length, 1);
+});
+
+test('sea: 街道建設で同じ辺に道と船は置けない', () => {
+  const base = finishSetup(newSea());
+  const s = blank(base);
+  const vid = boardVertexIds(s.board).find((v) =>
+    LAYOUT.vertexEdges[v].some((e) => isRoadEdge(s.board, e) && isShipEdge(s.board, e)));
+  s.buildings[vid] = { player: 0, type: 'settlement' };
+  s.players[0].devCards = [{ type: 'roadBuilding', boughtTurn: -1 }];
+  // 海岸線の辺は「陸にも海にも面する」ので道と船のどちらでも置ける
+  const both = LAYOUT.vertexEdges[vid].find(
+    (e) => isRoadEdge(s.board, e) && isShipEdge(s.board, e),
+  );
+  assert.equal(
+    validateAction(s, {
+      type: 'PLAY_DEV_CARD', player: 0, card: 'roadBuilding',
+      params: { edges: [both, both], pieces: ['road', 'ship'] },
+    }),
+    'その辺には道があります',
+  );
+});
+
+test('sea: 駒の種類を省略すると、陸に面していない辺は船として扱う', () => {
+  const base = finishSetup(newSea());
+  const s = blank(base);
+  const vid = boardVertexIds(s.board).find((v) => {
+    const edges = LAYOUT.vertexEdges[v];
+    return edges.some((e) => isRoadEdge(s.board, e))
+      && edges.some((e) => isShipEdge(s.board, e) && !isRoadEdge(s.board, e));
+  });
+  s.buildings[vid] = { player: 0, type: 'settlement' };
+  s.players[0].devCards = [{ type: 'roadBuilding', boughtTurn: -1 }];
+  const road = LAYOUT.vertexEdges[vid].find((e) => isRoadEdge(s.board, e));
+  const seaOnly = LAYOUT.vertexEdges[vid].find(
+    (e) => isShipEdge(s.board, e) && !isRoadEdge(s.board, e),
+  );
+  const after = dispatch(s, {
+    type: 'PLAY_DEV_CARD', player: 0, card: 'roadBuilding',
+    params: { edges: [road, seaOnly] }, // pieces を渡さない
+  });
+  assert.equal(after.roads[road].player, 0);
+  assert.equal(after.ships[seaOnly].player, 0);
 });

@@ -214,14 +214,15 @@ export function hasOwnShipAt(state, pid, vid, { skipEdge = null, extra = null } 
 
 // 船を置けるか。海の辺 + 「自分の建物か自分の船」に接続 + 海賊がいない。
 // 道とは建物の上でしかつながらない(公式ルール)。
-export function canPlaceShip(state, pid, edgeId, { extraShips = null } = {}) {
+// extraRoads: 同じカードで先に置く道(街道建設。同じ辺を二重に使わせない)
+export function canPlaceShip(state, pid, edgeId, { extraShips = null, extraRoads = null } = {}) {
   const board = state.board;
   const edge = LAYOUT.edges[edgeId];
   if (!edge) return '不正な辺です';
   if (!edge.hexes.some((h) => board.hexes[h])) return '盤の外です';
   if (!isShipEdge(board, edgeId)) return '船は海に面した辺にだけ置けます';
   if (state.ships?.[edgeId] || extraShips?.[edgeId]) return 'その辺には船があります';
-  if (state.roads?.[edgeId]) return 'その辺には道があります';
+  if (state.roads?.[edgeId] || extraRoads?.[edgeId]) return 'その辺には道があります';
   if (pirateBlocks(board, edgeId)) return '海賊がいる海には置けません';
 
   const count = Object.values(state.ships ?? {}).filter((s) => s.player === pid).length;

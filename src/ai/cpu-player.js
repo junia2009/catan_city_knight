@@ -37,7 +37,9 @@ import {
   legalSetupVertices,
   legalShipEdges,
 } from './legal-moves.js';
-import { missingFor, pipsOfVertex, robberHexValue, vertexValue } from './evaluator.js';
+import {
+  chooseRoadBuilding, missingFor, pipsOfVertex, robberHexValue, roadEdgeValue, vertexValue,
+} from './evaluator.js';
 
 function valid(state, action) {
   return action && validateAction(state, action) === null ? action : null;
@@ -183,18 +185,6 @@ export function nextGoal(state, pid) {
     return { kind: 'devCard', cost: COSTS.devCard };
   }
   return null;
-}
-
-// 道の先の拡張価値(空き頂点で隣に建物がない = 将来の入植候補)
-function roadEdgeValue(state, pid, eid) {
-  let v = 0.1;
-  for (const vid of LAYOUT.edges[eid].v) {
-    if (state.buildings[vid]) continue;
-    const blocked = LAYOUT.vertexAdj[vid].some((a) => state.buildings[a]);
-    const val = vertexValue(state, pid, vid);
-    v = Math.max(v, blocked ? val * 0.2 : val);
-  }
-  return v;
 }
 
 function tryTradeTowardGoal(state, pid, goal) {
@@ -453,15 +443,10 @@ function tryPlayDevCard(state, pid) {
   if (!state.turnFlags.rolled) return null;
 
   if (playable('roadBuilding')) {
-    const e1 = best(legalRoadEdges(state, pid), (e) => roadEdgeValue(state, pid, e));
-    if (e1) {
-      const e2 = best(
-        legalRoadEdges(state, pid, { extraRoads: { [e1]: true } }).filter((e) => e !== e1),
-        (e) => roadEdgeValue(state, pid, e),
-      );
-      const edges = e2 ? [e1, e2] : [e1];
+    const params = chooseRoadBuilding(state, pid);
+    if (params) {
       const a = valid(state, {
-        type: 'PLAY_DEV_CARD', player: pid, card: 'roadBuilding', params: { edges },
+        type: 'PLAY_DEV_CARD', player: pid, card: 'roadBuilding', params,
       });
       if (a) return a;
     }

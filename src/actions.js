@@ -22,6 +22,7 @@ import {
   totalCards,
   totalResources,
 } from './rules/build.js';
+import { applyRoadBuilding, validateRoadBuilding } from './rules/road-building.js';
 import { rollTwoDice, rollEventDie, distributeForRoll } from './rules/dice.js';
 import { TOWER_COST, canBuildTower, resolveRampage } from './rules/dragon.js';
 import { stealableTargets, applyRobberMove, stealRandomCard } from './rules/robber.js';
@@ -555,16 +556,8 @@ export function validateAction(state, action) {
       switch (action.card) {
         case 'knight':
           return null;
-        case 'roadBuilding': {
-          const edges = action.params?.edges ?? [];
-          if (edges.length < 1 || edges.length > 2) return '道を1〜2本選んでください';
-          const err1 = canPlaceRoad(state, pid, edges[0]);
-          if (err1) return err1;
-          if (edges.length === 2) {
-            return canPlaceRoad(state, pid, edges[1], { extraRoads: { [edges[0]]: true } });
-          }
-          return null;
-        }
+        case 'roadBuilding':
+          return validateRoadBuilding(state, pid, action.params);
         case 'yearOfPlenty': {
           const picks = action.params?.resources ?? [];
           if (picks.length !== 2) return '資源を2つ選んでください';
@@ -1084,10 +1077,7 @@ function applyAction(state, action) {
           state.awaiting = { type: 'moveRobber', players: [pid], context: { cause: 'knight' } };
           break;
         case 'roadBuilding':
-          for (const eid of action.params.edges) {
-            state.roads[eid] = { player: pid };
-          }
-          updateLongestRoad(state);
+          applyRoadBuilding(state, pid, action.params);
           break;
         case 'yearOfPlenty':
           for (const r of action.params.resources) grantResource(state, pid, r, 1);

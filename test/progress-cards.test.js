@@ -12,6 +12,8 @@ import {
 import { tradeRate } from '../src/rules/trade.js';
 import { computePoints } from '../src/rules/victory.js';
 import { LAYOUT } from '../src/rules/board.js';
+import { PIECE_LIMITS } from '../src/rules/build.js';
+import { roadBuildingCount, roadBuildingSpots } from '../src/rules/road-building.js';
 
 // ---- ヘルパー ----
 
@@ -520,18 +522,44 @@ test('医学: 鉱石2+小麦1で開拓地を都市化', () => {
   conservation(s);
 });
 
-test('街道建設(進歩): 道を2本無料建設', () => {
+test('街道建設(進歩): 2本がマスト。1本だけでは使えない', () => {
   let s = readyGame();
   const roads = Object.keys(s.roads).length;
-  const e1 = Object.keys(LAYOUT.edges).find(
-    (e) => validateAction(s, {
-      type: 'PLAY_PROGRESS_CARD', player: 0,
-      index: giveCard(s, 0, 'roadBuilding'), params: { edges: [e] },
-    }) === null,
-  );
+  assert.equal(roadBuildingCount(s, 0), 2, '2本置ける盤面のはず');
+  const [a] = roadBuildingSpots(s, 0);
+  const b = roadBuildingSpots(s, 0, [a])[0];
+
+  // 1本だけ・0本は弾かれる(資材ではなく「置き場所がない」ときだけ本数が減る)
+  const index = giveCard(s, 0, 'roadBuilding');
+  const play = (edges) => validateAction(s, {
+    type: 'PLAY_PROGRESS_CARD', player: 0, index, params: { edges },
+  });
+  assert.equal(play([a.edgeId]), '道を2本とも選んでください');
+  assert.equal(play([]), '道を2本とも選んでください');
   s.players[0].progressCards.pop();
-  s = playCard(s, 0, 'roadBuilding', { edges: [e1] });
-  assert.equal(Object.keys(s.roads).length, roads + 1);
+
+  s = playCard(s, 0, 'roadBuilding', { edges: [a.edgeId, b.edgeId] });
+  assert.equal(Object.keys(s.roads).length, roads + 2);
+});
+
+test('街道建設: 2本目を置けない盤面では1本で使える', () => {
+  const s = readyGame();
+  // 道のコマを残り1本にする(公式でも「置けない分は置かない」)
+  const free = Object.keys(LAYOUT.edges).filter(
+    (e) => !s.roads[e] && LAYOUT.edges[e].hexes.some((h) => s.board.hexes[h]),
+  );
+  const mine = Object.values(s.roads).filter((r) => r.player === 0).length;
+  for (const e of free.slice(0, PIECE_LIMITS.road - mine - 1)) s.roads[e] = { player: 0 };
+  assert.equal(roadBuildingCount(s, 0), 1);
+
+  const index = giveCard(s, 0, 'roadBuilding');
+  const [a] = roadBuildingSpots(s, 0);
+  assert.equal(
+    validateAction(s, {
+      type: 'PLAY_PROGRESS_CARD', player: 0, index, params: { edges: [a.edgeId] },
+    }),
+    null,
+  );
 });
 
 // 騎士のコマはレベルごとに1人2体まで(KNIGHT_LIMIT_PER_LEVEL)。
