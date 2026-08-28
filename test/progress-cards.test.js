@@ -221,16 +221,71 @@ test('外交官: 開いた道のみ除去できる', () => {
   assert.equal(s.roads[eid], undefined);
 });
 
-test('王家の婚礼: 勝利点が上の相手から2枚ずつもらう', () => {
+test('王家の婚礼: 渡す2枚は相手が選ぶ(公式)', () => {
+  let s = readyGame();
+  const vid = Object.keys(LAYOUT.vertices).find((v) => !s.buildings[v] && !s.knights[v]);
+  s.buildings[vid] = { player: 1, type: 'city' }; // 席1だけ勝利点が上
+  for (const pl of s.players) {
+    for (const r of RESOURCES) setCards(s, pl.id, r, 0);
+    for (const c of COMMODITIES) setCards(s, pl.id, c, 0);
+  }
+  setCards(s, 1, 'wood', 3);
+  setCards(s, 1, 'cloth', 2);
+
+  // 使った時点ではまだ動かない。贈り主の選択待ちになる。
+  s = playCard(s, 0, 'wedding');
+  assert.equal(s.awaiting?.type, 'weddingGift');
+  assert.deepEqual(s.awaiting.players, [1]);
+  assert.equal(s.players[0].resources.wood, 0, '選ぶ前に受け取っている');
+
+  // 枚数がちょうど2枚でないと通らない / 持っていない札は選べない
+  const give = (cards) => ({ type: 'GIVE_WEDDING', player: 1, cards });
+  assert.match(validateAction(s, give({ wood: 1 })), /ちょうど2枚/);
+  assert.match(validateAction(s, give({ wood: 3 })), /ちょうど2枚/);
+  assert.match(validateAction(s, give({ ore: 2 })), /手札が足りません/);
+
+  // 相手が選んだ内訳がそのまま渡る(資源と商品を混ぜてもよい)
+  const after = dispatch(s, give({ wood: 1, cloth: 1 }));
+  assert.equal(after.players[0].resources.wood, 1);
+  assert.equal(after.players[0].commodities.cloth, 1);
+  assert.equal(after.players[1].resources.wood, 2);
+  assert.equal(after.players[1].commodities.cloth, 1);
+  assert.equal(after.awaiting, null);
+  conservation(after);
+});
+
+test('王家の婚礼: 手札が1枚の相手は1枚だけ渡す', () => {
   let s = readyGame();
   const vid = Object.keys(LAYOUT.vertices).find((v) => !s.buildings[v] && !s.knights[v]);
   s.buildings[vid] = { player: 1, type: 'city' };
-  for (const pl of s.players) for (const r of RESOURCES) setCards(s, pl.id, r, 0);
-  setCards(s, 1, 'wood', 5);
+  for (const pl of s.players) {
+    for (const r of RESOURCES) setCards(s, pl.id, r, 0);
+    for (const c of COMMODITIES) setCards(s, pl.id, c, 0);
+  }
+  setCards(s, 1, 'wood', 1);
   s = playCard(s, 0, 'wedding');
-  assert.equal(s.players[1].resources.wood, 3);
-  assert.equal(s.players[0].resources.wood >= 2, true);
-  conservation(s);
+  assert.match(validateAction(s, { type: 'GIVE_WEDDING', player: 1, cards: { wood: 2 } }), /ちょうど1枚/);
+  const after = dispatch(s, { type: 'GIVE_WEDDING', player: 1, cards: { wood: 1 } });
+  assert.equal(after.players[0].resources.wood, 1);
+  assert.equal(after.awaiting, null);
+  conservation(after);
+});
+
+test('王家の婚礼: 手札が無い相手は対象外', () => {
+  const s = readyGame();
+  const vid = Object.keys(LAYOUT.vertices).find((v) => !s.buildings[v] && !s.knights[v]);
+  s.buildings[vid] = { player: 1, type: 'city' };
+  for (const pl of s.players) {
+    for (const r of RESOURCES) setCards(s, pl.id, r, 0);
+    for (const c of COMMODITIES) setCards(s, pl.id, c, 0);
+  }
+  // 誰も手札を持っていなければカード自体を使えない
+  assert.match(
+    validateAction(s, {
+      type: 'PLAY_PROGRESS_CARD', player: 0, index: giveCard(s, 0, 'wedding'), params: null,
+    }),
+    /対象となる相手がいません/,
+  );
 });
 
 // ---- 科学系 ----

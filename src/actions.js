@@ -77,6 +77,7 @@ import {
   PROGRESS_HAND_LIMIT,
   distributeProgressCards,
   drawProgressCard,
+  weddingGiftSize,
 } from './rules/cak/progress-cards.js';
 
 const ALL_CARD_KEYS = [...RESOURCES, ...COMMODITIES];
@@ -140,6 +141,7 @@ const AWAITING_ACTIONS = {
   barbarianDefense: 'RAZE_CITY',
   defenderDeck: 'PICK_DEFENDER_DECK',
   progressLimit: 'DISCARD_PROGRESS',
+  weddingGift: 'GIVE_WEDDING',
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
@@ -451,6 +453,18 @@ export function validateAction(state, action) {
 
     case 'DISCARD_PROGRESS': {
       if (!p.progressCards[action.index]) return '捨てるカードを選んでください';
+      return null;
+    }
+
+    // 王家の婚礼: 渡す2枚は自分で選ぶ(手札が1枚しかなければ1枚)
+    case 'GIVE_WEDDING': {
+      const need = weddingGiftSize(state, pid);
+      if (sumRes(action.cards) !== need) return `ちょうど${need}枚選んでください`;
+      for (const r of ALL_CARD_KEYS) {
+        const n = action.cards[r] ?? 0;
+        if (n < 0) return '不正な枚数です';
+        if (n > cardCount(p, r)) return '手札が足りません';
+      }
       return null;
     }
 
@@ -809,6 +823,20 @@ function applyAction(state, action) {
       break;
     }
 
+    case 'GIVE_WEDDING': {
+      const to = state.players[state.awaiting.context.to];
+      for (const r of ALL_CARD_KEYS) {
+        const n = action.cards[r] ?? 0;
+        if (!n) continue;
+        if (RESOURCES.includes(r)) { p.resources[r] -= n; to.resources[r] += n; }
+        else { p.commodities[r] -= n; to.commodities[r] += n; }
+      }
+      addLog(state, `💒 ${p.name}が${to.name}に${fmtCards(action.cards)}を贈りました`);
+      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+      if (state.awaiting.players.length === 0) state.awaiting = null;
+      break;
+    }
+
     // 防衛の功が同点だったときの報酬。引く山は本人が選ぶ(公式)。
     case 'PICK_DEFENDER_DECK': {
       drawProgressCard(state, pid, action.track);
@@ -1080,6 +1108,11 @@ function applyAction(state, action) {
       addLog(state, `${p.name}が進歩カード「${def.name}」を使用`);
       def.play(state, pid, action.params);
       state.bank.progressDecks[card.deck].unshift(card.id); // 使用済みは山札の底へ
+      // 相手に選択を返すカードは、ここで割り込みを立てる(効果は応答時に適用する)
+      if (def.awaitAfterPlay) {
+        const aw = def.awaitAfterPlay(state, pid, action.params);
+        if (aw?.players.length) state.awaiting = aw;
+      }
       break;
     }
 

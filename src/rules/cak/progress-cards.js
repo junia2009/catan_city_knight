@@ -101,6 +101,16 @@ export function diplomatDestinations(state, pid, fromEdge) {
   );
 }
 
+// 王家の婚礼で贈り物をする人(自分より勝利点が高く、手札がある相手)
+export function weddingGivers(state, pid) {
+  return playersAbove(state, pid).filter((o) => totalCards(o) > 0).map((o) => o.id);
+}
+
+// 王家の婚礼で渡す枚数(手札が1枚しかなければ1枚)
+export function weddingGiftSize(state, pid) {
+  return Math.min(2, totalCards(state.players[pid]));
+}
+
 // 自分より勝利点が高い(または以上の)プレイヤー一覧
 function playersAbove(state, pid, { orEqual = false } = {}) {
   const mine = computePoints(state, pid);
@@ -454,36 +464,19 @@ export const PROGRESS_CARDS = {
   wedding: {
     deck: 'politics', count: 2,
     name: '王家の婚礼', icon: '💒',
-    desc: '自分より勝利点が高い各プレイヤーから2枚ずつもらう(相手が選ぶ)',
+    desc: '自分より勝利点が高い各プレイヤーから2枚ずつもらう(渡す札は相手が選ぶ)',
     needsParams: null,
     validate(state, pid) {
-      const targets = playersAbove(state, pid).filter((o) => totalCards(o) > 0);
-      if (!targets.length) return '対象となる相手がいません';
+      if (!weddingGivers(state, pid).length) return '対象となる相手がいません';
       return null;
     },
+    // 渡す札は相手が選ぶ(公式)。ここでは割り込みを立てるだけで、
+    // 実際の受け渡しは actions.js の GIVE_WEDDING が行う。
     play(state, pid) {
-      const p = state.players[pid];
-      for (const o of playersAbove(state, pid)) {
-        // 相手は最も余っている札から渡す(商品より資源を優先して手放す)
-        let given = 0;
-        while (given < 2) {
-          let bestKey = null;
-          let bestN = 0;
-          for (const r of RESOURCES) {
-            if (o.resources[r] > bestN) { bestN = o.resources[r]; bestKey = r; }
-          }
-          if (!bestKey) {
-            for (const c of COMMODITIES) {
-              if (o.commodities[c] > bestN) { bestN = o.commodities[c]; bestKey = c; }
-            }
-          }
-          if (!bestKey) break;
-          if (RESOURCES.includes(bestKey)) { o.resources[bestKey]--; p.resources[bestKey]++; }
-          else { o.commodities[bestKey]--; p.commodities[bestKey]++; }
-          given++;
-        }
-        if (given) addLog(state, `💒 ${o.name}が${p.name}に${given}枚贈りました`);
-      }
+      addLog(state, `💒 ${state.players[pid].name}の王家の婚礼! 贈り物を待っています`);
+    },
+    awaitAfterPlay(state, pid) {
+      return { type: 'weddingGift', players: weddingGivers(state, pid), context: { to: pid } };
     },
   },
 

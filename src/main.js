@@ -538,7 +538,7 @@ function newGame() {
 // 閉じ忘れると「捨て札ダイアログのまま盗賊移動になる」ような食い違いが起き、
 // ダイアログの描画が state を読めずに例外で落ちて操作不能になる。
 const INTERRUPT_DIALOGS = [
-  'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck', 'progressLimit',
+  'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck', 'progressLimit', 'weddingGift',
 ];
 // awaiting の種類ごとに、開いたままでよいダイアログ
 const DIALOG_FOR_AWAITING = {
@@ -549,6 +549,7 @@ const DIALOG_FOR_AWAITING = {
   goldChoice: 'gold',
   defenderDeck: 'defenderDeck',
   progressLimit: 'progressLimit',
+  weddingGift: 'weddingGift',
   moveRobber: 'steal', // 略奪相手の選択(自分で開くのでここでは自動で開かない)
 };
 // awaiting の種類ごとの盤面入力モード
@@ -591,9 +592,9 @@ function syncUi() {
       ui.pending = null;
     }
     if (keep && keep !== 'steal' && ui.dialog?.type !== keep) {
-      ui.dialog = keep === 'discard'
+      ui.dialog = (keep === 'discard' || keep === 'weddingGift')
         ? {
-            type: 'discard',
+            type: keep,
             // 都市と騎士では商品も捨て札の対象(手札上限に数えるため)
             counts: {
               wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0,
@@ -1748,6 +1749,12 @@ document.addEventListener('click', (e) => {
     case 'discard-minus': ui.dialog.counts[arg]--; refresh(); return;
     case 'discard-confirm':
       doAction({ type: 'DISCARD', player: HUMAN, resources: { ...ui.dialog.counts } });
+      return;
+
+    case 'wed-plus': ui.dialog.counts[arg]++; refresh(); return;
+    case 'wed-minus': ui.dialog.counts[arg]--; refresh(); return;
+    case 'wed-confirm':
+      doAction({ type: 'GIVE_WEDDING', player: HUMAN, cards: { ...ui.dialog.counts } });
       return;
 
     case 'steal':

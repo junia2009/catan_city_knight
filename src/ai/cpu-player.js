@@ -19,7 +19,9 @@ import { KNIGHT_COSTS, canPlaceKnight } from '../rules/cak/knights.js';
 import { TOWER_COST } from '../rules/dragon.js';
 import { knightContribution, razableCities } from '../rules/cak/barbarians.js';
 import { TRACKS, TRACK_COMMODITY, canBuyImprovement } from '../rules/cak/improvements.js';
-import { COMMODITIES, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
+import {
+  COMMODITIES, PROGRESS_CARDS, weddingGiftSize,
+} from '../rules/cak/progress-cards.js';
 import { pickProgressPlay, pickAlchemist, pickProgressDiscard } from './progress-ai.js';
 import {
   legalCityVertices,
@@ -65,26 +67,34 @@ function chooseInitialPlacement(state, pid) {
 }
 
 function chooseDiscard(state, pid) {
+  return {
+    type: 'DISCARD', player: pid,
+    resources: chooseCardsToGive(state, pid, state.awaiting.context.required[pid]),
+  };
+}
+
+// 手放してよい札を need 枚選ぶ(捨て札・王家の婚礼で共通)。
+// 目標コストを超えた余剰が多いものから。商品は価値が高いので温存する。
+function chooseCardsToGive(state, pid, need) {
   const p = state.players[pid];
-  const need = state.awaiting.context.required[pid];
   const goal = nextGoal(state, pid);
   const keep = { ...(goal?.cost ?? {}) };
   const counts = {};
   for (const r of RESOURCES) counts[r] = p.resources[r];
   for (const c of COMMODITIES) counts[c] = p.commodities[c];
-  const discard = {};
+  const out = {};
   const keys = [...RESOURCES, ...COMMODITIES];
   for (let i = 0; i < need; i++) {
-    // 目標コストを超えた余剰が多い資源から。商品は価値が高いので温存する
     const r = best(keys.filter((x) => counts[x] > 0), (x) => {
       const surplus = counts[x] - (keep[x] ?? 0);
       const commodityPenalty = COMMODITIES.includes(x) ? -8 : 0;
       return surplus * 10 + counts[x] + commodityPenalty;
     });
+    if (r == null) break; // 手札が尽きた
     counts[r] -= 1;
-    discard[r] = (discard[r] ?? 0) + 1;
+    out[r] = (out[r] ?? 0) + 1;
   }
-  return { type: 'DISCARD', player: pid, resources: discard };
+  return out;
 }
 
 function chooseRobberMove(state, pid) {
@@ -558,6 +568,13 @@ export function chooseAction(state, pid) {
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
     if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
+    if (aw.type === 'weddingGift') {
+      // 王家の婚礼の贈り物。捨て札と同じ基準で、手放して痛くない札から選ぶ。
+      return {
+        type: 'GIVE_WEDDING', player: pid,
+        cards: chooseCardsToGive(state, pid, weddingGiftSize(state, pid)),
+      };
+    }
     if (aw.type === 'progressLimit') {
       // 進歩カードの手札上限。いちばん価値の低い1枚を手放す。
       return { type: 'DISCARD_PROGRESS', player: pid, index: pickProgressDiscard(state, pid) };
