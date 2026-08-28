@@ -29,7 +29,9 @@ import {
   canPlaceShip,
   goldGainForRoll,
   isLandHex,
+  isRoadEdge,
   isSeaHex,
+  isShipEdge,
   islandAtVertex,
   movableShips,
   pirateTargets,
@@ -109,6 +111,14 @@ function applyPlayerTrade(state, aPid, bPid, give, receive) {
   addLog(state, `🤝 ${a.name} ⇄ ${b.name}: ${fmtCards(give)} ⇄ ${fmtCards(receive)}`);
 }
 
+// 初期配置で開拓地と一緒に置く駒。航海者たちでは道か船かを選べる(公式ルール)。
+// action.piece の指定がなければ辺の地形から決める ── 陸に面していなければ船。
+// これで既存モード(すべて陸)と、駒を指定しない古いリプレイは今までどおり道になる。
+function setupPieceOf(state, action) {
+  if (action.piece === 'road' || action.piece === 'ship') return action.piece;
+  return state.mode === 'sea' && !isRoadEdge(state.board, action.edgeId) ? 'ship' : 'road';
+}
+
 // 割り込み(awaiting)中に許可されるアクション種別
 const AWAITING_ACTIONS = {
   setupPlacement: 'PLACE_INITIAL',
@@ -181,8 +191,17 @@ export function validateAction(state, action) {
       }
       const edge = LAYOUT.edges[action.edgeId];
       if (!edge) return '不正な辺です';
-      if (state.roads[action.edgeId]) return 'その辺には道があります';
+      // LAYOUT は最大半径まであるので、盤に載っているかを必ず見る
+      if (!edge.hexes.some((h) => state.board.hexes[h])) return '盤の外です';
       if (!edge.v.includes(action.vertexId)) return '道は開拓地に隣接させてください';
+      if (state.roads[action.edgeId]) return 'その辺には道があります';
+      if (state.ships?.[action.edgeId]) return 'その辺には船があります';
+      if (setupPieceOf(state, action) === 'ship') {
+        if (state.mode !== 'sea') return '航海者たちのルールではありません';
+        if (!isShipEdge(state.board, action.edgeId)) return '船は海に面した辺にだけ置けます';
+      } else if (!isRoadEdge(state.board, action.edgeId)) {
+        return '道は陸に面した辺にだけ置けます';
+      }
       return null;
     }
 
@@ -614,7 +633,12 @@ function applyAction(state, action) {
       // 都市と騎士: 開拓地×1 + 都市×1(2巡目が都市。設計書 §9.1)
       const type = state.mode === 'cak' && round === 2 ? 'city' : 'settlement';
       state.buildings[action.vertexId] = { player: pid, type };
-      state.roads[action.edgeId] = { player: pid };
+      // 航海者たち: 海へ向かう辺を選んだときは道ではなく船を置く
+      if (setupPieceOf(state, action) === 'ship') {
+        state.ships[action.edgeId] = { player: pid, builtTurn: state.turn };
+      } else {
+        state.roads[action.edgeId] = { player: pid };
+      }
       noteIsland(state, pid, action.vertexId);
       addLog(state, `${p.name}が初期配置(${round}巡目)を行いました`);
 

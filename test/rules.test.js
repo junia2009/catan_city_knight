@@ -11,6 +11,7 @@ import {
 } from '../src/rules/build.js';
 import {
   legalCityVertices, legalRoadEdges, legalSettlementVertices,
+  legalSetupEdges, legalSetupVertices,
 } from '../src/ai/legal-moves.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 
@@ -47,6 +48,28 @@ test('初期配置: スネーク順で進み、2巡目に初期資源をもら�
   for (const p of s.players) {
     assert.ok(totalResources(p) >= 1 && totalResources(p) <= 3, `${p.name}: ${totalResources(p)}`);
   }
+});
+
+// LAYOUT は航海者たち用に半径4まで作ってあるので、
+// 盤の縁の頂点には「盤に載っていない辺」がぶら下がっている。
+test('初期配置: 盤の外へ出る辺には道を置けない', () => {
+  const s = createGame({ seed: 5, playerCount: 4, humanIndex: -1 });
+  let found = 0;
+  for (const vid of legalSetupVertices(s, 0)) {
+    for (const eid of LAYOUT.vertexEdges[vid]) {
+      if (LAYOUT.edges[eid].hexes.some((h) => s.board.hexes[h])) continue;
+      found++;
+      assert.match(
+        validateAction(s, { type: 'PLACE_INITIAL', player: 0, vertexId: vid, edgeId: eid }),
+        /盤の外/,
+      );
+      assert.ok(
+        !legalSetupEdges(s, vid).includes(eid),
+        '盤外の辺が初期配置の候補に出ている',
+      );
+    }
+  }
+  assert.ok(found > 0, '盤外の辺が1つも見つからない(テストが意味を持っていない)');
 });
 
 test('距離ルール: 隣接頂点には建てられない', () => {

@@ -212,6 +212,14 @@
   }
   #status { display: flex; align-items: center; gap: 10px; min-height: 34px; font-size: 14px; }
   #status .msg { color: var(--accent2); font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+  /* 初期配置の 道/船 切り替え(航海者たち)。
+     オレンジは「確定」に取ってあるので、選択中は縁取りと明るさで示す。 */
+  #status .setup-piece { display: inline-flex; gap: 4px; flex-shrink: 0; }
+  #status .setup-piece button { opacity: 0.6; }
+  #status .setup-piece button.on {
+    opacity: 1; color: var(--accent2); border-color: var(--accent2);
+    box-shadow: inset 0 0 0 1px var(--accent2), 0 2px 5px rgba(0,0,0,0.35);
+  }
 
   #handrow { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
   #hand { display: flex; gap: 7px; align-items: stretch; flex-wrap: wrap; }

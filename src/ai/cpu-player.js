@@ -54,7 +54,9 @@ function best(items, scoreFn) {
 function chooseInitialPlacement(state, pid) {
   const vids = legalSetupVertices(state, pid);
   const vid = best(vids, (v) => vertexValue(state, pid, v));
-  const edges = legalSetupEdges(state, vid);
+  // 航海者たちでも初手は道にしておく。2軒目までは本島に置くので、
+  // 隣の頂点の価値で選ぶかぎり陸へ伸ばすほうがまず得になる。
+  const edges = legalSetupEdges(state, vid, 'road');
   const eid = best(edges, (e) => {
     const other = LAYOUT.edges[e].v.find((v) => v !== vid);
     return vertexValue(state, pid, other);
