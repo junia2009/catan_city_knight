@@ -4,6 +4,8 @@
 // ハープの分散和音 + 笛の旋律(穏やか)を重ねる。
 // 音源ファイルは使わない(オフラインPWA・ビルドなしのため全て合成)。
 
+import { lsGet, lsSet } from '../storage.js';
+
 const midiHz = (m) => 440 * 2 ** ((m - 69) / 12);
 
 // D ドリアの和声。notes = パッド音、drone = 低音(オルガン)
@@ -30,7 +32,7 @@ const CHORD_DUR = 5.6; // 1コードの長さ(秒)
 export class Bgm {
   constructor() {
     this.ctx = null;
-    this.enabled = localStorage.getItem('catan-bgm') !== 'off';
+    this.enabled = lsGet('bgm') !== 'off';
     this.running = false;
     this.timer = null;
     this.nextTime = 0;
@@ -40,7 +42,7 @@ export class Bgm {
 
   setEnabled(on) {
     this.enabled = on;
-    localStorage.setItem('catan-bgm', on ? 'on' : 'off');
+    lsSet('bgm', on ? 'on' : 'off');
     if (on) this.start();
     else this.stop();
   }

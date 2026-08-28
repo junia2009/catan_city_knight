@@ -144,7 +144,7 @@ const hasCards = (player, cards) =>
 
 // 提案の可否は「自分が渡せるか」だけで決める。
 // 相手が持っているかまで見ると、ボタンの活性や理由から相手の手札が透けてしまう
-// (実際のカタンでも、相手が持っていない物を要求する提案自体は自由にできる)。
+// (実際のボードゲームでも、相手が持っていない物を要求する提案自体は自由にできる)。
 function validateOfferContents(state, giver, give, receive) {
   return validateTradeShape(state, give, receive)
     ?? (hasCards(giver, give) ? null : '手札が足りません');

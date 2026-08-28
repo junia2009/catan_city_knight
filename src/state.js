@@ -34,7 +34,7 @@ export function zeroResources() {
 }
 
 // humanIndex: 人間プレイヤーの位置(-1 なら全員CPU、セルフプレイ用)
-// mode: 'base'(基本カタン) | 'cak'(都市と騎士) | 'dragon' | 'fish'(漁師たち)
+// mode: 'base'(基本ルール) | 'cak'(都市と騎士) | 'dragon' | 'fish'(漁師たち)
 //     | 'sea'(航海者たち。盤が半径3になり海と船が入る)
 export function createGame({
   seed = 1, playerCount = 4, humanIndex = 0, names = null, mode = 'base',

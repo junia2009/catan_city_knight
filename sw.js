@@ -7,7 +7,7 @@
 // SW 自体の更新も即時反映: skipWaiting + clients.claim。
 // (登録側は updateViaCache: 'none' で HTTP キャッシュを介さず sw.js を確認する)
 
-const CACHE = 'catan-net-first-v1';
+const CACHE = 'hexfrontier-net-first-v1';
 
 self.addEventListener('install', () => {
   self.skipWaiting(); // 新しい SW を待機させず即座に有効化

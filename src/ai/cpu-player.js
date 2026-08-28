@@ -390,7 +390,7 @@ function pickTradePartner(state, pid, accepted) {
   })[0];
 }
 
-// ---- 基本カタン: 発展カード ----
+// ---- 基本ルール: 発展カード ----
 
 function tryPlayDevCard(state, pid) {
   if (state.mode === 'cak') return null;

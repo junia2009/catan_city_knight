@@ -1,5 +1,12 @@
 # オンライン対戦サーバー(Cloudflare Workers + Durable Objects)
 # デプロイ: npx wrangler deploy   / ローカル: npm run server
+#
+# name はアプリ名(Hexfrontier)と揃っていないが、意図的にこのまま。
+# name を変えると worker の改名ではなく「新しい worker の作成」になり、
+# Durable Object の名前空間はスクリプト名に紐づくので新 worker からは
+# 既存の部屋に一切到達できない(= 進行中のオンライン対戦が消える)。
+# 揃えたくなったら、誰も遊んでいない時間に切り替えて旧 worker を消すこと。
+# この URL はクライアントが内部で叩くだけで、プレイヤーの目には触れない。
 
 name = "catan-web-server"
 main = "server/index.js"
