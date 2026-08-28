@@ -34,15 +34,17 @@ export function razeCity(state, vid) {
   addLog(state, `${state.players[b.player].name}の都市が開拓地に降格しました`);
 }
 
-// 襲来の解決。降格の選択が必要なプレイヤーがいれば ID の配列を返す
-// (呼び出し側が awaiting: barbarianDefense を張る)。
+// 襲来の解決。本人の選択が要る場合は呼び出し側が awaiting を張れるよう、
+// { raze, deck } を返す ── raze は降格する都市を選ぶ人、deck は防衛が同点で
+// 進歩カードを引く山を選ぶ人(どちらか一方しか出ない)。
 export function resolveBarbarianAttack(state) {
   const strength = barbarianStrength(state);
   const contributions = state.players.map((p) => knightContribution(state, p.id));
   const defense = contributions.reduce((a, b) => a + b, 0);
   addLog(state, `⚔️ 蛮族襲来! 蛮族${strength} vs 防衛${defense}`);
 
-  const needChoice = [];
+  const needRaze = [];
+  const needDeck = [];
 
   if (defense >= strength) {
     // 防衛成功: 最大貢献者に守護者1点(同点なら全員に進歩カード)
@@ -52,24 +54,10 @@ export function resolveBarbarianAttack(state) {
       tops[0].defenderPoints += 1;
       addLog(state, `🛡 ${tops[0].name}が「島の守護者」を獲得! +1点`);
     } else if (tops.length > 1) {
-      for (const p of tops) {
-        // 最も育てている系統の山札から獲得
-        const track = ['trade', 'politics', 'science'].sort(
-          (a, b) => p.improvements[b] - p.improvements[a],
-        )[0];
-        const deck = state.bank.progressDecks[track];
-        const cardId = deck.pop();
-        if (!cardId) continue;
-        if (cardId === 'vp') {
-          p.progressVP += 1;
-          addLog(state, `${p.name}が進歩カード(勝利点)を公開! +1点`);
-        } else if (p.progressCards.length < 4) {
-          p.progressCards.push({ id: cardId, deck: track, boughtTurn: state.turn });
-          addLog(state, `${p.name}が防衛の報酬に進歩カードを獲得`);
-        } else {
-          deck.unshift(cardId);
-        }
-      }
+      // 同点なら守護者は出ず、各自が「好きな系統の山」から1枚引く(公式)。
+      // どの山かは本人が選ぶので、呼び出し側が awaiting を張る。
+      needDeck.push(...tops.map((p) => p.id));
+      addLog(state, `🛡 防衛の功が並びました。${tops.map((p) => p.name).join('・')}が進歩カードを1枚引きます`);
     } else {
       addLog(state, '都市がなく、蛮族は引き返しました');
     }
@@ -84,7 +72,7 @@ export function resolveBarbarianAttack(state) {
         if (cities.length === 1) {
           razeCity(state, cities[0]);
         } else {
-          needChoice.push(p.id); // 複数あれば本人が選ぶ
+          needRaze.push(p.id); // 複数あれば本人が選ぶ
         }
       }
     }
@@ -95,5 +83,5 @@ export function resolveBarbarianAttack(state) {
   for (const k of Object.values(state.knights)) k.active = false;
   addLog(state, '全ての騎士が不活性になりました');
 
-  return needChoice;
+  return { raze: needRaze, deck: needDeck };
 }

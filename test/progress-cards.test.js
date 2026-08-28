@@ -331,15 +331,59 @@ test('街道建設(進歩): 道を2本無料建設', () => {
   assert.equal(Object.keys(s.roads).length, roads + 1);
 });
 
-test('鍛冶屋: 騎士を2体まで無料昇格', () => {
-  let s = readyGame();
-  const spots = Object.keys(LAYOUT.vertices).filter(
-    (v) => !s.buildings[v] && !s.knights[v] &&
-      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 0),
-  );
-  s.knights[spots[0]] = { player: 0, level: 1, active: false, activatedTurn: -1 };
-  s = playCard(s, 0, 'smith');
-  assert.equal(s.knights[spots[0]].level, 2);
+// 騎士のコマはレベルごとに1人2体まで(KNIGHT_LIMIT_PER_LEVEL)。
+// 空き頂点に直接置いて、昇格の判定だけを見る。
+function freeVertices(s, n) {
+  return Object.keys(LAYOUT.vertices)
+    .filter((v) => !s.buildings[v] && !s.knights[v])
+    .slice(0, n);
+}
+
+test('鍛冶屋: 昇格させる騎士を自分で選ぶ(公式)', () => {
+  const base = readyGame();
+  const [a, b] = freeVertices(base, 2);
+  const setup = () => {
+    const s = structuredClone(base);
+    s.knights[a] = { player: 0, level: 1, active: false, activatedTurn: -1 };
+    s.knights[b] = { player: 0, level: 1, active: false, activatedTurn: -1 };
+    return s;
+  };
+
+  // 1体だけ選べば、選ばなかった騎士は上がらない(自動選択ではない)
+  let s = playCard(setup(), 0, 'smith', { vertices: [a] });
+  assert.equal(s.knights[a].level, 2);
+  assert.equal(s.knights[b].level, 1, '選んでいない騎士まで昇格している');
+
+  // 2体選べば両方上がる
+  s = playCard(setup(), 0, 'smith', { vertices: [a, b] });
+  assert.equal(s.knights[a].level, 2);
+  assert.equal(s.knights[b].level, 2);
+
+  // 同じ騎士を2回 / 3体 / 0体 / 相手の騎士 は選べない
+  const t = setup();
+  const [, , c] = freeVertices(t, 3);
+  t.knights[c] = { player: 1, level: 1, active: false, activatedTurn: -1 };
+  const index = giveCard(t, 0, 'smith');
+  const play = (params) =>
+    validateAction(t, { type: 'PLAY_PROGRESS_CARD', player: 0, index, params });
+  assert.match(play({ vertices: [a, a] }), /同じ騎士/);
+  assert.match(play({ vertices: [a, b, c] }), /1〜2体/);
+  assert.match(play({ vertices: [] }), /1〜2体/);
+  assert.match(play({ vertices: [c] }), /自分の騎士/);
+});
+
+test('鍛冶屋: コマの残数は1体ずつ当てはめて判定する', () => {
+  const s = readyGame();
+  const [a, b, c] = freeVertices(s, 3);
+  // Lv2 のコマは1人2体まで。すでに1体いるので、Lv1 を2体同時には上げられない。
+  s.knights[a] = { player: 0, level: 2, active: false, activatedTurn: -1 };
+  s.knights[b] = { player: 0, level: 1, active: false, activatedTurn: -1 };
+  s.knights[c] = { player: 0, level: 1, active: false, activatedTurn: -1 };
+  const index = giveCard(s, 0, 'smith');
+  const play = (params) =>
+    validateAction(s, { type: 'PLAY_PROGRESS_CARD', player: 0, index, params });
+  assert.equal(play({ vertices: [b] }), null, '1体なら上げられるはず');
+  assert.match(play({ vertices: [b, c] }), /コマがありません/);
 });
 
 // ---- VPカードと山札処理 ----

@@ -67,12 +67,15 @@ import {
   razeCity,
   resolveBarbarianAttack,
 } from './rules/cak/barbarians.js';
-import { applyImprovement, canBuyImprovement } from './rules/cak/improvements.js';
+import {
+  TRACKS, applyImprovement, canBuyImprovement,
+} from './rules/cak/improvements.js';
 import {
   COMMODITIES,
   COM_JP,
   PROGRESS_CARDS,
   distributeProgressCards,
+  drawProgressCard,
 } from './rules/cak/progress-cards.js';
 
 const ALL_CARD_KEYS = [...RESOURCES, ...COMMODITIES];
@@ -119,12 +122,22 @@ function setupPieceOf(state, action) {
   return state.mode === 'sea' && !isRoadEdge(state.board, action.edgeId) ? 'ship' : 'road';
 }
 
+// 蛮族襲来で保留していた選択を1人ぶん済ませる。全員終わったら出目の処理へ進む。
+function finishBarbarianChoice(state, pid) {
+  state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+  if (state.awaiting.players.length > 0) return;
+  const { pendingTotal, roller } = state.awaiting.context;
+  state.awaiting = null;
+  processRollTotal(state, roller, pendingTotal);
+}
+
 // 割り込み(awaiting)中に許可されるアクション種別
 const AWAITING_ACTIONS = {
   setupPlacement: 'PLACE_INITIAL',
   discard: 'DISCARD',
   moveRobber: 'MOVE_ROBBER',
   barbarianDefense: 'RAZE_CITY',
+  defenderDeck: 'PICK_DEFENDER_DECK',
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
@@ -429,6 +442,11 @@ export function validateAction(state, action) {
       return null;
     }
 
+    case 'PICK_DEFENDER_DECK': {
+      if (!TRACKS.includes(action.track)) return '引く系統を選んでください';
+      return null;
+    }
+
     case 'PLAY_DEV_CARD': {
       if (state.mode === 'cak') return '都市と騎士では発展カードは使いません';
       if (state.turnFlags.playedDev) return 'このターンはすでに発展カードを使いました';
@@ -697,14 +715,15 @@ function applyAction(state, action) {
           state.barbarians.position += 1;
           addLog(state, `⛵ 蛮族船が前進(${state.barbarians.position}/${BARBARIAN_TRACK_LENGTH})`);
           if (state.barbarians.position >= BARBARIAN_TRACK_LENGTH) {
-            const needChoice = resolveBarbarianAttack(state);
-            if (needChoice.length > 0) {
-              // 降格する都市の選択待ち。出目の処理は選択後に行う。
-              state.awaiting = {
-                type: 'barbarianDefense',
-                players: needChoice,
-                context: { pendingTotal: total, roller: pid },
-              };
+            const need = resolveBarbarianAttack(state);
+            // 降格する都市の選択、または防衛同点の山選び。どちらも出目の処理は選択後。
+            const ctx = { pendingTotal: total, roller: pid };
+            if (need.raze.length > 0) {
+              state.awaiting = { type: 'barbarianDefense', players: need.raze, context: ctx };
+              break;
+            }
+            if (need.deck.length > 0) {
+              state.awaiting = { type: 'defenderDeck', players: need.deck, context: ctx };
               break;
             }
           }
@@ -749,12 +768,14 @@ function applyAction(state, action) {
 
     case 'RAZE_CITY': {
       razeCity(state, action.vertexId);
-      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
-      if (state.awaiting.players.length === 0) {
-        const { pendingTotal, roller } = state.awaiting.context;
-        state.awaiting = null;
-        processRollTotal(state, roller, pendingTotal);
-      }
+      finishBarbarianChoice(state, pid);
+      break;
+    }
+
+    // 防衛の功が同点だったときの報酬。引く山は本人が選ぶ(公式)。
+    case 'PICK_DEFENDER_DECK': {
+      drawProgressCard(state, pid, action.track);
+      finishBarbarianChoice(state, pid);
       break;
     }
 

@@ -84,10 +84,69 @@ test('cak: 蛮族襲来 — 防衛成功で守護者、失敗で都市降格', (
   s2.buildings[vids[0]] = { player: 0, type: 'city' };
   s2.buildings[vids[10]] = { player: 1, type: 'city' };
   s2.knights[vids[20]] = { player: 0, level: 1, active: true, activatedTurn: -1 };
-  const needChoice = resolveBarbarianAttack(s2);
-  assert.equal(needChoice.length, 0); // 都市1つなら自動降格
+  const need = resolveBarbarianAttack(s2);
+  assert.equal(need.raze.length, 0); // 都市1つなら自動降格
   assert.equal(s2.buildings[vids[10]].type, 'settlement');
   assert.equal(s2.buildings[vids[0]].type, 'city'); // 貢献者は守られる
+});
+
+test('cak: 防衛の功が同点なら、引く進歩カードの山を本人が選ぶ(公式)', () => {
+  const vids = Object.keys(LAYOUT.vertices);
+  const setup = () => {
+    const s = newCak();
+    s.buildings[vids[0]] = { player: 0, type: 'city' };
+    s.buildings[vids[10]] = { player: 1, type: 'city' };
+    // 0 と 1 が同じ貢献度 → 守護者は出ず、両者が山を選んで1枚引く
+    s.knights[vids[20]] = { player: 0, level: 1, active: true, activatedTurn: -1 };
+    s.knights[vids[30]] = { player: 1, level: 1, active: true, activatedTurn: -1 };
+    return s;
+  };
+
+  const s = setup();
+  const need = resolveBarbarianAttack(s);
+  assert.deepEqual(need.deck, [0, 1]);
+  assert.deepEqual(need.raze, []);
+  assert.equal(s.players[0].defenderPoints, 0, '同点では守護者は出ない');
+  assert.equal(s.players[1].defenderPoints, 0);
+  // この時点ではまだ引いていない(選択待ち)
+  assert.equal(s.players[0].progressCards.length, 0);
+
+  // ROLL_DICE 経由で割り込みが張られ、選んだ山から引けること
+  let g = finishSetup(newCak());
+  // cak の初期配置で全員1都市 = 蛮族4。防衛4(Lv2×2人)で守り切り、貢献は同点。
+  g.knights = {
+    [vids[20]]: { player: 0, level: 2, active: true, activatedTurn: -1 },
+    [vids[30]]: { player: 1, level: 2, active: true, activatedTurn: -1 },
+  };
+  g.currentPlayer = 0;
+  g.awaiting = null;
+  g.turnFlags = { rolled: false, playedDev: false };
+  g.barbarians.position = 6;
+  let rolled = null;
+  for (let i = 0; i < 60 && !rolled; i++) {
+    const t = structuredClone(g);
+    t.rng = (t.rng + i * 7919) >>> 0;
+    const nx = dispatch(t, { type: 'ROLL_DICE', player: 0 });
+    if (nx.awaiting?.type === 'defenderDeck') rolled = nx;
+  }
+  assert.ok(rolled, '襲来が起きる乱数が見つからない');
+  assert.deepEqual(rolled.awaiting.players, [0, 1]);
+
+  // 山を指定しないと通らない
+  assert.match(
+    validateAction(rolled, { type: 'PICK_DEFENDER_DECK', player: 0, track: 'nope' }),
+    /系統を選んで/,
+  );
+  const before = rolled.bank.progressDecks.science.length;
+  let after = dispatch(rolled, { type: 'PICK_DEFENDER_DECK', player: 0, track: 'science' });
+  assert.equal(after.bank.progressDecks.science.length, before - 1, '科学の山から引いていない');
+  assert.deepEqual(after.awaiting.players, [1], 'もう一人の選択待ちが残っていない');
+
+  // 全員が選び終わると山選びの割り込みが解け、保留していた出目の処理へ進む
+  // (7 なら捨て札や盗賊移動が続くので、awaiting が null とは限らない)
+  after = dispatch(after, { type: 'PICK_DEFENDER_DECK', player: 1, track: 'trade' });
+  assert.notEqual(after.awaiting?.type, 'defenderDeck');
+  assert.equal(after.turnFlags.rolled, true, '出目の処理が再開していない');
 });
 
 test('cak: メトロポリスの都市は降格対象外', () => {

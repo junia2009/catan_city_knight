@@ -305,11 +305,19 @@ const SCORERS = {
   },
 
   smith(state, pid) {
-    const n = Object.keys(state.knights).filter(
-      (vid) => canPromoteKnight(state, pid, vid) === null,
-    ).length;
-    if (!n) return null;
-    return { score: n * 2, params: null };
+    // 高レベル優先で2体まで。コマの残数は昇格ごとに変わるので順に当てはめる。
+    const sim = { ...state, knights: structuredClone(state.knights) };
+    const vertices = [];
+    for (let i = 0; i < 2; i++) {
+      const vid = Object.keys(sim.knights)
+        .filter((v) => !vertices.includes(v) && canPromoteKnight(sim, pid, v) === null)
+        .sort((a, b) => sim.knights[b].level - sim.knights[a].level)[0];
+      if (!vid) break;
+      vertices.push(vid);
+      sim.knights[vid].level += 1;
+    }
+    if (!vertices.length) return null;
+    return { score: vertices.length * 2, params: { vertices } };
   },
 };
 

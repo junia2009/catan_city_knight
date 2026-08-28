@@ -394,9 +394,11 @@ function statusText(state, ui) {
     }
     if (aw.type === 'goldChoice') return '💰 金鉱: もらう資源を選んでください';
     if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
+    if (aw.type === 'defenderDeck') return '🛡 防衛の報酬: 進歩カードを引く系統を選んでください';
     if (aw.type === 'tradeChoose') return '🤝 交換する相手を選んでください';
   } else if (aw) {
     const waiting = aw.players.map((i) => state.players[i].name).join('・');
+    if (aw.type === 'defenderDeck') return `⏳ 防衛の報酬を選んでいます: ${waiting}`;
     if (aw.type === 'tradeOffer') {
       // 何人が応じたかはこの時点で全員に見えている情報(成立すれば公開される)
       const yes = Object.values(aw.context.replies ?? {}).filter(Boolean).length;
@@ -418,7 +420,8 @@ function statusText(state, ui) {
     case 'move-knight': return '⚔️ 騎士の移動先を選んでください';
     case 'play-road-building':
       return `🛤️ 街道建設: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
-    case 'prog-hex': case 'prog-vertex': case 'prog-edge': case 'prog-hex2': case 'prog-roads': {
+    case 'prog-hex': case 'prog-vertex': case 'prog-edge': case 'prog-hex2': case 'prog-roads':
+    case 'prog-knights': {
       const card = state.players[HUMAN].progressCards[ui.progIndex];
       const def = card ? PROGRESS_CARDS[card.id] : null;
       const label = def ? `${def.icon} ${def.name}` : '進歩カード';
@@ -426,6 +429,9 @@ function statusText(state, ui) {
       if (ui.mode === 'prog-vertex') return `${label}: 対象の頂点を選んでください`;
       if (ui.mode === 'prog-edge') return `${label}: 取り除く道を選んでください`;
       if (ui.mode === 'prog-hex2') return `${label}: 交換する数字を選択(${ui.pendingHexes.length}/2)`;
+      if (ui.mode === 'prog-knights') {
+        return `${label}: 昇格させる騎士を選択(${ui.pendingVertices.length}/2)。1体でも確定できます`;
+      }
       return `${label}: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
     }
     default:
@@ -454,11 +460,12 @@ function renderStatus(state, ui) {
   const cancellable = [
     'build-road', 'build-settlement', 'build-city', 'play-road-building',
     'build-knight', 'build-wall', 'move-knight',
-    'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads',
+    'prog-hex', 'prog-vertex', 'prog-edge', 'prog-hex2', 'prog-roads', 'prog-knights',
   ].includes(ui.mode) || (ui.mode === 'setup-road');
   const confirmable =
     (ui.pending != null) ||
     (['play-road-building', 'prog-roads'].includes(ui.mode) && ui.pendingEdges.length >= 1) ||
+    (ui.mode === 'prog-knights' && ui.pendingVertices.length >= 1) ||
     (ui.mode === 'prog-hex2' && ui.pendingHexes.length === 2);
   el('status').innerHTML = `
     <span class="msg">${statusText(state, ui)}</span>
@@ -638,6 +645,18 @@ function dialogHtml(state, ui) {
     ).join('');
     return `<h3>💧 水道橋(科学Lv3)</h3>
       <p>出目で資源がもらえなかったので、好きな資源を1枚もらえます</p>
+      <div class="row">${btns}</div>`;
+  }
+
+  if (d.type === 'defenderDeck') {
+    const btns = TRACKS.map((t) => {
+      const left = state.bank.progressDecks[t].length;
+      return `<button class="pick" data-act="ddeck:${t}" ${left ? '' : 'disabled'}>
+        <span class="picon">${TRACK_ICON[t]}</span>${TRACK_JP[t]}<small>残り${left}</small></button>`;
+    }).join('');
+    return `<h3>🛡 防衛の報酬</h3>
+      <p>蛮族を防いだ功が並びました。守護者は出ませんが、
+      <b>好きな系統の山から進歩カードを1枚</b>引けます。</p>
       <div class="row">${btns}</div>`;
   }
 
