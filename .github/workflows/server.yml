@@ -64,7 +64,7 @@ jobs:
         env:
           DEPLOYED: ${{ steps.deploy.outputs.deployment-url }}
         run: |
-          BASE="${DEPLOYED:-https://hexfrontier-server.uriboo-dev.workers.dev}"
+          BASE="${DEPLOYED:-https://catan-web-server.uriboo-dev.workers.dev}"
           BASE="${BASE%/}"
           echo "確認先: $BASE"
 

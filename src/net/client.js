@@ -6,7 +6,7 @@ import { lsGet, lsSet } from '../storage.js';
 
 // 接続先。デプロイ後の workers.dev URL をここに書く。
 // 開発中は ?server=... で上書きでき、localhost では自動でローカルサーバーを見る。
-const DEFAULT_SERVER = 'https://hexfrontier-server.uriboo-dev.workers.dev';
+const DEFAULT_SERVER = 'https://catan-web-server.uriboo-dev.workers.dev';
 
 export function serverBase() {
   const override = new URLSearchParams(location.search).get('server');
