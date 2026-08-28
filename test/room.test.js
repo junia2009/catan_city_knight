@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { RoomCore, makeRoomCode, normalizeRoomCode, MAX_SEATS } from '../server/room-core.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 import { RESOURCES } from '../src/state.js';
+import { totalCards } from '../src/rules/build.js';
 
 function newRoom(seed = 42) {
   return new RoomCore({ code: 'TEST', seed });
@@ -215,6 +216,59 @@ test('room: 都市と騎士の進歩カードも伏せられる', () => {
   for (const track of ['trade', 'politics', 'science']) {
     assert.ok(view0.bank.progressDecks[track].every((c) => c === null));
   }
+});
+
+test('room: 相手の資源と商品は枚数だけ配られ、内訳は伏せられる', () => {
+  const room = newRoom();
+  room.join({ clientId: 'a', name: 'A' });
+  room.join({ clientId: 'b', name: 'B' });
+  room.setSettings('a', { mode: 'cak' });
+  room.start('a');
+  const p1 = room.state.players[1];
+  p1.resources = { wood: 3, brick: 0, sheep: 1, wheat: 0, ore: 2 };
+  p1.commodities = { cloth: 1, coin: 0, paper: 0 };
+
+  const view0 = room.viewFor(0);
+  const seen = view0.players[1];
+  assert.ok(
+    Object.values(seen.resources).every((n) => n === 0),
+    `資源の内訳が漏れている: ${JSON.stringify(seen.resources)}`,
+  );
+  assert.ok(
+    Object.values(seen.commodities).every((n) => n === 0),
+    `商品の内訳が漏れている: ${JSON.stringify(seen.commodities)}`,
+  );
+  // 枚数そのものは公開情報(7で捨てる枚数や略奪の対象選びに使う)
+  assert.equal(seen.hidden, true);
+  assert.equal(totalCards(seen), 7);
+  // 自分の手札は内訳まで見える
+  assert.equal(view0.players[0].hidden, undefined);
+  // 元の状態は壊さない
+  assert.equal(room.state.players[1].resources.wood, 3);
+});
+
+test('room: 豪商・スパイは覗く本人にだけ相手の手札を開く', () => {
+  const room = newRoom();
+  room.join({ clientId: 'a', name: 'A' });
+  room.join({ clientId: 'b', name: 'B' });
+  room.setSettings('a', { mode: 'cak' });
+  room.start('a');
+  room.state.players[1].resources = { wood: 3, brick: 0, sheep: 0, wheat: 0, ore: 0 };
+  room.state.players[1].progressCards = [{ id: 'warlord', deck: 'politics', boughtTurn: 1 }];
+
+  // 豪商: 席0だけが席1の資源の内訳を見られる(進歩カードは伏せたまま)
+  room.state.awaiting = {
+    type: 'merchantPick', players: [0], context: { target: 1, count: 2 },
+  };
+  assert.equal(room.viewFor(0).players[1].resources.wood, 3);
+  assert.ok(room.viewFor(0).players[1].progressCards.every((c) => c.id === 'hidden'));
+  assert.equal(room.viewFor(2).players[1].resources.wood, 0);
+
+  // スパイ: 開くのは進歩カードだけで、資源は伏せたまま
+  room.state.awaiting = { type: 'spyPick', players: [0], context: { target: 1 } };
+  assert.equal(room.viewFor(0).players[1].progressCards[0].id, 'warlord');
+  assert.equal(room.viewFor(0).players[1].resources.wood, 0);
+  assert.equal(room.viewFor(2).players[1].progressCards[0].id, 'hidden');
 });
 
 test('room: 決着後は全公開(隠し勝利点を含む最終得点のため)', () => {

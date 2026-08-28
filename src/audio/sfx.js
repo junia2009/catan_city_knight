@@ -279,6 +279,8 @@ const BUILD_VOICE = {
   TRADE_BANK: 'trade',
   CHOOSE_TRADE: 'trade',
   DISCARD: 'steal',
+  PICK_MERCHANT: 'steal',
+  PICK_SPY: 'steal',
   RAZE_CITY: 'barbarian',
   PASS_SHOE: 'ui',
   PICK_GOLD: 'gain',

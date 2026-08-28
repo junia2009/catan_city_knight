@@ -397,6 +397,8 @@ function statusText(state, ui) {
     if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
     if (aw.type === 'defenderDeck') return '🛡 防衛の報酬: 進歩カードを引く系統を選んでください';
     if (aw.type === 'progressLimit') return '📜 進歩カードが多すぎます。1枚捨ててください';
+    if (aw.type === 'merchantPick') return '👑 豪商: 奪う札を選んでください';
+    if (aw.type === 'spyPick') return '🕵️ スパイ: 奪う進歩カードを選んでください';
     if (aw.type === 'weddingGift') return '💒 王家の婚礼: 贈る札を選んでください';
     if (aw.type === 'harborGive') return '⚓ 商業港: 渡す商品を選んでください';
     if (aw.type === 'deserterPick') return '🏳️ 脱走兵: 差し出す騎士を選んでください';
@@ -412,6 +414,12 @@ function statusText(state, ui) {
     if (aw.type === 'deserterPick') return `⏳ 脱走させる騎士の選択待ち: ${waiting}`;
     if (aw.type === 'deserterPlace') return `⏳ 騎士の配置待ち: ${waiting}`;
     if (aw.type === 'knightDisplace') return `⏳ 追い出された騎士の移動先待ち: ${waiting}`;
+    if (aw.type === 'merchantPick') {
+      return `⏳ 👑 ${waiting}が${state.players[aw.context.target].name}の手札を覗いています`;
+    }
+    if (aw.type === 'spyPick') {
+      return `⏳ 🕵️ ${waiting}が${state.players[aw.context.target].name}の進歩カードを覗いています`;
+    }
     if (aw.type === 'tradeOffer') {
       // 何人が応じたかはこの時点で全員に見えている情報(成立すれば公開される)
       const yes = Object.values(aw.context.replies ?? {}).filter(Boolean).length;
@@ -844,13 +852,16 @@ function dialogHtml(state, ui) {
       return `${head}<div class="row">${btns}</div><div class="row end">${cancel}</div>`;
     }
     if (d.type === 'prog-player') {
+      // スパイが見るのは進歩カードの枚数、それ以外は手札の枚数
+      const count = (o) =>
+        card?.id === 'spy' ? `進歩${o.progressCards.length}枚` : `${totalCards(o)}枚`;
       const btns = state.players
         .filter((o) => o.id !== HUMAN)
         .map((o) => {
           const err = progValid({ target: o.id });
           return `<button class="pick" data-act="pplayer:${o.id}" style="--pc:${PLAYER_COLORS[o.id]}"
             ${err ? 'disabled' : ''} title="${err ?? ''}">
-            <span class="chip">${avatarSvg(o.id)}</span>${o.name}<small>${totalCards(o)}枚</small></button>`;
+            <span class="chip">${avatarSvg(o.id)}</span>${o.name}<small>${count(o)}</small></button>`;
         })
         .join('');
       return `${head}<div class="row">${btns}</div><div class="row end">${cancel}</div>`;
@@ -928,6 +939,46 @@ function dialogHtml(state, ui) {
       <div class="row end">
         <button class="primary" data-act="wed-confirm" ${sum === need ? '' : 'disabled'}>贈る</button>
       </div>`;
+  }
+
+  // 豪商: 覗いた手札から奪う札を選ぶ(オンラインでは自分にだけ内訳が届いている)
+  if (d.type === 'merchantPick') {
+    const ctx = state.awaiting?.context ?? {};
+    const from = state.players[ctx.target ?? 0];
+    const need = ctx.count ?? 0;
+    const keys = [...RESOURCES, ...COMMODITIES];
+    const have = (k) => (RESOURCES.includes(k) ? from.resources[k] : from.commodities[k]);
+    const icon = (k) => RES_ICON[k] ?? COM_ICON[k];
+    const label = (k) => RES_JP[k] ?? COM_JP[k];
+    const sum = keys.reduce((x, k) => x + (d.counts[k] ?? 0), 0);
+    const rows = keys.filter((k) => have(k) > 0).map(
+      (r) => `<div class="drow">
+        <span>${icon(r)} ${label(r)}(${have(r)})</span>
+        <button data-act="mer-minus:${r}" ${(d.counts[r] ?? 0) > 0 ? '' : 'disabled'}>−</button>
+        <b>${d.counts[r] ?? 0}</b>
+        <button data-act="mer-plus:${r}" ${(d.counts[r] ?? 0) < have(r) && sum < need ? '' : 'disabled'}>+</button>
+      </div>`,
+    ).join('');
+    return `<h3>👑 豪商(${sum}/${need}枚)</h3>
+      <p><b>${from.name}</b>の手札です。ここから<b>${need}枚</b>選んで奪います。</p>
+      ${rows}
+      <div class="row end">
+        <button class="primary" data-act="mer-confirm" ${sum === need ? '' : 'disabled'}>奪う</button>
+      </div>`;
+  }
+
+  // スパイ: 覗いた進歩カードから奪う1枚を選ぶ
+  if (d.type === 'spyPick') {
+    const from = state.players[state.awaiting?.context?.target ?? 0];
+    const btns = from.progressCards.map((c, i) => {
+      const def = PROGRESS_CARDS[c.id];
+      return `<button class="pick" data-act="spy-take:${i}" title="${def.desc}">
+        <span class="picon">${def.icon}</span>${def.name}</button>`;
+    }).join('');
+    return `<h3>🕵️ スパイ</h3>
+      <p><b>${from.name}</b>の進歩カードです。1枚選んで奪います
+      (奪ったカードはこのターンには使えません)。</p>
+      <div class="row">${btns}</div>`;
   }
 
   if (d.type === 'steal') {

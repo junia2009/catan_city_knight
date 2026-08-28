@@ -6,7 +6,7 @@
 import { LAYOUT, TERRAIN_RESOURCE, boardVertexIds } from '../board.js';
 import { rngInt } from '../../rng.js';
 import { RESOURCES, RES_JP, addLog } from '../../state.js';
-import { grantResource, totalCards, canBuildWall, canPlaceRoad } from '../build.js';
+import { grantResource, handHidden, totalCards, canBuildWall, canPlaceRoad } from '../build.js';
 import { updateLongestRoad, computePoints } from '../victory.js';
 import { countKnights, canPromoteKnight, displaceKnight, KNIGHT_LIMIT_PER_LEVEL } from './knights.js';
 import { TRACKS, MAX_IMPROVEMENT } from './improvements.js';
@@ -122,16 +122,37 @@ export function deserterSpots(state, pid) {
   );
 }
 
-// 商業港で商品を渡す人(商品を1枚以上持っている相手)
+// 商業港で商品を渡す人(商品を1枚以上持っている相手)。
+// オンラインでは相手の内訳が伏せられているので、手元では「手札があれば対象かも」
+// までしか分からない。緩めに通しておいてサーバーの判定に任せる。
 export function harborGivers(state, pid) {
   return state.players
-    .filter((o) => o.id !== pid && COMMODITIES.some((c) => o.commodities[c] > 0))
+    .filter((o) => o.id !== pid && (
+      handHidden(o) ? totalCards(o) > 0 : COMMODITIES.some((c) => o.commodities[c] > 0)
+    ))
     .map((o) => o.id);
 }
 
 // 王家の婚礼で贈り物をする人(自分より勝利点が高く、手札がある相手)
 export function weddingGivers(state, pid) {
   return playersAbove(state, pid).filter((o) => totalCards(o) > 0).map((o) => o.id);
+}
+
+// 豪商で狙える相手(自分より勝利点が高く、手札がある相手)
+export function masterMerchantTargets(state, pid) {
+  return playersAbove(state, pid).filter((o) => totalCards(o) > 0).map((o) => o.id);
+}
+
+// 豪商で奪う枚数(相手の手札が1枚しかなければ1枚)
+export function masterMerchantTake(state, target) {
+  return Math.min(2, totalCards(state.players[target]));
+}
+
+// スパイで狙える相手(進歩カードを持っている相手)
+export function spyTargets(state, pid) {
+  return state.players
+    .filter((o) => o.id !== pid && o.progressCards.length > 0)
+    .map((o) => o.id);
 }
 
 // 王家の婚礼で渡す枚数(手札が1枚しかなければ1枚)
@@ -240,7 +261,7 @@ export const PROGRESS_CARDS = {
   masterMerchant: {
     deck: 'trade', count: 2,
     name: '豪商', icon: '👑',
-    desc: '自分より勝利点が高い相手から2枚奪う',
+    desc: '自分より勝利点が高い相手の手札を見て、好きな2枚を奪う',
     needsParams: 'player',
     validate(state, pid, params) {
       const t = state.players[params?.target];
@@ -252,11 +273,19 @@ export const PROGRESS_CARDS = {
       return null;
     },
     play(state, pid, params) {
-      const got = stealRandomCards(state, params.target, pid, 2);
       addLog(
         state,
-        `👑 ${state.players[pid].name}が${state.players[params.target].name}から${got.length}枚奪いました`,
+        `👑 ${state.players[pid].name}が${state.players[params.target].name}の手札を覗いています`,
       );
+    },
+    // 公式では「手札を見て自分で2枚選ぶ」。覗く本人に選択を返す
+    // (中身は awaiting.context には入れない ── context は全員に配信される)。
+    awaitAfterPlay(state, pid, params) {
+      return {
+        type: 'merchantPick',
+        players: [pid],
+        context: { target: params.target, count: masterMerchantTake(state, params.target) },
+      };
     },
   },
 
@@ -269,9 +298,7 @@ export const PROGRESS_CARDS = {
       const r = params?.resource;
       if (!RESOURCES.includes(r)) return '渡す資源を選んでください';
       if (state.players[pid].resources[r] < 1) return 'その資源を持っていません';
-      if (!state.players.some((o) => o.id !== pid && COMMODITIES.some((c) => o.commodities[c] > 0))) {
-        return '商品を持つ相手がいません';
-      }
+      if (harborGivers(state, pid).length === 0) return '商品を持つ相手がいません';
       return null;
     },
     // 渡す商品は相手が選ぶ(公式)。実際の交換は actions.js の GIVE_HARBOR が行う。
@@ -440,7 +467,7 @@ export const PROGRESS_CARDS = {
   spy: {
     deck: 'politics', count: 3,
     name: 'スパイ', icon: '🕵️',
-    desc: '相手の進歩カードを1枚奪う',
+    desc: '相手の進歩カードを見て、好きな1枚を奪う',
     needsParams: 'player',
     validate(state, pid, params) {
       const t = state.players[params?.target];
@@ -449,15 +476,14 @@ export const PROGRESS_CARDS = {
       return null;
     },
     play(state, pid, params) {
-      const t = state.players[params.target];
-      let idx;
-      [state.rng, idx] = rngInt(state.rng, t.progressCards.length);
-      const card = t.progressCards.splice(idx, 1)[0];
-      state.players[pid].progressCards.push({ ...card, boughtTurn: state.turn });
       addLog(
         state,
-        `🕵️ ${state.players[pid].name}が${t.name}から進歩カード「${PROGRESS_CARDS[card.id].name}」を奪取!`,
+        `🕵️ ${state.players[pid].name}が${state.players[params.target].name}の進歩カードを覗いています`,
       );
+    },
+    // 公式では「見てから1枚選ぶ」。覗く本人に選択を返す。
+    awaitAfterPlay(state, pid, params) {
+      return { type: 'spyPick', players: [pid], context: { target: params.target } };
     },
   },
 

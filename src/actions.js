@@ -16,6 +16,7 @@ import {
   canPlaceRoad,
   canPlaceSettlement,
   grantResource,
+  handHidden,
   handLimit,
   payCost,
   totalCards,
@@ -92,8 +93,11 @@ function cardCount(player, key) {
   return RESOURCES.includes(key) ? player.resources[key] : player.commodities[key];
 }
 
+// 0枚の種類は書かない ── UI は全種類の枚数(多くは0)をそのまま送ってくるので、
+// そのまま並べると「レンガ×0 羊毛×0 …」だらけのログになる。
 function fmtCards(obj) {
   return Object.entries(obj)
+    .filter(([, n]) => n > 0)
     .map(([r, n]) => `${RES_JP[r] ?? COM_JP[r]}×${n}`)
     .join(' ');
 }
@@ -152,6 +156,8 @@ const AWAITING_ACTIONS = {
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
   goldChoice: 'PICK_GOLD',
+  merchantPick: 'PICK_MERCHANT',
+  spyPick: 'PICK_SPY',
 };
 
 // 交易の一斉提案は1手番にこの回数まで(内容を変えて出し直せる)
@@ -172,7 +178,10 @@ function validateTradeShape(state, give, receive) {
   return null;
 }
 
+// 伏せられた手札(オンラインで他人を見ているとき)は内訳が分からないので、
+// 手元では判定を通す。実際の可否はサーバーが権威として判定する。
 const hasCards = (player, cards) =>
+  handHidden(player) ||
   Object.entries(cards).every(([r, n]) => cardCount(player, r) >= n);
 
 // 提案の可否は「自分が渡せるか」だけで決める。
@@ -502,6 +511,27 @@ export function validateAction(state, action) {
         if (n < 0) return '不正な枚数です';
         if (n > cardCount(p, r)) return '手札が足りません';
       }
+      return null;
+    }
+
+    // 豪商: 覗いた手札から奪う札を自分で選ぶ
+    case 'PICK_MERCHANT': {
+      const t = state.players[aw.context.target];
+      const need = aw.context.count;
+      if (sumRes(action.cards) !== need) return `ちょうど${need}枚選んでください`;
+      for (const r of ALL_CARD_KEYS) {
+        const n = action.cards[r] ?? 0;
+        if (n < 0) return '不正な枚数です';
+        // 相手の手札が伏せられている(自席以外を見ている)ときは手元では判定しない
+        if (!handHidden(t) && n > cardCount(t, r)) return '相手はそれだけ持っていません';
+      }
+      return null;
+    }
+
+    // スパイ: 覗いた進歩カードから奪う1枚を自分で選ぶ
+    case 'PICK_SPY': {
+      const t = state.players[aw.context.target];
+      if (!t.progressCards[action.index]) return '奪うカードを選んでください';
       return null;
     }
 
@@ -925,6 +955,33 @@ function applyAction(state, action) {
       addLog(state, `💒 ${p.name}が${to.name}に${fmtCards(action.cards)}を贈りました`);
       state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
       if (state.awaiting.players.length === 0) state.awaiting = null;
+      break;
+    }
+
+    // 豪商: 覗いた手札から選んだ札を奪う
+    case 'PICK_MERCHANT': {
+      const from = state.players[state.awaiting.context.target];
+      for (const r of ALL_CARD_KEYS) {
+        const n = action.cards[r] ?? 0;
+        if (!n) continue;
+        if (RESOURCES.includes(r)) { from.resources[r] -= n; p.resources[r] += n; }
+        else { from.commodities[r] -= n; p.commodities[r] += n; }
+      }
+      addLog(state, `👑 ${p.name}が${from.name}から${fmtCards(action.cards)}を奪いました`);
+      state.awaiting = null;
+      break;
+    }
+
+    // スパイ: 覗いた進歩カードから選んだ1枚を奪う
+    case 'PICK_SPY': {
+      const from = state.players[state.awaiting.context.target];
+      const card = from.progressCards.splice(action.index, 1)[0];
+      p.progressCards.push({ ...card, boughtTurn: state.turn });
+      addLog(
+        state,
+        `🕵️ ${p.name}が${from.name}から進歩カード「${PROGRESS_CARDS[card.id].name}」を奪取!`,
+      );
+      state.awaiting = null;
       break;
     }
 
