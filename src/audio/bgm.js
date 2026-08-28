@@ -5,6 +5,7 @@
 // 音源ファイルは使わない(オフラインPWA・ビルドなしのため全て合成)。
 
 import { lsGet, lsSet } from '../storage.js';
+import { audioCtx, wantsKeepAlive } from './ctx.js';
 
 const midiHz = (m) => 440 * 2 ** ((m - 69) / 12);
 
@@ -76,14 +77,15 @@ export class Bgm {
     this.master.gain.setValueAtTime(this.master.gain.value, t);
     this.master.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
     setTimeout(() => {
-      if (!this.running && this.ctx) this.ctx.suspend();
+      // 効果音が使っているなら context は落とさない(共有しているため)
+      if (!this.running && this.ctx && !wantsKeepAlive()) this.ctx.suspend();
     }, 1000);
   }
 
   _init() {
     if (this.ctx) return;
-    const AC = window.AudioContext ?? window.webkitAudioContext;
-    this.ctx = new AC();
+    this.ctx = audioCtx();
+    if (!this.ctx) throw new Error('AudioContext を作れません');
 
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.0001;

@@ -25,6 +25,7 @@ import { avatarSvg } from './render/avatars.js';
 import { renderHUD, RES_ICON, COM_ICON, setHumanSeat } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
 import { Bgm } from './audio/bgm.js';
+import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 import {
   NetClient, createRoom, clientId, savedName, saveName, serverBase,
@@ -85,7 +86,7 @@ function setSeat(seat) {
 
 // 設定(⚙️シートから編集。新しいゲーム開始時に反映)
 const settings = {
-  view: '3d', mode: 'base', cpuCount: 3, seed: '', difficulty: 'normal', bgm: true,
+  view: '3d', mode: 'base', cpuCount: 3, seed: '', difficulty: 'normal', bgm: true, sfx: true,
   diceMode: 'random', // 'random'(毎回独立。既定) | 'balanced'(36通りの山札)
 };
 
@@ -132,6 +133,8 @@ function renderSelectPanel() {
     <div class="srow"><span>CPU</span>${seg('set-cpu', [['2', '2体'], ['3', '3体']], String(settings.cpuCount))}</div>
     <div class="srow"><span>強さ</span>${seg('set-diff', [['easy', '弱い'], ['normal', '普通'], ['hard', '強い']], settings.difficulty)}</div>
     <div class="srow"><span>出目</span>${seg('set-dice', [['random', '純ランダム'], ['balanced', 'バランス']], settings.diceMode)}</div>
+    <div class="srow"><span>BGM</span>${seg('set-bgm', [['on', '🔊 オン'], ['off', '🔇 オフ']], settings.bgm ? 'on' : 'off')}</div>
+    <div class="srow"><span>効果音</span>${seg('set-sfx', [['on', '🔔 オン'], ['off', '🔕 オフ']], settings.sfx ? 'on' : 'off')}</div>
     <div class="srow"><span>シード</span><input id="seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${settings.seed}"></div>
     <div class="row end">
       <button data-act="goto-rules:setup">❔ 選択肢の説明</button>
@@ -267,6 +270,7 @@ function onNetState(msg) {
       rollFx();
     }
     maybeTradeFx(act, prev.awaiting);
+    playSfx(act, prev, state);
   }
   syncUi();
   refresh();
@@ -339,15 +343,31 @@ function syncBgmButtons() {
     b.textContent = bgm.enabled ? '🔊 BGM オン' : '🔇 BGM オフ';
   }
 }
+// 効果音。BGM と AudioContext を共有する(audio/ctx.js)
+const sfx = new Sfx();
+settings.sfx = sfx.enabled;
+
 document.addEventListener(
   'pointerdown',
   () => bgm.start(),
   { once: true, capture: true },
 );
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) bgm.ctx?.suspend();
+  if (document.hidden) suspendAudio();
   else if (bgm.enabled && bgm.running) bgm.ctx?.resume();
 });
+
+// アクション1つぶんの効果音を鳴らす(ローカル戦・オンラインの共通フック)
+function playSfx(action, prev, next) {
+  const me = HUMAN; // オンラインでも setSeat() で自席になっている
+  for (const { name, delay } of sfxForAction(action, prev, next, me)) {
+    if (delay) setTimeout(() => sfx.play(name), delay * 1000);
+    else sfx.play(name);
+  }
+  if (prev.phase !== 'ended' && next.phase === 'ended') {
+    setTimeout(() => sfx.play(sfxForEnd(next, me)), 600);
+  }
+}
 
 // ---- あそびかたデモ(自動再生。実装は src/demo/)----
 // 台本は実物のルールエンジンを動かすので、CPU の自動進行だけ止めて場を明け渡す。
@@ -1098,6 +1118,7 @@ function doAction(action) {
   const before =
     action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
   const prevAwaiting = state.awaiting;
+  const prevState = state;
   try {
     state = dispatch(state, action);
   } catch (e) {
@@ -1106,6 +1127,7 @@ function doAction(action) {
     return false;
   }
   maybeTradeFx(action, prevAwaiting);
+  playSfx(action, prevState, state);
   if (before) {
     showGainFx(before);
     rollFx();
@@ -1482,6 +1504,11 @@ document.addEventListener('click', (e) => {
       bgm.setEnabled(arg === 'on');
       settings.bgm = bgm.enabled;
       syncBgmButtons();
+      refresh();
+      return;
+    case 'set-sfx':
+      sfx.setEnabled(arg === 'on'); // オンにしたときは確認用に1音鳴る
+      settings.sfx = sfx.enabled;
       refresh();
       return;
     case 'rules-back': setScreen(rulesFrom === 'rules' ? 'title' : rulesFrom); return;
