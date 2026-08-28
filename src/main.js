@@ -538,7 +538,7 @@ function newGame() {
 // 閉じ忘れると「捨て札ダイアログのまま盗賊移動になる」ような食い違いが起き、
 // ダイアログの描画が state を読めずに例外で落ちて操作不能になる。
 const INTERRUPT_DIALOGS = [
-  'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck', 'progressLimit', 'weddingGift',
+  'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck', 'progressLimit', 'weddingGift', 'harborGive',
 ];
 // awaiting の種類ごとに、開いたままでよいダイアログ
 const DIALOG_FOR_AWAITING = {
@@ -550,6 +550,7 @@ const DIALOG_FOR_AWAITING = {
   defenderDeck: 'defenderDeck',
   progressLimit: 'progressLimit',
   weddingGift: 'weddingGift',
+  harborGive: 'harborGive',
   moveRobber: 'steal', // 略奪相手の選択(自分で開くのでここでは自動で開かない)
 };
 // awaiting の種類ごとの盤面入力モード
@@ -1749,6 +1750,10 @@ document.addEventListener('click', (e) => {
     case 'discard-minus': ui.dialog.counts[arg]--; refresh(); return;
     case 'discard-confirm':
       doAction({ type: 'DISCARD', player: HUMAN, resources: { ...ui.dialog.counts } });
+      return;
+
+    case 'harbor':
+      doAction({ type: 'GIVE_HARBOR', player: HUMAN, commodity: arg });
       return;
 
     case 'wed-plus': ui.dialog.counts[arg]++; refresh(); return;

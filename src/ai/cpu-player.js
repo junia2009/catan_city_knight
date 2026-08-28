@@ -18,7 +18,9 @@ import { RESOURCES } from '../state.js';
 import { KNIGHT_COSTS, canPlaceKnight } from '../rules/cak/knights.js';
 import { TOWER_COST } from '../rules/dragon.js';
 import { knightContribution, razableCities } from '../rules/cak/barbarians.js';
-import { TRACKS, TRACK_COMMODITY, canBuyImprovement } from '../rules/cak/improvements.js';
+import {
+  TRACKS, TRACK_COMMODITY, MAX_IMPROVEMENT, canBuyImprovement,
+} from '../rules/cak/improvements.js';
 import {
   COMMODITIES, PROGRESS_CARDS, weddingGiftSize,
 } from '../rules/cak/progress-cards.js';
@@ -568,6 +570,19 @@ export function chooseAction(state, pid) {
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
     if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
+    if (aw.type === 'harborGive') {
+      // 商業港。改良に使わない系統の商品から手放す。
+      const p = state.players[pid];
+      const commodity = best(
+        COMMODITIES.filter((c) => p.commodities[c] > 0),
+        (c) => {
+          const track = TRACKS.find((t) => TRACK_COMMODITY[t] === c);
+          // まだ育てる余地がある系統の商品ほど手放したくない
+          return -(p.improvements[track] < MAX_IMPROVEMENT ? 2 : 0) + p.commodities[c] * 0.1;
+        },
+      );
+      return { type: 'GIVE_HARBOR', player: pid, commodity };
+    }
     if (aw.type === 'weddingGift') {
       // 王家の婚礼の贈り物。捨て札と同じ基準で、手放して痛くない札から選ぶ。
       return {

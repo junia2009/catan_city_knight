@@ -144,19 +144,62 @@ test('豪商: 勝利点が上の相手からのみ2枚奪える', () => {
   conservation(s);
 });
 
-test('商業港: 資源1枚と相手の商品1枚を強制交換', () => {
+test('商業港: 渡す商品は相手が選ぶ(公式)', () => {
   let s = readyGame();
-  for (const p of s.players) for (const c of COMMODITIES) setCards(s, p.id, c, 0);
-  for (const p of s.players) setCards(s, p.id, 'wood', 0);
+  for (const p of s.players) {
+    for (const c of COMMODITIES) setCards(s, p.id, c, 0);
+    setCards(s, p.id, 'wood', 0);
+  }
   setCards(s, 0, 'wood', 3);
   setCards(s, 1, 'cloth', 1);
+  setCards(s, 1, 'paper', 2); // 席1 は布と紙のどちらを渡すか選べる
   setCards(s, 2, 'paper', 1);
+
   s = playCard(s, 0, 'commercialHarbor', { resource: 'wood' });
-  assert.equal(s.players[0].commodities.cloth + s.players[0].commodities.paper, 2);
-  assert.equal(s.players[0].resources.wood, 1);
-  assert.equal(s.players[1].resources.wood, 1);
-  assert.equal(s.players[2].resources.wood, 1);
-  conservation(s);
+  assert.equal(s.awaiting?.type, 'harborGive');
+  assert.deepEqual(s.awaiting.players, [1, 2]);
+  assert.equal(s.players[0].resources.wood, 3, '選ぶ前に交換が起きている');
+
+  // 持っていない商品は選べない
+  assert.match(
+    validateAction(s, { type: 'GIVE_HARBOR', player: 1, commodity: 'coin' }),
+    /持っていません/,
+  );
+
+  // 席1 は紙を選ぶ(自動選択ではなく指定どおりに動く)
+  let after = dispatch(s, { type: 'GIVE_HARBOR', player: 1, commodity: 'paper' });
+  assert.equal(after.players[0].commodities.paper, 1);
+  assert.equal(after.players[0].commodities.cloth, 0, '選んでいない商品まで渡っている');
+  assert.equal(after.players[1].resources.wood, 1, '資源が返っていない');
+  assert.equal(after.players[0].resources.wood, 2);
+  assert.deepEqual(after.awaiting.players, [2]);
+
+  after = dispatch(after, { type: 'GIVE_HARBOR', player: 2, commodity: 'paper' });
+  assert.equal(after.players[0].commodities.paper, 2);
+  assert.equal(after.awaiting, null);
+  conservation(after);
+});
+
+test('商業港: 使う側の資源が尽きたら、そこから先は交換されない', () => {
+  let s = readyGame();
+  for (const p of s.players) {
+    for (const c of COMMODITIES) setCards(s, p.id, c, 0);
+    setCards(s, p.id, 'wood', 0);
+  }
+  setCards(s, 0, 'wood', 1); // 1枚しかないので交換できるのは1人まで
+  setCards(s, 1, 'cloth', 1);
+  setCards(s, 2, 'coin', 1);
+
+  s = playCard(s, 0, 'commercialHarbor', { resource: 'wood' });
+  let after = dispatch(s, { type: 'GIVE_HARBOR', player: 1, commodity: 'cloth' });
+  assert.equal(after.players[0].commodities.cloth, 1);
+  assert.equal(after.players[0].resources.wood, 0);
+  // 2人目は資源が尽きているので商品を失わない
+  after = dispatch(after, { type: 'GIVE_HARBOR', player: 2, commodity: 'coin' });
+  assert.equal(after.players[2].commodities.coin, 1, '資源が無いのに商品を取られている');
+  assert.equal(after.players[0].commodities.coin, 0);
+  assert.equal(after.awaiting, null);
+  conservation(after);
 });
 
 // ---- 政治系 ----

@@ -142,6 +142,7 @@ const AWAITING_ACTIONS = {
   defenderDeck: 'PICK_DEFENDER_DECK',
   progressLimit: 'DISCARD_PROGRESS',
   weddingGift: 'GIVE_WEDDING',
+  harborGive: 'GIVE_HARBOR',
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
@@ -453,6 +454,13 @@ export function validateAction(state, action) {
 
     case 'DISCARD_PROGRESS': {
       if (!p.progressCards[action.index]) return '捨てるカードを選んでください';
+      return null;
+    }
+
+    // 商業港: 渡す商品は自分で選ぶ
+    case 'GIVE_HARBOR': {
+      if (!COMMODITIES.includes(action.commodity)) return '渡す商品を選んでください';
+      if (p.commodities[action.commodity] < 1) return 'その商品を持っていません';
       return null;
     }
 
@@ -820,6 +828,23 @@ function applyAction(state, action) {
     case 'RAZE_CITY': {
       razeCity(state, action.vertexId);
       finishBarbarianChoice(state, pid);
+      break;
+    }
+
+    case 'GIVE_HARBOR': {
+      const { to: toPid, resource } = state.awaiting.context;
+      const to = state.players[toPid];
+      const c = action.commodity;
+      // 相手の資源が尽きていたら交換は起きない(公式: 資源1枚と引き換え)
+      if (to.resources[resource] > 0) {
+        p.commodities[c] -= 1; to.commodities[c] += 1;
+        to.resources[resource] -= 1; p.resources[resource] += 1;
+        addLog(state, `⚓ ${p.name}が${COM_JP[c]}を渡し、${RES_JP[resource]}を受け取りました`);
+      } else {
+        addLog(state, `⚓ ${to.name}の${RES_JP[resource]}が尽きたため、${p.name}との交換は成立せず`);
+      }
+      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+      if (state.awaiting.players.length === 0) state.awaiting = null;
       break;
     }
 

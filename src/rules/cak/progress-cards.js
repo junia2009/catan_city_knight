@@ -101,6 +101,13 @@ export function diplomatDestinations(state, pid, fromEdge) {
   );
 }
 
+// 商業港で商品を渡す人(商品を1枚以上持っている相手)
+export function harborGivers(state, pid) {
+  return state.players
+    .filter((o) => o.id !== pid && COMMODITIES.some((c) => o.commodities[c] > 0))
+    .map((o) => o.id);
+}
+
 // 王家の婚礼で贈り物をする人(自分より勝利点が高く、手札がある相手)
 export function weddingGivers(state, pid) {
   return playersAbove(state, pid).filter((o) => totalCards(o) > 0).map((o) => o.id);
@@ -246,23 +253,19 @@ export const PROGRESS_CARDS = {
       }
       return null;
     },
+    // 渡す商品は相手が選ぶ(公式)。実際の交換は actions.js の GIVE_HARBOR が行う。
     play(state, pid, params) {
-      const p = state.players[pid];
-      const r = params.resource;
-      let swaps = 0;
-      for (const o of state.players) {
-        if (o.id === pid || p.resources[r] < 1) continue;
-        const pool = [];
-        for (const c of COMMODITIES) for (let k = 0; k < o.commodities[c]; k++) pool.push(c);
-        if (!pool.length) continue;
-        let idx;
-        [state.rng, idx] = rngInt(state.rng, pool.length);
-        const c = pool[idx];
-        o.commodities[c]--; p.commodities[c]++;
-        p.resources[r]--; o.resources[r]++;
-        swaps++;
-      }
-      addLog(state, `⚓ ${state.players[pid].name}が商業港で${swaps}人と交換(${RES_JP[r]}⇄商品)`);
+      addLog(
+        state,
+        `⚓ ${state.players[pid].name}が商業港を開きました(${RES_JP[params.resource]}と商品を交換)`,
+      );
+    },
+    awaitAfterPlay(state, pid, params) {
+      return {
+        type: 'harborGive',
+        players: harborGivers(state, pid),
+        context: { to: pid, resource: params.resource },
+      };
     },
   },
 
