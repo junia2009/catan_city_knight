@@ -230,6 +230,11 @@ const VOICES = {
     s.tone(D.d2, t, 0.7, { type: 'sine', gain: 0.12 });
     s.tone(D.a, t, 0.9, { type: 'sine', gain: 0.07 });
   },
+  // 自分に返事を求められた(交易の提案・捨て札・盗賊の移動など): 呼びかけの2音
+  ask: (s, t) => {
+    s.tone(D.a, t, 0.16, { type: 'sine', gain: 0.11 });
+    s.tone(D.d2, t + 0.13, 0.3, { type: 'sine', gain: 0.11 });
+  },
 
   // 勝利: ファンファーレ
   win: (s, t) => {
@@ -288,7 +293,16 @@ export function sfxForAction(action, prev, next, me) {
   if (!action || !prev || !next) return [];
   const out = [];
   const add = (name, delay = 0) => { if (name) out.push({ name, delay }); };
-  const mine = action.player === me;
+
+  // 自分に返事が回ってきたら呼びかける。手番中ずっと画面を見ているとは限らないので、
+  // 「今あなたが答える番」という割り込みは、その行動そのものの音とは別に鳴らす。
+  const asksMe = (s) => me != null && !!s.awaiting?.players?.includes(me);
+  const newlyAsked = asksMe(next) && !asksMe(prev);
+  // 行動そのものの音を先に鳴らし、呼びかけを少し遅らせて重ならないようにする
+  const done = () => {
+    if (newlyAsked) out.push({ name: 'ask', delay: out.length ? 0.9 : 0 });
+    return out;
+  };
 
   if (action.type === 'ROLL_DICE') {
     add('roll');
@@ -301,38 +315,38 @@ export function sfxForAction(action, prev, next, me) {
     else if (rampaged) add('dragon', 0.7);
     else if (total === 7) add('robber', 0.7);
     else if (me != null && handOf(next.players[me]) > handOf(prev.players[me])) add('gain', 0.7);
-    return out;
+    return done();
   }
 
   if (action.type === 'MOVE_ROBBER') {
     add('robber');
     // 自分が奪われたときだけ被害の音を足す
     if (me != null && handOf(next.players[me]) < handOf(prev.players[me])) add('steal', 0.35);
-    return out;
+    return done();
   }
 
   if (action.type === 'RESPOND_TRADE') {
     // 提案が締め切られたときだけ(まだ返事待ちが残っていれば鳴らさない)
-    if (next.awaiting?.type === 'tradeOffer') return out;
+    if (next.awaiting?.type === 'tradeOffer') return done();
     const replies = prev.awaiting?.context?.replies ?? {};
     const anyYes = action.accept || Object.values(replies).some(Boolean);
     add(anyYes ? 'ui' : 'reject');
-    return out;
+    return done();
   }
 
   if (action.type === 'PLACE_INITIAL') {
     add(next.ships?.[action.edgeId] ? 'ship' : 'settlement');
-    return out;
+    return done();
   }
 
   if (action.type === 'END_TURN') {
     // 手番が自分に回ってきた合図(割り込み待ちのときは鳴らさない)
     if (me != null && next.currentPlayer === me && !next.awaiting) add('turn');
-    return out;
+    return done();
   }
 
   add(BUILD_VOICE[action.type]);
-  return out;
+  return done();
 }
 
 // 決着の音。勝者が自分かどうかで変える。

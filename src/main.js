@@ -263,15 +263,7 @@ function onNetState(msg) {
     if (viewMode === '3d' && !renderer3d) ensureRenderer3d().then(() => refresh());
   }
   // 演出はローカル戦と同じフックを、サーバーが適用したアクションから再生する
-  const act = msg.action;
-  if (act && prev) {
-    if (act.type === 'ROLL_DICE') {
-      showGainFx(prev.players.map((p) => ({ ...p.resources })));
-      rollFx();
-    }
-    maybeTradeFx(act, prev.awaiting);
-    playSfx(act, prev, state);
-  }
+  if (msg.action && prev) playFx(msg.action, prev, state);
   syncUi();
   refresh();
   updateNetBadge();
@@ -357,8 +349,20 @@ document.addEventListener('visibilitychange', () => {
   else if (bgm.enabled && bgm.running) bgm.ctx?.resume();
 });
 
-// アクション1つぶんの効果音を鳴らす(ローカル戦・オンラインの共通フック)
-function playSfx(action, prev, next) {
+// アクション1つぶんの演出(音と画面)。
+//
+// 手を出す経路は「自分の操作」「CPU の自動進行」「オンラインでサーバーから届いた手」
+// の3つある。どれも同じ演出を出すので、必ずここを通す ──
+// 経路ごとに書き写していたせいで、CPU の手番だけ音が鳴らない状態になっていた。
+function playFx(action, prev, next, { skipBoardFx = false } = {}) {
+  if (!action || !prev || !next) return;
+  if (!skipBoardFx) {
+    maybeTradeFx(action, prev.awaiting);
+    if (action.type === 'ROLL_DICE') {
+      showGainFx(prev.players.map((p) => ({ ...p.resources })));
+      rollFx();
+    }
+  }
   const me = HUMAN; // オンラインでも setSeat() で自席になっている
   for (const { name, delay } of sfxForAction(action, prev, next, me)) {
     if (delay) setTimeout(() => sfx.play(name), delay * 1000);
@@ -1115,9 +1119,6 @@ function doAction(action) {
     return true;
   }
 
-  const before =
-    action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
-  const prevAwaiting = state.awaiting;
   const prevState = state;
   try {
     state = dispatch(state, action);
@@ -1126,12 +1127,7 @@ function doAction(action) {
     refresh();
     return false;
   }
-  maybeTradeFx(action, prevAwaiting);
-  playSfx(action, prevState, state);
-  if (before) {
-    showGainFx(before);
-    rollFx();
-  }
+  playFx(action, prevState, state);
   resetInputState();
   refresh();
   scheduleCpu();
@@ -1172,16 +1168,10 @@ function scheduleCpu() {
   cpuTimer = setTimeout(() => {
     const action = chooseAction(state, pid);
     if (!action) return;
-    const before =
-      action.type === 'ROLL_DICE' ? state.players.map((p) => ({ ...p.resources })) : null;
-    const prevAwaiting = state.awaiting;
+    const prevState = state;
     try {
       state = dispatch(state, action);
-      maybeTradeFx(action, prevAwaiting);
-      if (before) {
-        showGainFx(before);
-        rollFx();
-      }
+      playFx(action, prevState, state);
     } catch (e) {
       // CPU の手が通らない場合は安全側でターン終了を試みる
       console.error('CPU action failed:', e.message, action);
