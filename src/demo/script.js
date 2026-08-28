@@ -649,7 +649,7 @@ const cakBeats = [
       const line = [...s.log].reverse().find((l) => l.includes('蛮族襲来'));
       const m = line?.match(/蛮族(\d+) vs 防衛(\d+)/);
       if (m && Number(m[2]) >= Number(m[1])) {
-        return '🛡 防衛成功! 最も貢献した人が「カタンの守護者」+1点。同点なら全員に進歩カードです。';
+        return '🛡 防衛成功! 最も貢献した人が「島の守護者」+1点。同点なら全員に進歩カードです。';
       }
       return '💥 防衛失敗 ── 貢献が最も少なかった人の都市が開拓地に降格します。騎士を出していたあなたは無事でした。';
     },

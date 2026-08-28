@@ -350,14 +350,14 @@ main.js ── 通常の refresh・dispatch・演出がそのまま動く
 | 結合 | セルフプレイ: CPU のみで数百ゲーム完走・無限ループ検出・資源/商品の保存則・勝者の点数検証 |
 | オンライン | `test/room.test.js` で部屋のロジック(席・ホスト・伏せ処理・肩代わり・復元)を検証。
 実サーバーは `wrangler dev` + WebSocket / ブラウザ2つで確認 |
-| E2E | Playwright(headless Chromium + SwiftShader)。`window.catanDebug` で state を直接操作して
+| E2E | Playwright(headless Chromium + SwiftShader)。`window.hexDebug` で state を直接操作して
 UI フローを検証(手順は [CLAUDE.md](../CLAUDE.md)) |
 
 **保存則**は最重要の不変条件: どの時点でも 銀行+全員の手札 = 資源 19×5・商品 12×3。
 
 ## デバッグフック
 
-- `window.catanDebug`: `getState` / `setState`(差し替え+再描画+CPU再開)/ `doAction` /
+- `window.hexDebug`: `getState` / `setState`(差し替え+再描画+CPU再開)/ `doAction` /
   `newGameWith(patch)` / `getUi` / `screenPos(kind, id)`(3D→画面座標)/ `getRenderer` /
   `getBgm` / `getViewState` / `startDemo(id)` / `getDemo` / `demoSkip` / `demoStop`
 - URL `?seed=123`: シード固定

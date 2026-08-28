@@ -50,7 +50,7 @@ export function resolveBarbarianAttack(state) {
     const tops = state.players.filter((p) => contributions[p.id] === max && max > 0);
     if (tops.length === 1) {
       tops[0].defenderPoints += 1;
-      addLog(state, `🛡 ${tops[0].name}が「カタンの守護者」を獲得! +1点`);
+      addLog(state, `🛡 ${tops[0].name}が「島の守護者」を獲得! +1点`);
     } else if (tops.length > 1) {
       for (const p of tops) {
         // 最も育てている系統の山札から獲得

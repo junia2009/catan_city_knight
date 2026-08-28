@@ -30,7 +30,7 @@ npm run deploy:server         # Cloudflare へ手動デプロイ(要ログイン
 3. **見た目の変更**は必ずスクリーンショットをユーザーに見せて確認をとる。
 4. **HUD のボタン(`data-act`)やルールを変えたら** `npm test` の `test/demo.test.js` を確認。
    あそびかたデモ(`src/demo/`)の台本が実物の手を出しているので、ここが落ちたら
-   デモも一緒に直す(`window.catanDebug.startDemo('setup'|'basic'|'cak')` で再生できる)。
+   デモも一緒に直す(`window.hexDebug.startDemo('setup'|'basic'|'cak')` で再生できる)。
 
 ## Playwright E2E レシピ
 
@@ -51,19 +51,19 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
 await page.goto('http://localhost:8000/index.html?seed=11'); // シード固定で再現可能に
-await page.waitForFunction(() => window.catanDebug, null, { timeout: 20000 });
+await page.waitForFunction(() => window.hexDebug, null, { timeout: 20000 });
 ```
 
 ### よく使うパターン
 
-- **状態を直接作る**: `catanDebug.getState()` を `structuredClone` して書き換え、
-  `catanDebug.setState(s)`。資源を足すときは銀行から引く(保存則を壊さない)。
+- **状態を直接作る**: `hexDebug.getState()` を `structuredClone` して書き換え、
+  `hexDebug.setState(s)`。資源を足すときは銀行から引く(保存則を壊さない)。
 - **出目の固定**: `s.turnFlags.alchemist = [3, 3]` → ROLL_DICE でその出目になる
   (ゾロ目で暴走、合計7で捨て札などを意図的に起こせる)。
 - **セットアップ完走**: `import('./src/ai/cpu-player.js')` して人間の分も
   `chooseAction` で回す(check-dragon.mjs 参照)。
-- **3D 上の座標**: `catanDebug.screenPos('vertex'|'edge'|'hex', id)` → `page.touchscreen.tap(x, y)`。
-- **昼夜の固定**: `catanDebug.getRenderer().skyPhaseOverride = 0.5` 等(照明・影の確認)。
+- **3D 上の座標**: `hexDebug.screenPos('vertex'|'edge'|'hex', id)` → `page.touchscreen.tap(x, y)`。
+- **昼夜の固定**: `hexDebug.getRenderer().skyPhaseOverride = 0.5` 等(照明・影の確認)。
 - **スクリーンショットの注意**: ダイアログや演出は CSS アニメーションの
   0 フレーム目(opacity: 0)を撮りがち。**400〜500ms 待つ**か、
   完了マーカー(例: `.rollfx.land`)を待ってから撮る。
@@ -89,9 +89,9 @@ npm run serve         # 静的サイト(:8000)
   相手の手札を「枚数以外」で描画に使い始めると伏せ処理が破綻するので、
   `render/` 側で `players[other].devCards[i].type` のような読み方をしない。
 - ブラウザ2つの E2E は `browser.newContext()` を2つ作り、
-  `addInitScript` で `localStorage['catan.clientId']` を固定すると再接続を再現できる。
+  `addInitScript` で `localStorage['hexfrontier.clientId']` を固定すると再接続を再現できる。
   SwiftShader で WebGL を2つ動かすと重いので、待ち時間は長めに取る。
-- `window.catanDebug.getNet() / netJoin() / netStart() / netLeave()` が E2E 用のフック。
+- `window.hexDebug.getNet() / netJoin() / netStart() / netLeave()` が E2E 用のフック。
 
 ## デプロイ
 

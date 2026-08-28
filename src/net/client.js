@@ -2,14 +2,16 @@
 // サーバー(Cloudflare Workers + Durable Objects)とのやりとりを 1 箇所にまとめる。
 // ゲームのルール判定は一切ここでは行わない ── 権威はサーバーにある。
 
+import { lsGet, lsSet } from '../storage.js';
+
 // 接続先。デプロイ後の workers.dev URL をここに書く。
 // 開発中は ?server=... で上書きでき、localhost では自動でローカルサーバーを見る。
-const DEFAULT_SERVER = 'https://catan-web-server.uriboo-dev.workers.dev';
+const DEFAULT_SERVER = 'https://hexfrontier-server.uriboo-dev.workers.dev';
 
 export function serverBase() {
   const override = new URLSearchParams(location.search).get('server');
   if (override) return override.replace(/\/$/, '');
-  const saved = localStorage.getItem('catan.server');
+  const saved = lsGet('server');
   if (saved) return saved.replace(/\/$/, '');
   if (['localhost', '127.0.0.1'].includes(location.hostname)) return 'http://127.0.0.1:8787';
   return DEFAULT_SERVER;
@@ -17,20 +19,20 @@ export function serverBase() {
 
 // 同じ端末は同じ ID を使い続ける(再接続で元の席に戻るため)
 export function clientId() {
-  let id = localStorage.getItem('catan.clientId');
+  let id = lsGet('clientId');
   if (!id) {
     id = `c-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
-    localStorage.setItem('catan.clientId', id);
+    lsSet('clientId', id);
   }
   return id;
 }
 
 export function savedName() {
-  return localStorage.getItem('catan.name') ?? '';
+  return lsGet('name') ?? '';
 }
 
 export function saveName(name) {
-  localStorage.setItem('catan.name', name);
+  lsSet('name', name);
 }
 
 // 新しい部屋を作って合言葉をもらう

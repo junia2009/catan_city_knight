@@ -17,6 +17,7 @@ import {
 } from './ai/legal-moves.js';
 import { LAYOUT, boardVertexIds } from './rules/board.js';
 import { isSeaHex, movableShips, pirateTargets } from './rules/sea.js';
+import { lsSet, lsRemove } from './storage.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import { PROGRESS_CARDS } from './rules/cak/progress-cards.js';
 import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-render.js';
@@ -1446,8 +1447,8 @@ document.addEventListener('click', (e) => {
     }
     case 'net-server-save': {
       const url = document.getElementById('net-server')?.value.trim() ?? '';
-      if (url) localStorage.setItem('catan.server', url.replace(/\/$/, ''));
-      else localStorage.removeItem('catan.server');
+      if (url) lsSet('server', url.replace(/\/$/, ''));
+      else lsRemove('server');
       // ?server= の一時指定より保存を優先させる(明示的な操作なので上書きしてよい)
       const u = new URL(location.href);
       if (u.searchParams.has('server')) {
@@ -1781,7 +1782,7 @@ document.addEventListener('input', (e) => {
 });
 
 // デバッグ・テスト用フック(シード制御と合わせて再現検証に使う)
-window.catanDebug = {
+window.hexDebug = {
   getState: () => state,
   setState: (s) => { state = s; refresh(); scheduleCpu(); },
   doAction,

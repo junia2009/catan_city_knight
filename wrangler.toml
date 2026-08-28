@@ -1,7 +1,7 @@
 # オンライン対戦サーバー(Cloudflare Workers + Durable Objects)
 # デプロイ: npx wrangler deploy   / ローカル: npm run server
 
-name = "catan-web-server"
+name = "hexfrontier-server"
 main = "server/index.js"
 compatibility_date = "2025-09-01"
 

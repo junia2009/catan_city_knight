@@ -1,7 +1,7 @@
 {
-  "name": "カタン 都市と騎士",
-  "short_name": "カタン",
-  "description": "ブラウザで遊べるカタン(都市と騎士対応)。1人 vs CPU 2〜3体。",
+  "name": "Hexfrontier",
+  "short_name": "Hexfrontier",
+  "description": "ブラウザで遊べるヘックスの島の開拓ゲーム。1人 vs CPU でも、友達とのオンライン対戦でも。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -9,8 +9,21 @@
   "theme_color": "#0e2338",
   "lang": "ja",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
