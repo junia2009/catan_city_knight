@@ -74,6 +74,7 @@ import {
   COMMODITIES,
   COM_JP,
   PROGRESS_CARDS,
+  PROGRESS_HAND_LIMIT,
   distributeProgressCards,
   drawProgressCard,
 } from './rules/cak/progress-cards.js';
@@ -138,6 +139,7 @@ const AWAITING_ACTIONS = {
   moveRobber: 'MOVE_ROBBER',
   barbarianDefense: 'RAZE_CITY',
   defenderDeck: 'PICK_DEFENDER_DECK',
+  progressLimit: 'DISCARD_PROGRESS',
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
@@ -447,6 +449,11 @@ export function validateAction(state, action) {
       return null;
     }
 
+    case 'DISCARD_PROGRESS': {
+      if (!p.progressCards[action.index]) return '捨てるカードを選んでください';
+      return null;
+    }
+
     case 'PLAY_DEV_CARD': {
       if (state.mode === 'cak') return '都市と騎士では発展カードは使いません';
       if (state.turnFlags.playedDev) return 'このターンはすでに発展カードを使いました';
@@ -561,6 +568,36 @@ function noteIsland(state, pid, vertexId) {
   p.islands.push(island);
   if (island !== 0) {
     addLog(state, `🏝 ${p.name}が新しい島に入植! (+2点)`);
+  }
+}
+
+function endTurn(state, pid) {
+  checkVictoryFor(state, pid);
+  if (state.phase === 'ended') return;
+  state.currentPlayer = (pid + 1) % state.players.length;
+  state.turn += 1;
+  state.turnFlags = { rolled: false, playedDev: false };
+  state.dice = null;
+  addLog(state, `── ${state.players[state.currentPlayer].name}の手番 ──`);
+}
+
+// 進歩カードの手札上限(公式): 4枚。ただし自分の手番のあいだだけ5枚まで持てて、
+// ターンを終える前に4枚へ戻す。超過している枚数を返す。
+// endingTurn: ターンを終えようとしている判定(この猶予を使わない)。
+function progressOverflow(state, pid, { endingTurn = false } = {}) {
+  if (state.mode !== 'cak') return 0;
+  const onOwnTurn = !endingTurn && state.phase === 'main' && state.currentPlayer === pid;
+  const allowed = onOwnTurn ? PROGRESS_HAND_LIMIT + 1 : PROGRESS_HAND_LIMIT;
+  return Math.max(0, state.players[pid].progressCards.length - allowed);
+}
+
+// 上限を超えている人がいたら、その場で捨ててもらう割り込みを張る。
+// 他の割り込み(捨て札・盗賊など)が先に立っているときは、そちらが済んでから。
+function enforceProgressLimit(state) {
+  if (state.mode !== 'cak' || state.awaiting || state.phase !== 'main') return;
+  const over = state.players.filter((x) => progressOverflow(state, x.id) > 0).map((x) => x.id);
+  if (over.length) {
+    state.awaiting = { type: 'progressLimit', players: over, context: {} };
   }
 }
 
@@ -1089,13 +1126,31 @@ function applyAction(state, action) {
     }
 
     case 'END_TURN': {
-      checkVictoryFor(state, pid);
-      if (state.phase === 'ended') break;
-      state.currentPlayer = (pid + 1) % state.players.length;
-      state.turn += 1;
-      state.turnFlags = { rolled: false, playedDev: false };
-      state.dice = null;
-      addLog(state, `── ${state.players[state.currentPlayer].name}の手番 ──`);
+      // 進歩カードが5枚のままターンを終えられない(公式)。1枚捨ててもらう。
+      if (progressOverflow(state, pid, { endingTurn: true }) > 0) {
+        state.awaiting = {
+          type: 'progressLimit',
+          players: [pid],
+          context: { thenEndTurn: true },
+        };
+        break;
+      }
+      endTurn(state, pid);
+      break;
+    }
+
+    case 'DISCARD_PROGRESS': {
+      const [card] = p.progressCards.splice(action.index, 1);
+      state.bank.progressDecks[card.deck].unshift(card.id); // 捨て札は山札の底へ
+      addLog(state, `${p.name}が進歩カード「${PROGRESS_CARDS[card.id].name}」を捨てました`);
+      const endingTurn = !!state.awaiting.context.thenEndTurn;
+      state.awaiting.players = state.awaiting.players.filter(
+        (x) => progressOverflow(state, x, { endingTurn }) > 0,
+      );
+      if (state.awaiting.players.length === 0) {
+        state.awaiting = null;
+        if (endingTurn) endTurn(state, pid);
+      }
       break;
     }
   }
@@ -1114,5 +1169,8 @@ export function dispatch(prev, action) {
   if (action.type !== 'END_TURN' && action.player === state.currentPlayer) {
     checkVictoryFor(state, action.player);
   }
+  // 進歩カードが増える経路は複数あるので(イベントダイスの配布・スパイ・
+  // 防衛の報酬)、どこで増えても効くよう最後にまとめて見る
+  enforceProgressLimit(state);
   return state;
 }

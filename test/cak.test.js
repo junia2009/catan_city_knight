@@ -16,6 +16,7 @@ import { canPlaceKnight, canMoveKnight, canPromoteKnight } from '../src/rules/ca
 import { applyImprovement, canBuyImprovement } from '../src/rules/cak/improvements.js';
 import { distributeProgressCards } from '../src/rules/cak/progress-cards.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
+import { legalRoadEdges } from '../src/ai/legal-moves.js';
 
 function newCak(seed = 5) {
   return createGame({ seed, playerCount: 4, humanIndex: -1, mode: 'cak' });
@@ -337,4 +338,81 @@ test('cak: セルフプレイ15ゲーム完走 + 保存則', () => {
       assert.equal(total, 12, `seed=${seed}: ${c}=${total}`);
     }
   }
+});
+
+// ---- 進歩カードの手札上限(公式) ----
+
+// 指定枚数の進歩カードを持たせる(山札から取り除いて辻褄を合わせる)
+function giveProgress(s, pid, n) {
+  s.players[pid].progressCards = [];
+  for (let i = 0; i < n; i++) {
+    const id = s.bank.progressDecks.politics.pop();
+    s.players[pid].progressCards.push({ id, deck: 'politics', boughtTurn: -1 });
+  }
+  return s;
+}
+
+test('cak: 進歩カードは4枚まで。自分の手番だけ5枚持てる(公式)', () => {
+  let s = finishSetup(newCak());
+  s.currentPlayer = 0;
+  s.awaiting = null;
+  s.turnFlags = { rolled: true, playedDev: false };
+
+  // 手番中は5枚まで持てる ── 5枚にしても捨て札の割り込みは立たない
+  s = giveProgress(s, 0, 5);
+  s.players[0].resources.wood = 2;
+  s.players[0].resources.brick = 2;
+  let t = dispatch(s, { type: 'BUILD_ROAD', player: 0, edgeId: legalRoadEdges(s, 0)[0] });
+  assert.equal(t.awaiting?.type ?? null, null, '手番中の5枚で捨て札を求められている');
+
+  // ただしそのままターンは終えられない
+  t = dispatch(s, { type: 'END_TURN', player: 0 });
+  assert.equal(t.awaiting?.type, 'progressLimit');
+  assert.deepEqual(t.awaiting.players, [0]);
+  assert.equal(t.currentPlayer, 0, '捨てる前に手番が進んでいる');
+
+  // 1枚捨てるとターンが進む
+  const after = dispatch(t, { type: 'DISCARD_PROGRESS', player: 0, index: 0 });
+  assert.equal(after.players[0].progressCards.length, 4);
+  assert.equal(after.awaiting?.type ?? null, null);
+  assert.equal(after.currentPlayer, 1, 'ターンが進んでいない');
+  // 捨てたカードは山札の底に戻る
+  assert.equal(after.bank.progressDecks.politics[0], t.players[0].progressCards[0].id);
+});
+
+test('cak: 手番でない人が5枚目を得たら即座に捨てる(公式)', () => {
+  let s = finishSetup(newCak());
+  s.currentPlayer = 0;
+  s.awaiting = null;
+  s.turnFlags = { rolled: true, playedDev: false };
+  s = giveProgress(s, 1, 4); // 手番でない席1が上限ちょうど
+  s.players[0].resources.wood = 2;
+  s.players[0].resources.brick = 2;
+
+  // スパイで席1から奪うと席0が5枚になる…のではなく、ここは配布で増やす。
+  // イベントダイスの配布は席1にも配られるので、政治Lvを上げて確実に引かせる。
+  s.players[1].improvements.politics = 3;
+  for (const p of s.players) if (p.id !== 1) p.improvements.politics = 0;
+  distributeProgressCards(s, 'politics', 1);
+  assert.equal(s.players[1].progressCards.length, 5, '上限でも引けていない');
+
+  // dispatch を通すと割り込みが立つ(手番外なので猶予なし)
+  const t = dispatch(
+    { ...s, awaiting: null },
+    { type: 'BUILD_ROAD', player: 0, edgeId: legalRoadEdges(s, 0)[0] },
+  );
+  assert.equal(t.awaiting?.type, 'progressLimit');
+  assert.deepEqual(t.awaiting.players, [1]);
+
+  const after = dispatch(t, { type: 'DISCARD_PROGRESS', player: 1, index: 2 });
+  assert.equal(after.players[1].progressCards.length, 4);
+  assert.equal(after.awaiting?.type ?? null, null);
+});
+
+test('cak: 上限の割り込みは基本モードでは立たない', () => {
+  const s = finishSetup(createGame({ seed: 5, playerCount: 4, humanIndex: -1 }));
+  const t = { ...s, currentPlayer: 0, awaiting: null, turnFlags: { rolled: true, playedDev: false } };
+  // 基本モードに progressCards は無いので、何をしても progressLimit は立たない
+  const after = dispatch(t, { type: 'END_TURN', player: 0 });
+  assert.equal(after.awaiting?.type ?? null, null);
 });

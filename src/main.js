@@ -536,7 +536,7 @@ function newGame() {
 // 閉じ忘れると「捨て札ダイアログのまま盗賊移動になる」ような食い違いが起き、
 // ダイアログの描画が state を読めずに例外で落ちて操作不能になる。
 const INTERRUPT_DIALOGS = [
-  'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck',
+  'discard', 'steal', 'tradeOffer', 'tradeChoose', 'aqueduct', 'gold', 'defenderDeck', 'progressLimit',
 ];
 // awaiting の種類ごとに、開いたままでよいダイアログ
 const DIALOG_FOR_AWAITING = {
@@ -546,6 +546,7 @@ const DIALOG_FOR_AWAITING = {
   aqueduct: 'aqueduct',
   goldChoice: 'gold',
   defenderDeck: 'defenderDeck',
+  progressLimit: 'progressLimit',
   moveRobber: 'steal', // 略奪相手の選択(自分で開くのでここでは自動で開かない)
 };
 // awaiting の種類ごとの盤面入力モード
@@ -1661,6 +1662,9 @@ document.addEventListener('click', (e) => {
       return;
     case 'ddeck':
       doAction({ type: 'PICK_DEFENDER_DECK', player: HUMAN, track: arg });
+      return;
+    case 'pdisc':
+      doAction({ type: 'DISCARD_PROGRESS', player: HUMAN, index: Number(arg) });
       return;
 
     // ---- 漁師たち ----

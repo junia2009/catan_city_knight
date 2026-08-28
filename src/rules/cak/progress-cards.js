@@ -644,11 +644,8 @@ export function drawProgressCard(state, pid, track) {
     addLog(state, `${p.name}が進歩カード「${PROGRESS_CARDS[cardId].name}」を公開! +1点`);
     return true;
   }
-  if (p.progressCards.length >= PROGRESS_HAND_LIMIT) {
-    deck.unshift(cardId); // 手札上限超過は山札の底へ
-    addLog(state, `${p.name}は進歩カードの手札が上限のため獲得できず`);
-    return false;
-  }
+  // 上限(4枚)を超えても引く。公式は「超えたら即座に1枚捨てる」なので、
+  // 捨てる選択は actions.js の progressLimit 割り込みが受け持つ。
   p.progressCards.push({ id: cardId, deck: track, boughtTurn: state.turn });
   addLog(state, `${p.name}が進歩カードを1枚獲得(${TRACK_JP_SHORT[track]})`);
   return true;

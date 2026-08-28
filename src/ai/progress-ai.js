@@ -346,6 +346,27 @@ export function pickProgressPlay(state, pid, { threshold = null } = {}) {
   return best?.action ?? null;
 }
 
+// 手札上限で1枚捨てるとき、いちばん手放していいカードの位置を返す。
+// 「いま使えるか」ではなく「持っている価値」で見る ── 今は対象がいなくても
+// 場が変われば効くカードがあるので、スコアが出ないものを一律に最下位とはしない。
+export function pickProgressDiscard(state, pid) {
+  const cards = state.players[pid].progressCards;
+  let worst = 0;
+  let worstScore = Infinity;
+  for (let i = 0; i < cards.length; i++) {
+    const def = PROGRESS_CARDS[cards[i].id];
+    const scorer = SCORERS[cards[i].id];
+    // 今すぐの価値 + 種類ごとの下駄(勝利点カードは手札に来ないので考えない)
+    const now = scorer ? (scorer(state, pid)?.score ?? 0) : 0;
+    const score = now + (def.preRoll ? 1 : 0);
+    if (score < worstScore) {
+      worstScore = score;
+      worst = i;
+    }
+  }
+  return worst;
+}
+
 // ロール前の錬金術師使用判断
 export function pickAlchemist(state, pid) {
   const p = state.players[pid];

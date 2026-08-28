@@ -395,10 +395,12 @@ function statusText(state, ui) {
     if (aw.type === 'goldChoice') return '💰 金鉱: もらう資源を選んでください';
     if (aw.type === 'barbarianDefense') return '⚔️ 降格させる都市を選んでください';
     if (aw.type === 'defenderDeck') return '🛡 防衛の報酬: 進歩カードを引く系統を選んでください';
+    if (aw.type === 'progressLimit') return '📜 進歩カードが多すぎます。1枚捨ててください';
     if (aw.type === 'tradeChoose') return '🤝 交換する相手を選んでください';
   } else if (aw) {
     const waiting = aw.players.map((i) => state.players[i].name).join('・');
     if (aw.type === 'defenderDeck') return `⏳ 防衛の報酬を選んでいます: ${waiting}`;
+    if (aw.type === 'progressLimit') return `⏳ 進歩カードの捨て札待ち: ${waiting}`;
     if (aw.type === 'tradeOffer') {
       // 何人が応じたかはこの時点で全員に見えている情報(成立すれば公開される)
       const yes = Object.values(aw.context.replies ?? {}).filter(Boolean).length;
@@ -645,6 +647,20 @@ function dialogHtml(state, ui) {
     ).join('');
     return `<h3>💧 水道橋(科学Lv3)</h3>
       <p>出目で資源がもらえなかったので、好きな資源を1枚もらえます</p>
+      <div class="row">${btns}</div>`;
+  }
+
+  if (d.type === 'progressLimit') {
+    const p0 = state.players[HUMAN];
+    const mine = state.currentPlayer === HUMAN;
+    const btns = p0.progressCards.map((c, i) => {
+      const def = PROGRESS_CARDS[c.id];
+      return `<button class="pick" data-act="pdisc:${i}">
+        <span class="picon">${def.icon}</span>${def.name}</button>`;
+    }).join('');
+    return `<h3>📜 進歩カードの手札上限</h3>
+      <p>進歩カードは<b>4枚まで</b>です${mine ? '(自分の手番のあいだだけ5枚持てますが、ターンを終える前に1枚捨てます)' : ''}。
+      捨てるカードを選んでください。</p>
       <div class="row">${btns}</div>`;
   }
 
