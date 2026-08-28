@@ -52,7 +52,11 @@ test('効果音: ダイスは必ず鳴り、7なら盗賊の音が続く', () =>
   const s7 = readyToRoll(base);
   s7.turnFlags.alchemist = [3, 4];
   const after7 = dispatch(s7, { type: 'ROLL_DICE', player: 0 });
-  assert.deepEqual(names({ type: 'ROLL_DICE', player: 0 }, s7, after7), ['roll', 'robber']);
+  // 7 のあとは盗賊の移動などで自分に返事が回るので、末尾に呼びかけが付くことがある
+  assert.deepEqual(
+    names({ type: 'ROLL_DICE', player: 0 }, s7, after7).slice(0, 2),
+    ['roll', 'robber'],
+  );
 
   // 7 以外で自分の手札が増えたら獲得の音
   const s = readyToRoll(base);
@@ -85,7 +89,11 @@ test('効果音: 蛮族の襲来はダイスの音のあとに鳴る', () => {
     if (nx.barbarians.position < t.barbarians.position) { next = [t, nx]; break; }
   }
   assert.ok(next, '襲来が起きる乱数が見つからない');
-  assert.deepEqual(names({ type: 'ROLL_DICE', player: 0 }, next[0], next[1]), ['roll', 'barbarian']);
+  // 都市の降格を選ばされる場合は、末尾に呼びかけが付く
+  assert.deepEqual(
+    names({ type: 'ROLL_DICE', player: 0 }, next[0], next[1]).slice(0, 2),
+    ['roll', 'barbarian'],
+  );
 });
 
 test('効果音: 建設と手番の合図', () => {
@@ -126,6 +134,31 @@ test('効果音: 交易は全員が断ったときだけ拒否の音', () => {
   assert.deepEqual(names({ type: 'RESPOND_TRADE', player: 1, accept: false }, offering, waiting), []);
   assert.deepEqual(names({ type: 'RESPOND_TRADE', player: 3, accept: false }, offering, done), ['reject']);
   assert.deepEqual(names({ type: 'RESPOND_TRADE', player: 3, accept: true }, offering, done), ['ui']);
+});
+
+test('効果音: 自分に返事が回ってきたら呼びかける', () => {
+  const s = finishSetup(createGame({ seed: 5, playerCount: 4, humanIndex: -1 }));
+  const idle = { ...s, awaiting: null };
+  const asksMe = { ...s, awaiting: { type: 'tradeOffer', players: [0, 2], context: {} } };
+  const asksOther = { ...s, awaiting: { type: 'tradeOffer', players: [2], context: {} } };
+
+  // 相手の提案が自分に回ってきた → 行動の音のあとに呼びかけ
+  const got = sfxForAction({ type: 'OFFER_TRADE', player: 1 }, idle, asksMe, 0);
+  assert.deepEqual(got, [{ name: 'ask', delay: 0 }]);
+  // 自分以外に回ったときは鳴らさない
+  assert.deepEqual(names({ type: 'OFFER_TRADE', player: 1 }, idle, asksOther), []);
+  // すでに自分が返事待ちだったなら鳴らし直さない
+  assert.deepEqual(names({ type: 'RESPOND_TRADE', player: 2 }, asksMe, asksMe), []);
+
+  // 行動の音がある場合は、そのあとに遅らせて鳴らす(7を出して自分が捨て札)
+  const rolled = readyToRoll(s);
+  rolled.turnFlags.alchemist = [3, 4];
+  for (const p of rolled.players) p.resources = { wood: 3, brick: 3, sheep: 2, wheat: 0, ore: 0 };
+  const after = dispatch(rolled, { type: 'ROLL_DICE', player: 0 });
+  assert.equal(after.awaiting?.type, 'discard', '捨て札の割り込みが立っていない');
+  const seq = sfxForAction({ type: 'ROLL_DICE', player: 0 }, rolled, after, 0);
+  assert.deepEqual(seq.map((x) => x.name), ['roll', 'robber', 'ask']);
+  assert.ok(seq[2].delay > 0, '呼びかけが行動の音と重なっている');
 });
 
 test('効果音: 決着は勝者が自分かどうかで変わる', () => {
