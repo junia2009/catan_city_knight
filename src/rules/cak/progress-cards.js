@@ -74,6 +74,33 @@ function isOpenRoad(state, eid) {
   });
 }
 
+// その辺の道を外した state(判定用の使い捨て。元の state は変えない)
+function roadsWithout(state, eid) {
+  const roads = { ...state.roads };
+  delete roads[eid];
+  return { ...state, roads };
+}
+
+// 外交官で撤去できる道(自分のぶんも含む。開いた道すべて)
+export function diplomatRemovable(state) {
+  return Object.keys(state.roads).filter((eid) => isOpenRoad(state, eid));
+}
+
+// 外交官で移設できる自分の道
+export function diplomatMovable(state, pid) {
+  return Object.keys(state.roads).filter(
+    (eid) => state.roads[eid].player === pid && isOpenRoad(state, eid),
+  );
+}
+
+// その道を移設できる先。外した状態で普通に道を置ける辺。
+export function diplomatDestinations(state, pid, fromEdge) {
+  const sim = roadsWithout(state, fromEdge);
+  return Object.keys(LAYOUT.edges).filter(
+    (eid) => eid !== fromEdge && canPlaceRoad(sim, pid, eid) === null,
+  );
+}
+
 // 自分より勝利点が高い(または以上の)プレイヤー一覧
 function playersAbove(state, pid, { orEqual = false } = {}) {
   const mine = computePoints(state, pid);
@@ -305,18 +332,29 @@ export const PROGRESS_CARDS = {
   diplomat: {
     deck: 'politics', count: 2,
     name: '外交官', icon: '🎖️',
-    desc: '両端が繋がっていない「開いた道」を1本取り除く',
-    needsParams: 'edge',
+    desc: '端が繋がっていない「開いた道」を1本取り除く。自分の道なら別の場所へ無料で移設できる',
+    needsParams: 'diplomat',
     validate(state, pid, params) {
-      if (!state.roads[params?.edgeId]) return '道を選んでください';
-      if (!isOpenRoad(state, params.edgeId)) return '開いた道(端が繋がっていない道)のみ対象です';
-      return null;
+      const eid = params?.edgeId;
+      const road = state.roads[eid];
+      if (!road) return '道を選んでください';
+      if (!isOpenRoad(state, eid)) return '開いた道(端が繋がっていない道)のみ対象です';
+      if (params.to == null) return null; // 撤去だけ(相手の道でも自分の道でもよい)
+      // 移設は自分の道のみ。いったん外した状態で置けるかを見る。
+      if (road.player !== pid) return '移設できるのは自分の道だけです';
+      if (params.to === eid) return '別の場所へ移してください';
+      return canPlaceRoad(roadsWithout(state, eid), pid, params.to);
     },
     play(state, pid, params) {
       const owner = state.roads[params.edgeId].player;
       delete state.roads[params.edgeId];
+      if (params.to != null) {
+        state.roads[params.to] = { player: pid };
+        addLog(state, `🎖️ ${state.players[pid].name}が自分の道を移設`);
+      } else {
+        addLog(state, `🎖️ ${state.players[pid].name}が${state.players[owner].name}の道を撤去`);
+      }
       updateLongestRoad(state);
-      addLog(state, `🎖️ ${state.players[pid].name}が${state.players[owner].name}の道を撤去`);
     },
   },
 
@@ -595,27 +633,26 @@ export const PROGRESS_CARDS = {
   smith: {
     deck: 'science', count: 2,
     name: '鍛冶屋', icon: '⚒️',
-    desc: '騎士を2体まで無料で昇格させる(自動選択)',
-    needsParams: null,
-    validate(state, pid) {
-      const any = Object.keys(state.knights).some(
-        (vid) => canPromoteKnight(state, pid, vid) === null,
-      );
-      if (!any) return '昇格できる騎士がいません';
+    desc: '自分の騎士を2体まで、1レベルずつ無料で昇格させる',
+    needsParams: 'knights',
+    validate(state, pid, params) {
+      const vids = params?.vertices;
+      if (!Array.isArray(vids) || vids.length < 1 || vids.length > 2) {
+        return '昇格させる騎士を1〜2体選んでください';
+      }
+      if (new Set(vids).size !== vids.length) return '同じ騎士は選べません';
+      // コマの残数は1体昇格するたびに変わるので、順に当てはめながら見る
+      const sim = { ...state, knights: structuredClone(state.knights) };
+      for (const vid of vids) {
+        const err = canPromoteKnight(sim, pid, vid);
+        if (err) return err;
+        sim.knights[vid].level += 1;
+      }
       return null;
     },
-    play(state, pid) {
-      let done = 0;
-      for (let i = 0; i < 2; i++) {
-        // 高レベル優先で昇格(蛮族防衛への寄与が大きい)
-        const vids = Object.keys(state.knights)
-          .filter((vid) => canPromoteKnight(state, pid, vid) === null)
-          .sort((a, b) => state.knights[b].level - state.knights[a].level);
-        if (!vids.length) break;
-        state.knights[vids[0]].level += 1;
-        done++;
-      }
-      addLog(state, `⚒️ ${state.players[pid].name}が騎士${done}体を無料昇格!`);
+    play(state, pid, params) {
+      for (const vid of params.vertices) state.knights[vid].level += 1;
+      addLog(state, `⚒️ ${state.players[pid].name}が騎士${params.vertices.length}体を無料昇格!`);
     },
   },
 };
@@ -631,23 +668,32 @@ export function buildProgressDecks() {
 
 export const PROGRESS_HAND_LIMIT = 4;
 
+export const TRACK_JP_SHORT = { trade: '交易', politics: '政治', science: '科学' };
+
+// 指定の山から1枚引いて手札に加える。引けたら true。
+// 勝利点カードは引いた瞬間に公開されて得点になる(手札には入らない)。
+export function drawProgressCard(state, pid, track) {
+  const p = state.players[pid];
+  const deck = state.bank.progressDecks[track];
+  if (!deck?.length) return false;
+  const cardId = deck.pop();
+  if (PROGRESS_CARDS[cardId].vp) {
+    p.progressVP += 1;
+    addLog(state, `${p.name}が進歩カード「${PROGRESS_CARDS[cardId].name}」を公開! +1点`);
+    return true;
+  }
+  // 上限(4枚)を超えても引く。公式は「超えたら即座に1枚捨てる」なので、
+  // 捨てる選択は actions.js の progressLimit 割り込みが受け持つ。
+  p.progressCards.push({ id: cardId, deck: track, boughtTurn: state.turn });
+  addLog(state, `${p.name}が進歩カードを1枚獲得(${TRACK_JP_SHORT[track]})`);
+  return true;
+}
+
 // イベントダイスの色 + 赤ダイス目 ≦ 系統Lv+1 で進歩カード獲得(設計書 §9.4)
 export function distributeProgressCards(state, track, redDie) {
   for (const p of state.players) {
     const lv = p.improvements[track];
     if (lv <= 0 || redDie > lv + 1) continue;
-    const deck = state.bank.progressDecks[track];
-    if (!deck.length) continue;
-    const cardId = deck.pop();
-    if (PROGRESS_CARDS[cardId].vp) {
-      p.progressVP += 1;
-      addLog(state, `${p.name}が進歩カード「${PROGRESS_CARDS[cardId].name}」を公開! +1点`);
-    } else if (p.progressCards.length >= PROGRESS_HAND_LIMIT) {
-      deck.unshift(cardId); // 手札上限超過は山札の底へ
-      addLog(state, `${p.name}は進歩カードの手札が上限のため獲得できず`);
-    } else {
-      p.progressCards.push({ id: cardId, deck: track, boughtTurn: state.turn });
-      addLog(state, `${p.name}が進歩カードを1枚獲得(${track === 'trade' ? '交易' : track === 'politics' ? '政治' : '科学'})`);
-    }
+    drawProgressCard(state, p.id, track);
   }
 }

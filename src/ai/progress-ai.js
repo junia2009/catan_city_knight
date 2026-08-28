@@ -11,7 +11,9 @@ import { canPromoteKnight } from '../rules/cak/knights.js';
 import {
   TRACKS, TRACK_COMMODITY, MAX_IMPROVEMENT, canBuyImprovement, improvementCost,
 } from '../rules/cak/improvements.js';
-import { COMMODITIES, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
+import {
+  COMMODITIES, PROGRESS_CARDS, diplomatMovable, diplomatDestinations,
+} from '../rules/cak/progress-cards.js';
 import { validateAction } from '../actions.js';
 import {
   playerProduction, robberHexValue, vertexValue, missingFor, surplusOver,
@@ -142,15 +144,26 @@ const SCORERS = {
   },
 
   diplomat(state, pid) {
-    // 敵の開いた道のみ対象(自分の道は消さない)。交易路首位を優先
+    // 敵の開いた道の撤去(交易路首位を優先)と、自分の開いた道の移設を比べる
     let best = null;
+    const consider = (score, params) => {
+      if (PROGRESS_CARDS.diplomat.validate(state, pid, params)) return;
+      if (!best || score > best.score) best = { score, params };
+    };
     for (const [eid, road] of Object.entries(state.roads)) {
       if (road.player === pid) continue;
-      const a = { type: 'PLAY_PROGRESS_CARD', player: pid, index: 0, params: { edgeId: eid } };
-      if (PROGRESS_CARDS.diplomat.validate(state, pid, a.params)) continue;
-      const isLeader = state.longestRoad.player === road.player;
-      const score = isLeader ? 3 : 1.2;
-      if (!best || score > best.score) best = { score, params: { edgeId: eid } };
+      consider(state.longestRoad.player === road.player ? 3 : 1.2, { edgeId: eid });
+    }
+    // 移設: いま伸びている先より価値の高い辺へ移せるなら
+    const edgeReach = (eid) => Math.max(
+      ...LAYOUT.edges[eid].v.map((v) => (state.buildings[v] ? 0 : vertexValue(state, pid, v))),
+    );
+    for (const from of diplomatMovable(state, pid)) {
+      const now = edgeReach(from);
+      for (const to of diplomatDestinations(state, pid, from)) {
+        const gain = edgeReach(to) - now;
+        if (gain > 0.5) consider(1 + gain, { edgeId: from, to });
+      }
     }
     return best;
   },
@@ -305,11 +318,19 @@ const SCORERS = {
   },
 
   smith(state, pid) {
-    const n = Object.keys(state.knights).filter(
-      (vid) => canPromoteKnight(state, pid, vid) === null,
-    ).length;
-    if (!n) return null;
-    return { score: n * 2, params: null };
+    // 高レベル優先で2体まで。コマの残数は昇格ごとに変わるので順に当てはめる。
+    const sim = { ...state, knights: structuredClone(state.knights) };
+    const vertices = [];
+    for (let i = 0; i < 2; i++) {
+      const vid = Object.keys(sim.knights)
+        .filter((v) => !vertices.includes(v) && canPromoteKnight(sim, pid, v) === null)
+        .sort((a, b) => sim.knights[b].level - sim.knights[a].level)[0];
+      if (!vid) break;
+      vertices.push(vid);
+      sim.knights[vid].level += 1;
+    }
+    if (!vertices.length) return null;
+    return { score: vertices.length * 2, params: { vertices } };
   },
 };
 
@@ -336,6 +357,27 @@ export function pickProgressPlay(state, pid, { threshold = null } = {}) {
     if (!best || r.score > best.score) best = { score: r.score, action };
   }
   return best?.action ?? null;
+}
+
+// 手札上限で1枚捨てるとき、いちばん手放していいカードの位置を返す。
+// 「いま使えるか」ではなく「持っている価値」で見る ── 今は対象がいなくても
+// 場が変われば効くカードがあるので、スコアが出ないものを一律に最下位とはしない。
+export function pickProgressDiscard(state, pid) {
+  const cards = state.players[pid].progressCards;
+  let worst = 0;
+  let worstScore = Infinity;
+  for (let i = 0; i < cards.length; i++) {
+    const def = PROGRESS_CARDS[cards[i].id];
+    const scorer = SCORERS[cards[i].id];
+    // 今すぐの価値 + 種類ごとの下駄(勝利点カードは手札に来ないので考えない)
+    const now = scorer ? (scorer(state, pid)?.score ?? 0) : 0;
+    const score = now + (def.preRoll ? 1 : 0);
+    if (score < worstScore) {
+      worstScore = score;
+      worst = i;
+    }
+  }
+  return worst;
 }
 
 // ロール前の錬金術師使用判断

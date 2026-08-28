@@ -67,12 +67,16 @@ import {
   razeCity,
   resolveBarbarianAttack,
 } from './rules/cak/barbarians.js';
-import { applyImprovement, canBuyImprovement } from './rules/cak/improvements.js';
+import {
+  TRACKS, applyImprovement, canBuyImprovement,
+} from './rules/cak/improvements.js';
 import {
   COMMODITIES,
   COM_JP,
   PROGRESS_CARDS,
+  PROGRESS_HAND_LIMIT,
   distributeProgressCards,
+  drawProgressCard,
 } from './rules/cak/progress-cards.js';
 
 const ALL_CARD_KEYS = [...RESOURCES, ...COMMODITIES];
@@ -119,12 +123,23 @@ function setupPieceOf(state, action) {
   return state.mode === 'sea' && !isRoadEdge(state.board, action.edgeId) ? 'ship' : 'road';
 }
 
+// 蛮族襲来で保留していた選択を1人ぶん済ませる。全員終わったら出目の処理へ進む。
+function finishBarbarianChoice(state, pid) {
+  state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
+  if (state.awaiting.players.length > 0) return;
+  const { pendingTotal, roller } = state.awaiting.context;
+  state.awaiting = null;
+  processRollTotal(state, roller, pendingTotal);
+}
+
 // 割り込み(awaiting)中に許可されるアクション種別
 const AWAITING_ACTIONS = {
   setupPlacement: 'PLACE_INITIAL',
   discard: 'DISCARD',
   moveRobber: 'MOVE_ROBBER',
   barbarianDefense: 'RAZE_CITY',
+  defenderDeck: 'PICK_DEFENDER_DECK',
+  progressLimit: 'DISCARD_PROGRESS',
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
@@ -429,6 +444,16 @@ export function validateAction(state, action) {
       return null;
     }
 
+    case 'PICK_DEFENDER_DECK': {
+      if (!TRACKS.includes(action.track)) return '引く系統を選んでください';
+      return null;
+    }
+
+    case 'DISCARD_PROGRESS': {
+      if (!p.progressCards[action.index]) return '捨てるカードを選んでください';
+      return null;
+    }
+
     case 'PLAY_DEV_CARD': {
       if (state.mode === 'cak') return '都市と騎士では発展カードは使いません';
       if (state.turnFlags.playedDev) return 'このターンはすでに発展カードを使いました';
@@ -543,6 +568,36 @@ function noteIsland(state, pid, vertexId) {
   p.islands.push(island);
   if (island !== 0) {
     addLog(state, `🏝 ${p.name}が新しい島に入植! (+2点)`);
+  }
+}
+
+function endTurn(state, pid) {
+  checkVictoryFor(state, pid);
+  if (state.phase === 'ended') return;
+  state.currentPlayer = (pid + 1) % state.players.length;
+  state.turn += 1;
+  state.turnFlags = { rolled: false, playedDev: false };
+  state.dice = null;
+  addLog(state, `── ${state.players[state.currentPlayer].name}の手番 ──`);
+}
+
+// 進歩カードの手札上限(公式): 4枚。ただし自分の手番のあいだだけ5枚まで持てて、
+// ターンを終える前に4枚へ戻す。超過している枚数を返す。
+// endingTurn: ターンを終えようとしている判定(この猶予を使わない)。
+function progressOverflow(state, pid, { endingTurn = false } = {}) {
+  if (state.mode !== 'cak') return 0;
+  const onOwnTurn = !endingTurn && state.phase === 'main' && state.currentPlayer === pid;
+  const allowed = onOwnTurn ? PROGRESS_HAND_LIMIT + 1 : PROGRESS_HAND_LIMIT;
+  return Math.max(0, state.players[pid].progressCards.length - allowed);
+}
+
+// 上限を超えている人がいたら、その場で捨ててもらう割り込みを張る。
+// 他の割り込み(捨て札・盗賊など)が先に立っているときは、そちらが済んでから。
+function enforceProgressLimit(state) {
+  if (state.mode !== 'cak' || state.awaiting || state.phase !== 'main') return;
+  const over = state.players.filter((x) => progressOverflow(state, x.id) > 0).map((x) => x.id);
+  if (over.length) {
+    state.awaiting = { type: 'progressLimit', players: over, context: {} };
   }
 }
 
@@ -697,14 +752,15 @@ function applyAction(state, action) {
           state.barbarians.position += 1;
           addLog(state, `⛵ 蛮族船が前進(${state.barbarians.position}/${BARBARIAN_TRACK_LENGTH})`);
           if (state.barbarians.position >= BARBARIAN_TRACK_LENGTH) {
-            const needChoice = resolveBarbarianAttack(state);
-            if (needChoice.length > 0) {
-              // 降格する都市の選択待ち。出目の処理は選択後に行う。
-              state.awaiting = {
-                type: 'barbarianDefense',
-                players: needChoice,
-                context: { pendingTotal: total, roller: pid },
-              };
+            const need = resolveBarbarianAttack(state);
+            // 降格する都市の選択、または防衛同点の山選び。どちらも出目の処理は選択後。
+            const ctx = { pendingTotal: total, roller: pid };
+            if (need.raze.length > 0) {
+              state.awaiting = { type: 'barbarianDefense', players: need.raze, context: ctx };
+              break;
+            }
+            if (need.deck.length > 0) {
+              state.awaiting = { type: 'defenderDeck', players: need.deck, context: ctx };
               break;
             }
           }
@@ -749,12 +805,14 @@ function applyAction(state, action) {
 
     case 'RAZE_CITY': {
       razeCity(state, action.vertexId);
-      state.awaiting.players = state.awaiting.players.filter((x) => x !== pid);
-      if (state.awaiting.players.length === 0) {
-        const { pendingTotal, roller } = state.awaiting.context;
-        state.awaiting = null;
-        processRollTotal(state, roller, pendingTotal);
-      }
+      finishBarbarianChoice(state, pid);
+      break;
+    }
+
+    // 防衛の功が同点だったときの報酬。引く山は本人が選ぶ(公式)。
+    case 'PICK_DEFENDER_DECK': {
+      drawProgressCard(state, pid, action.track);
+      finishBarbarianChoice(state, pid);
       break;
     }
 
@@ -1068,13 +1126,31 @@ function applyAction(state, action) {
     }
 
     case 'END_TURN': {
-      checkVictoryFor(state, pid);
-      if (state.phase === 'ended') break;
-      state.currentPlayer = (pid + 1) % state.players.length;
-      state.turn += 1;
-      state.turnFlags = { rolled: false, playedDev: false };
-      state.dice = null;
-      addLog(state, `── ${state.players[state.currentPlayer].name}の手番 ──`);
+      // 進歩カードが5枚のままターンを終えられない(公式)。1枚捨ててもらう。
+      if (progressOverflow(state, pid, { endingTurn: true }) > 0) {
+        state.awaiting = {
+          type: 'progressLimit',
+          players: [pid],
+          context: { thenEndTurn: true },
+        };
+        break;
+      }
+      endTurn(state, pid);
+      break;
+    }
+
+    case 'DISCARD_PROGRESS': {
+      const [card] = p.progressCards.splice(action.index, 1);
+      state.bank.progressDecks[card.deck].unshift(card.id); // 捨て札は山札の底へ
+      addLog(state, `${p.name}が進歩カード「${PROGRESS_CARDS[card.id].name}」を捨てました`);
+      const endingTurn = !!state.awaiting.context.thenEndTurn;
+      state.awaiting.players = state.awaiting.players.filter(
+        (x) => progressOverflow(state, x, { endingTurn }) > 0,
+      );
+      if (state.awaiting.players.length === 0) {
+        state.awaiting = null;
+        if (endingTurn) endTurn(state, pid);
+      }
       break;
     }
   }
@@ -1093,5 +1169,8 @@ export function dispatch(prev, action) {
   if (action.type !== 'END_TURN' && action.player === state.currentPlayer) {
     checkVictoryFor(state, action.player);
   }
+  // 進歩カードが増える経路は複数あるので(イベントダイスの配布・スパイ・
+  // 防衛の報酬)、どこで増えても効くよう最後にまとめて見る
+  enforceProgressLimit(state);
   return state;
 }

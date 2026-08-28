@@ -20,7 +20,7 @@ import { TOWER_COST } from '../rules/dragon.js';
 import { knightContribution, razableCities } from '../rules/cak/barbarians.js';
 import { TRACKS, TRACK_COMMODITY, canBuyImprovement } from '../rules/cak/improvements.js';
 import { COMMODITIES, PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
-import { pickProgressPlay, pickAlchemist } from './progress-ai.js';
+import { pickProgressPlay, pickAlchemist, pickProgressDiscard } from './progress-ai.js';
 import {
   legalCityVertices,
   legalRoadEdges,
@@ -558,6 +558,20 @@ export function chooseAction(state, pid) {
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
     if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
+    if (aw.type === 'progressLimit') {
+      // 進歩カードの手札上限。いちばん価値の低い1枚を手放す。
+      return { type: 'DISCARD_PROGRESS', player: pid, index: pickProgressDiscard(state, pid) };
+    }
+    if (aw.type === 'defenderDeck') {
+      // 防衛同点の報酬。いちばん育てている系統から引く(使えるカードが多い)。
+      // 山が尽きている系統は避ける。
+      const decks = state.bank.progressDecks;
+      const track = best(
+        ['trade', 'politics', 'science'].filter((t) => decks[t]?.length),
+        (t) => state.players[pid].improvements[t],
+      ) ?? 'trade';
+      return { type: 'PICK_DEFENDER_DECK', player: pid, track };
+    }
     if (aw.type === 'goldChoice') {
       // 目標に足りない資源を優先、なければ在庫のあるものを
       const goal = nextGoal(state, pid);
