@@ -77,6 +77,8 @@ import {
   PROGRESS_HAND_LIMIT,
   distributeProgressCards,
   drawProgressCard,
+  deserterLevel,
+  deserterSpots,
   weddingGiftSize,
 } from './rules/cak/progress-cards.js';
 
@@ -143,6 +145,8 @@ const AWAITING_ACTIONS = {
   progressLimit: 'DISCARD_PROGRESS',
   weddingGift: 'GIVE_WEDDING',
   harborGive: 'GIVE_HARBOR',
+  deserterPick: 'PICK_DESERTER',
+  deserterPlace: 'PLACE_DESERTER',
   tradeOffer: 'RESPOND_TRADE',
   tradeChoose: 'CHOOSE_TRADE',
   aqueduct: 'PICK_AQUEDUCT',
@@ -454,6 +458,21 @@ export function validateAction(state, action) {
 
     case 'DISCARD_PROGRESS': {
       if (!p.progressCards[action.index]) return '捨てるカードを選んでください';
+      return null;
+    }
+
+    // 脱走兵: 差し出す騎士は自分で選ぶ
+    case 'PICK_DESERTER': {
+      const k = state.knights[action.vertexId];
+      if (!k || k.player !== pid) return '自分の騎士を選んでください';
+      return null;
+    }
+
+    // 脱走兵: 受け取った騎士を自分の道網に置く
+    case 'PLACE_DESERTER': {
+      if (!deserterSpots(state, pid).includes(action.vertexId)) {
+        return '自分の道に隣接する空き頂点を選んでください';
+      }
       return null;
     }
 
@@ -828,6 +847,33 @@ function applyAction(state, action) {
     case 'RAZE_CITY': {
       razeCity(state, action.vertexId);
       finishBarbarianChoice(state, pid);
+      break;
+    }
+
+    case 'PICK_DESERTER': {
+      const to = state.awaiting.context.to;
+      const k = state.knights[action.vertexId];
+      delete state.knights[action.vertexId];
+      addLog(state, `🏳️ ${p.name}の騎士(Lv${k.level})が脱走!`);
+      // コマ在庫の許すレベルで、受け取る側が置き場所を選ぶ
+      const level = deserterLevel(state, to, k.level);
+      const spots = level >= 1 ? deserterSpots(state, to) : [];
+      state.awaiting = spots.length
+        ? { type: 'deserterPlace', players: [to], context: { level } }
+        : null;
+      if (!spots.length) {
+        addLog(state, `${state.players[to].name}は騎士を置ける場所がありませんでした`);
+      }
+      break;
+    }
+
+    case 'PLACE_DESERTER': {
+      const { level } = state.awaiting.context;
+      state.knights[action.vertexId] = {
+        player: pid, level, active: false, activatedTurn: -1,
+      };
+      addLog(state, `${p.name}が脱走してきた騎士(Lv${level})を配置`);
+      state.awaiting = null;
       break;
     }
 

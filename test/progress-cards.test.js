@@ -242,18 +242,71 @@ test('将軍: 全騎士を無料で活性化', () => {
   assert.equal(s.knights[vid].active, true);
 });
 
-test('脱走兵: 相手の騎士を除去し自分の騎士を無料配置', () => {
-  let s = readyGame();
-  const enemyVid = Object.keys(LAYOUT.vertices).find(
-    (v) => !s.buildings[v] && !s.knights[v] &&
-      LAYOUT.vertexEdges[v].some((e) => s.roads[e]?.player === 1),
+test('脱走兵: 差し出す騎士は相手が選び、置き場所は使った側が選ぶ(公式)', () => {
+  const base = readyGame();
+  const spots = Object.keys(LAYOUT.vertices).filter(
+    (v) => !base.buildings[v] && !base.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => base.roads[e]?.player === 1),
   );
-  s.knights[enemyVid] = { player: 1, level: 2, active: true, activatedTurn: -1 };
-  s = playCard(s, 0, 'deserter', { target: 1 });
-  assert.equal(s.knights[enemyVid], undefined);
-  const mine = Object.values(s.knights).filter((k) => k.player === 0);
-  assert.equal(mine.length, 1);
-  assert.equal(mine[0].level, 2);
+  const [a, b] = spots;
+  const setup = () => {
+    const s = structuredClone(base);
+    s.knights[a] = { player: 1, level: 2, active: true, activatedTurn: -1 };
+    s.knights[b] = { player: 1, level: 1, active: false, activatedTurn: -1 };
+    return s;
+  };
+
+  let s = playCard(setup(), 0, 'deserter', { target: 1 });
+  assert.equal(s.awaiting?.type, 'deserterPick');
+  assert.deepEqual(s.awaiting.players, [1]);
+  assert.equal(Object.keys(s.knights).length, 2, '選ぶ前に騎士が消えている');
+
+  // 自分の騎士しか差し出せない
+  assert.match(
+    validateAction(s, { type: 'PICK_DESERTER', player: 1, vertexId: a.replace(/./, 'X') }),
+    /自分の騎士/,
+  );
+
+  // 相手が Lv2 のほうを差し出すと、こちらは Lv2 を置ける
+  let after = dispatch(s, { type: 'PICK_DESERTER', player: 1, vertexId: a });
+  assert.equal(after.knights[a], undefined);
+  assert.equal(after.knights[b].level, 1, '選ばなかった騎士まで消えている');
+  assert.equal(after.awaiting?.type, 'deserterPlace');
+  assert.deepEqual(after.awaiting.players, [0]);
+  assert.equal(after.awaiting.context.level, 2);
+
+  // 置けるのは自分の道に隣接する空き頂点だけ
+  const mySpots = Object.keys(LAYOUT.vertices).filter(
+    (v) => !after.buildings[v] && !after.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => after.roads[e]?.player === 0),
+  );
+  assert.ok(mySpots.length > 0);
+  assert.match(
+    validateAction(after, { type: 'PLACE_DESERTER', player: 0, vertexId: b }),
+    /自分の道に隣接/,
+  );
+  const done = dispatch(after, { type: 'PLACE_DESERTER', player: 0, vertexId: mySpots[0] });
+  assert.equal(done.knights[mySpots[0]].player, 0);
+  assert.equal(done.knights[mySpots[0]].level, 2);
+  assert.equal(done.knights[mySpots[0]].active, false, '配置直後は不活性のはず');
+  assert.equal(done.awaiting, null);
+
+  // 相手が Lv1 を差し出せば、こちらが置けるのも Lv1
+  const lowered = dispatch(playCard(setup(), 0, 'deserter', { target: 1 }),
+    { type: 'PICK_DESERTER', player: 1, vertexId: b });
+  assert.equal(lowered.awaiting.context.level, 1);
+});
+
+test('脱走兵: 置き場所が無ければ騎士は消えるだけ', () => {
+  const s = readyGame();
+  const enemyVid = Object.keys(LAYOUT.vertices).find((v) => !s.buildings[v] && !s.knights[v]);
+  s.knights[enemyVid] = { player: 1, level: 1, active: false, activatedTurn: -1 };
+  // 自分の道をすべて消す = 置ける頂点が無くなる
+  for (const e of Object.keys(s.roads)) if (s.roads[e].player === 0) delete s.roads[e];
+  const played = playCard(s, 0, 'deserter', { target: 1 });
+  const after = dispatch(played, { type: 'PICK_DESERTER', player: 1, vertexId: enemyVid });
+  assert.equal(after.knights[enemyVid], undefined);
+  assert.equal(after.awaiting, null, '置けないのに配置待ちになっている');
 });
 
 test('外交官: 開いた道のみ除去できる', () => {

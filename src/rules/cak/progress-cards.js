@@ -101,6 +101,27 @@ export function diplomatDestinations(state, pid, fromEdge) {
   );
 }
 
+// 脱走兵で差し出せる騎士(その相手の騎士すべて)
+export function deserterKnights(state, target) {
+  return Object.keys(state.knights).filter((vid) => state.knights[vid].player === target);
+}
+
+// 脱走してきた騎士を置けるレベル(コマ在庫の許す範囲で下げる。0なら置けない)
+export function deserterLevel(state, pid, level) {
+  let lv = level;
+  while (lv >= 1 && countKnights(state, pid, lv) >= KNIGHT_LIMIT_PER_LEVEL) lv--;
+  return lv;
+}
+
+// 脱走してきた騎士を置ける頂点(自分の道に隣接する空き頂点)
+export function deserterSpots(state, pid) {
+  return boardVertexIds(state.board).filter(
+    (v) =>
+      !state.buildings[v] && !state.knights[v] &&
+      LAYOUT.vertexEdges[v].some((e) => state.roads[e]?.player === pid),
+  );
+}
+
 // 商業港で商品を渡す人(商品を1枚以上持っている相手)
 export function harborGivers(state, pid) {
   return state.players
@@ -319,26 +340,13 @@ export const PROGRESS_CARDS = {
       }
       return null;
     },
+    // 差し出す騎士は相手が選ぶ(公式)。除去と自分の配置は
+    // actions.js の PICK_DESERTER / PLACE_DESERTER が行う。
     play(state, pid, params) {
-      // 相手は自分の最弱騎士を差し出す(不活性・低レベル優先)
-      const entries = Object.entries(state.knights).filter(([, k]) => k.player === params.target);
-      entries.sort(([, a], [, b]) => (a.level - b.level) || (a.active - b.active));
-      const [vid, k] = entries[0];
-      delete state.knights[vid];
-      addLog(state, `🏳️ ${state.players[params.target].name}の騎士(Lv${k.level})が脱走!`);
-
-      // コマ在庫の許すレベルで、自分の道網の空き頂点に配置
-      let level = k.level;
-      while (level >= 1 && countKnights(state, pid, level) >= KNIGHT_LIMIT_PER_LEVEL) level--;
-      if (level < 1) return;
-      const spot = boardVertexIds(state.board).find(
-        (v) =>
-          !state.buildings[v] && !state.knights[v] &&
-          LAYOUT.vertexEdges[v].some((e) => state.roads[e]?.player === pid),
-      );
-      if (!spot) return;
-      state.knights[spot] = { player: pid, level, active: false, activatedTurn: -1 };
-      addLog(state, `${state.players[pid].name}が騎士(Lv${level})を無料配置`);
+      addLog(state, `🏳️ ${state.players[pid].name}が${state.players[params.target].name}に脱走を促しました`);
+    },
+    awaitAfterPlay(state, pid, params) {
+      return { type: 'deserterPick', players: [params.target], context: { to: pid } };
     },
   },
 

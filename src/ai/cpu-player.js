@@ -23,6 +23,7 @@ import {
 } from '../rules/cak/improvements.js';
 import {
   COMMODITIES, PROGRESS_CARDS, weddingGiftSize,
+  deserterKnights, deserterSpots,
 } from '../rules/cak/progress-cards.js';
 import { pickProgressPlay, pickAlchemist, pickProgressDiscard } from './progress-ai.js';
 import {
@@ -570,6 +571,19 @@ export function chooseAction(state, pid) {
     if (aw.type === 'discard') return chooseDiscard(state, pid);
     if (aw.type === 'moveRobber') return chooseRobberMove(state, pid);
     if (aw.type === 'barbarianDefense') return chooseRaze(state, pid);
+    if (aw.type === 'deserterPick') {
+      // 差し出す騎士。いちばん惜しくないもの(不活性・低レベル優先)。
+      const vid = best(
+        deserterKnights(state, pid),
+        (v) => -(state.knights[v].level * 2 + (state.knights[v].active ? 1 : 0)),
+      );
+      return { type: 'PICK_DESERTER', player: pid, vertexId: vid };
+    }
+    if (aw.type === 'deserterPlace') {
+      // 受け取った騎士の置き場所。将来の入植価値が高い頂点へ。
+      const vid = best(deserterSpots(state, pid), (v) => vertexValue(state, pid, v));
+      return { type: 'PLACE_DESERTER', player: pid, vertexId: vid };
+    }
     if (aw.type === 'harborGive') {
       // 商業港。改良に使わない系統の商品から手放す。
       const p = state.players[pid];

@@ -21,6 +21,7 @@ import { lsSet, lsRemove } from './storage.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import {
   PROGRESS_CARDS, diplomatMovable, diplomatDestinations,
+  deserterKnights, deserterSpots,
 } from './rules/cak/progress-cards.js';
 import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-render.js';
 import { avatarSvg } from './render/avatars.js';
@@ -558,11 +559,16 @@ const MODE_FOR_AWAITING = {
   setupPlacement: 'setup-settlement',
   moveRobber: 'move-robber',
   barbarianDefense: 'raze-city',
+  deserterPick: 'desert-pick',
+  deserterPlace: 'desert-place',
 };
 
 function syncUi() {
   const aw = state.awaiting;
-  const forced = ['setup-settlement', 'setup-road', 'move-robber', 'raze-city'].includes(ui.mode);
+  const forced = [
+    'setup-settlement', 'setup-road', 'move-robber', 'raze-city',
+    'desert-pick', 'desert-place',
+  ].includes(ui.mode);
 
   if (state.phase === 'ended') {
     ui.mode = 'idle';
@@ -709,6 +715,8 @@ function computeHighlights() {
       ),
     };
   }
+  if (m === 'desert-pick') return { vertices: deserterKnights(state, HUMAN) };
+  if (m === 'desert-place') return { vertices: deserterSpots(state, HUMAN) };
   if (m === 'prog-moveroad') {
     // 1本目は自分の開いた道、2本目はその道を外した状態で置ける辺
     return {
@@ -1265,7 +1273,10 @@ function boardClick(pick) {
   } else if (m === 'play-road-building') {
     const eid = pick('edge', ui.highlights.edges ?? []);
     if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
-  } else if (['build-knight', 'build-wall', 'build-tower', 'move-knight', 'raze-city'].includes(m)) {
+  } else if ([
+    'build-knight', 'build-wall', 'build-tower', 'move-knight', 'raze-city',
+    'desert-pick', 'desert-place',
+  ].includes(m)) {
     const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid) ui.pending = { vertexId: vid };
   } else if (m === 'prog-hex') {
@@ -1357,6 +1368,10 @@ function confirmPending() {
     doAction({ type: 'BUILD_SETTLEMENT', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'build-city' && ui.pending?.vertexId) {
     doAction({ type: 'BUILD_CITY', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'desert-pick' && ui.pending?.vertexId) {
+    doAction({ type: 'PICK_DESERTER', player: HUMAN, vertexId: ui.pending.vertexId });
+  } else if (m === 'desert-place' && ui.pending?.vertexId) {
+    doAction({ type: 'PLACE_DESERTER', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'move-robber' && ui.pending?.hexId) {
     doAction({ type: 'MOVE_ROBBER', player: HUMAN, hexId: ui.pending.hexId, targetPlayer: null });
   } else if (m === 'play-road-building' && ui.pendingEdges.length >= 1) {
