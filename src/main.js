@@ -7,6 +7,9 @@ import { chooseAction } from './ai/cpu-player.js';
 import { stealableTargets } from './rules/robber.js';
 import { totalCards } from './rules/build.js';
 import {
+  pieceForEdge, roadBuildingCount, roadBuildingSpots,
+} from './rules/road-building.js';
+import {
   legalCityVertices,
   legalRoadEdges,
   legalRobberHexes,
@@ -500,7 +503,9 @@ function freshUi() {
     pending: null, // { vertexId } | { edgeId } | { hexId }
     pendingVertex: null, // 初期配置で選んだ開拓地
     setupPiece: 'road', // 初期配置で開拓地と一緒に置く駒(航海者たちは船も選べる)
-    pendingEdges: [], // 街道建設カード
+    pendingEdges: [], // 街道建設カード・外交官の移設
+    pendingPieces: [], // 街道建設で辺ごとに置く駒('road' | 'ship')
+    roadPiece: 'road', // 街道建設で次に置く駒(航海者たちだけ切り替えられる)
     pendingHexes: [], // 発明家(数字トークン交換)
     pendingVertices: [], // 鍛冶屋(昇格させる騎士)
     sentAwaiting: null, // オンライン: サーバーへ応答を送った割り込み(返信待ち)
@@ -642,11 +647,7 @@ function computeHighlights() {
   if (m === 'build-settlement') return { vertices: legalSettlementVertices(state, HUMAN) };
   if (m === 'build-city') return { vertices: legalCityVertices(state, HUMAN) };
   if (m === 'move-robber') return { hexes: legalRobberHexes(state) };
-  if (m === 'play-road-building') {
-    const extra = {};
-    for (const e of ui.pendingEdges) extra[e] = true;
-    return { edges: legalRoadEdges(state, HUMAN, { extraRoads: extra }) };
-  }
+  if (m === 'play-road-building') return { edges: roadBuildingHighlights() };
   // ---- 都市と騎士 ----
   if (m === 'build-knight') {
     return {
@@ -739,12 +740,43 @@ function computeHighlights() {
       ),
     };
   }
-  if (m === 'prog-roads') {
-    const extra = {};
-    for (const e of ui.pendingEdges) extra[e] = true;
-    return { edges: legalRoadEdges(state, HUMAN, { extraRoads: extra }) };
-  }
+  if (m === 'prog-roads') return { edges: roadBuildingHighlights() };
   return {};
+}
+
+// 街道建設で今タップできる辺。すでに選んだぶんを置いた前提で、
+// いま選んでいる駒('road' か 'ship')の候補だけを光らせる。
+function roadBuildingHighlights() {
+  const placed = roadBuildingPicks();
+  const piece = state.mode === 'sea' ? ui.roadPiece : 'road';
+  return roadBuildingSpots(state, HUMAN, placed)
+    .filter((s) => s.piece === piece)
+    .map((s) => s.edgeId);
+}
+
+// 選択中の駒を [{ edgeId, piece }] で返す
+function roadBuildingPicks() {
+  return ui.pendingEdges.map((edgeId, i) => ({
+    edgeId,
+    piece: ui.pendingPieces[i] ?? pieceForEdge(state, edgeId),
+  }));
+}
+
+// 街道建設で置かなければならない本数(公式は2。置ける場所がなければ減る)
+function roadBuildingNeed() {
+  return roadBuildingCount(state, HUMAN);
+}
+
+// 街道建設の辺を1つ選ぶ。必要数まで溜めてから確定する。
+function pickRoadBuildingEdge(pick) {
+  const eid = pick('edge', ui.highlights.edges ?? []);
+  if (!eid || ui.pendingEdges.length >= roadBuildingNeed()) return;
+  ui.pendingEdges.push(eid);
+  ui.pendingPieces.push(state.mode === 'sea' ? ui.roadPiece : 'road');
+}
+
+function roadBuildingParams() {
+  return { edges: [...ui.pendingEdges], pieces: [...ui.pendingPieces] };
 }
 
 // ハイライト表示中はパルスアニメーションのため毎フレーム再描画する
@@ -1074,18 +1106,18 @@ function startDevPlay(type) {
     return;
   }
   if (type === 'roadBuilding') {
-    // 建てられる辺があるかだけ先に確かめる(なければ理由を出して札を減らさない)
-    const err = validateAction(state, {
-      type: 'PLAY_DEV_CARD', player: HUMAN, card: 'roadBuilding',
-      params: { edges: [legalRoadEdges(state, HUMAN)[0]].filter(Boolean) },
-    });
-    if (err) {
-      ui.toast = err;
+    // 置ける場所があるかだけ先に確かめる(なければ理由を出して札を減らさない)
+    if (roadBuildingNeed() === 0) {
+      ui.toast = state.mode === 'sea'
+        ? '道も船も置ける場所がありません'
+        : '道を置ける場所がありません';
       refresh();
       return;
     }
     ui.mode = 'play-road-building';
     ui.pendingEdges = [];
+    ui.pendingPieces = [];
+    ui.roadPiece = 'road';
     refresh();
     return;
   }
@@ -1110,6 +1142,8 @@ function startProgressPlay(index) {
     ui.pending = null;
     ui.pendingHexes = [];
     ui.pendingEdges = [];
+    ui.pendingPieces = [];
+    ui.roadPiece = 'road';
     ui.pendingVertices = [];
     refresh();
   } else if (def.needsParams === 'commodity') {
@@ -1183,6 +1217,8 @@ function resetInputState() {
   ui.pending = null;
   ui.pendingVertex = null;
   ui.pendingEdges = [];
+  ui.pendingPieces = [];
+  ui.roadPiece = 'road';
   ui.pendingHexes = [];
   ui.pendingVertices = [];
   ui.knightFrom = null;
@@ -1276,8 +1312,7 @@ function boardClick(pick) {
       }
     }
   } else if (m === 'play-road-building') {
-    const eid = pick('edge', ui.highlights.edges ?? []);
-    if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
+    pickRoadBuildingEdge(pick);
   } else if ([
     'build-knight', 'build-wall', 'build-tower', 'move-knight', 'raze-city',
     'desert-pick', 'desert-place', 'knight-displace',
@@ -1305,8 +1340,7 @@ function boardClick(pick) {
     const vid = pick('vertex', ui.highlights.vertices ?? []);
     if (vid && ui.pendingVertices.length < 2) ui.pendingVertices.push(vid);
   } else if (m === 'prog-roads') {
-    const eid = pick('edge', ui.highlights.edges ?? []);
-    if (eid && ui.pendingEdges.length < 2) ui.pendingEdges.push(eid);
+    pickRoadBuildingEdge(pick);
   } else if (m === 'idle' && state.mode === 'cak') {
     // 自分の騎士をクリック → 行動メニュー
     const myKnights = Object.keys(state.knights).filter(
@@ -1381,12 +1415,12 @@ function confirmPending() {
     doAction({ type: 'PLACE_DESERTER', player: HUMAN, vertexId: ui.pending.vertexId });
   } else if (m === 'move-robber' && ui.pending?.hexId) {
     doAction({ type: 'MOVE_ROBBER', player: HUMAN, hexId: ui.pending.hexId, targetPlayer: null });
-  } else if (m === 'play-road-building' && ui.pendingEdges.length >= 1) {
+  } else if (m === 'play-road-building' && ui.pendingEdges.length === roadBuildingNeed()) {
     doAction({
       type: 'PLAY_DEV_CARD',
       player: HUMAN,
       card: 'roadBuilding',
-      params: { edges: [...ui.pendingEdges] },
+      params: roadBuildingParams(),
     });
   } else if (m === 'build-knight' && ui.pending?.vertexId) {
     doAction({ type: 'BUILD_KNIGHT', player: HUMAN, vertexId: ui.pending.vertexId });
@@ -1431,10 +1465,12 @@ function confirmPending() {
       type: 'PLAY_PROGRESS_CARD', player: HUMAN,
       index: ui.progIndex, params: { vertices: [...ui.pendingVertices] },
     });
-  } else if (m === 'prog-roads' && ui.pendingEdges.length >= 1 && ui.progIndex != null) {
+  } else if (
+    m === 'prog-roads' && ui.pendingEdges.length === roadBuildingNeed() && ui.progIndex != null
+  ) {
     doAction({
       type: 'PLAY_PROGRESS_CARD', player: HUMAN,
-      index: ui.progIndex, params: { edges: [...ui.pendingEdges] },
+      index: ui.progIndex, params: roadBuildingParams(),
     });
   }
 }
@@ -1454,6 +1490,8 @@ function cancelMode() {
     ui.mode = 'idle';
     ui.pending = null;
     ui.pendingEdges = [];
+    ui.pendingPieces = [];
+    ui.roadPiece = 'road';
     ui.pendingHexes = [];
     ui.pendingVertices = [];
     ui.knightFrom = null;
@@ -1640,6 +1678,12 @@ document.addEventListener('click', (e) => {
       return;
     }
 
+    // 街道建設で次に置く駒(航海者たち)。すでに選んだぶんはそのまま残す。
+    case 'rb-piece':
+      ui.roadPiece = arg === 'ship' ? 'ship' : 'road';
+      refresh();
+      return;
+
     // 手札の発展カードをタップ → まず説明ダイアログ(そこから「使う」)。
     // 使えないカードもタップできるようにして、理由が伝わるようにする。
     case 'dev-info': {
@@ -1714,6 +1758,8 @@ document.addEventListener('click', (e) => {
       ui.progIndex = index;
       ui.pending = null;
       ui.pendingEdges = [];
+      ui.pendingPieces = [];
+      ui.roadPiece = 'road';
       ui.mode = arg === 'move' ? 'prog-moveroad' : 'prog-edge';
       refresh();
       return;

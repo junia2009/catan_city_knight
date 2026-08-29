@@ -10,6 +10,7 @@ import { KNIGHT_COSTS } from '../rules/cak/knights.js';
 import { TOWER_COST } from '../rules/dragon.js';
 import { FISH_USES, fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
 import { SHIP_COST, SHIP_LIMIT, movableShips } from '../rules/sea.js';
+import { roadBuildingCount, roadBuildingSpots } from '../rules/road-building.js';
 import { legalSetupEdges } from '../ai/legal-moves.js';
 import { diplomatMovable, weddingGiftSize } from '../rules/cak/progress-cards.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
@@ -443,7 +444,7 @@ function statusText(state, ui) {
     case 'desert-place': return '🏳️ 脱走してきた騎士を置く頂点を選んでください';
     case 'knight-displace': return '⚔️ 追い出された騎士の移動先を選んでください';
     case 'play-road-building':
-      return `🛤️ 街道建設: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
+      return `🛤️ 街道建設: ${roadBuildingPrompt(state, ui)}`;
     case 'prog-hex': case 'prog-vertex': case 'prog-edge': case 'prog-hex2': case 'prog-roads':
     case 'prog-knights': case 'prog-moveroad': {
       const card = state.players[HUMAN].progressCards[ui.progIndex];
@@ -461,7 +462,7 @@ function statusText(state, ui) {
       if (ui.mode === 'prog-knights') {
         return `${label}: 昇格させる騎士を選択(${ui.pendingVertices.length}/2)。1体でも確定できます`;
       }
-      return `${label}: 光っている辺をタップして道を選びます(あと${2 - ui.pendingEdges.length}本)`;
+      return `${label}: ${roadBuildingPrompt(state, ui)}`;
     }
     default:
       if (state.phase === 'main') {
@@ -471,6 +472,18 @@ function statusText(state, ui) {
       }
       return '';
   }
+}
+
+// 街道建設の案内。公式では置ける数はきっちり置くので、残り本数を必ず出す。
+function roadBuildingPrompt(state, ui) {
+  const need = roadBuildingCount(state, HUMAN);
+  const left = need - ui.pendingEdges.length;
+  const what = state.mode === 'sea' ? '道か船' : '道';
+  if (left <= 0) return `${what}を${need}つ選びました。確定してください`;
+  if (need === 1) {
+    return `2つ目を置ける場所がないので、${what}を1つだけ置きます`;
+  }
+  return `光っている辺をタップして${what}を選びます(あと${left}つ)`;
 }
 
 // 航海者たちの初期配置は「開拓地 + 道 or 船」(公式ルール)。どちらを置くか選ばせる。
@@ -485,6 +498,22 @@ function setupPieceToggle(state, ui) {
   return `<span class="setup-piece">${btn('road', '🛤️ 道')}${btn('ship', '⛵ 船')}</span>`;
 }
 
+// 航海者たちの街道建設は「道または船を2つ」。次に置く駒を選ばせる。
+function roadPieceToggle(state, ui) {
+  if (state.mode !== 'sea') return '';
+  if (!['play-road-building', 'prog-roads'].includes(ui.mode)) return '';
+  const placed = ui.pendingEdges.map((edgeId, i) => ({
+    edgeId, piece: ui.pendingPieces[i] ?? 'road',
+  }));
+  const spots = roadBuildingSpots(state, HUMAN, placed);
+  const btn = (piece, label) => {
+    const on = ui.roadPiece === piece ? ' class="on"' : '';
+    const off = spots.some((s) => s.piece === piece) ? '' : ' disabled';
+    return `<button data-act="rb-piece:${piece}"${on}${off}>${label}</button>`;
+  };
+  return `<span class="setup-piece">${btn('road', '🛤️ 道')}${btn('ship', '⛵ 船')}</span>`;
+}
+
 function renderStatus(state, ui) {
   const cancellable = [
     'build-road', 'build-settlement', 'build-city', 'play-road-building',
@@ -494,13 +523,15 @@ function renderStatus(state, ui) {
   ].includes(ui.mode) || (ui.mode === 'setup-road');
   const confirmable =
     (ui.pending != null) ||
-    (['play-road-building', 'prog-roads'].includes(ui.mode) && ui.pendingEdges.length >= 1) ||
+    (['play-road-building', 'prog-roads'].includes(ui.mode)
+      && ui.pendingEdges.length === roadBuildingCount(state, HUMAN)) ||
     (ui.mode === 'prog-knights' && ui.pendingVertices.length >= 1) ||
     (ui.mode === 'prog-moveroad' && ui.pendingEdges.length === 2) ||
     (ui.mode === 'prog-hex2' && ui.pendingHexes.length === 2);
   el('status').innerHTML = `
     <span class="msg">${statusText(state, ui)}</span>
     ${setupPieceToggle(state, ui)}
+    ${roadPieceToggle(state, ui)}
     ${confirmable ? '<button class="primary" data-act="confirm">✓ 確定</button>' : ''}
     ${cancellable ? '<button data-act="cancel">↩ やり直す</button>' : ''}
   `;

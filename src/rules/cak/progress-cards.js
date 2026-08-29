@@ -8,6 +8,7 @@ import { rngInt } from '../../rng.js';
 import { RESOURCES, RES_JP, addLog } from '../../state.js';
 import { grantResource, handHidden, totalCards, canBuildWall, canPlaceRoad } from '../build.js';
 import { updateLongestRoad, computePoints } from '../victory.js';
+import { applyRoadBuilding, validateRoadBuilding } from '../road-building.js';
 import { countKnights, canPromoteKnight, displaceKnight, KNIGHT_LIMIT_PER_LEVEL } from './knights.js';
 import { TRACKS, MAX_IMPROVEMENT } from './improvements.js';
 
@@ -653,23 +654,10 @@ export const PROGRESS_CARDS = {
   roadBuilding: {
     deck: 'science', count: 2,
     name: '街道建設', icon: '🛤️',
-    desc: '道を2本まで無料で建設する',
+    desc: '道を2本無料で建設する(2本目を置ける場所がなければ1本)',
     needsParams: 'edges',
-    validate(state, pid, params) {
-      const edges = params?.edges ?? [];
-      if (edges.length < 1 || edges.length > 2) return '道を1〜2本選んでください';
-      const err1 = canPlaceRoad(state, pid, edges[0]);
-      if (err1) return err1;
-      if (edges.length === 2) {
-        return canPlaceRoad(state, pid, edges[1], { extraRoads: { [edges[0]]: true } });
-      }
-      return null;
-    },
-    play(state, pid, params) {
-      for (const eid of params.edges) state.roads[eid] = { player: pid };
-      updateLongestRoad(state);
-      addLog(state, `🛤️ ${state.players[pid].name}が道を${params.edges.length}本無料建設`);
-    },
+    validate: (state, pid, params) => validateRoadBuilding(state, pid, params),
+    play: (state, pid, params) => applyRoadBuilding(state, pid, params),
   },
 
   smith: {

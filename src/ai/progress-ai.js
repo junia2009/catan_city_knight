@@ -17,8 +17,9 @@ import {
 import { validateAction } from '../actions.js';
 import {
   playerProduction, robberHexValue, vertexValue, missingFor, surplusOver,
+  chooseRoadBuilding,
 } from './evaluator.js';
-import { legalRobberHexes, legalRoadEdges } from './legal-moves.js';
+import { legalRobberHexes } from './legal-moves.js';
 import { nextGoal } from './cpu-player.js';
 
 function othersOf(state, pid) {
@@ -309,12 +310,8 @@ const SCORERS = {
   },
 
   roadBuilding(state, pid) {
-    const first = legalRoadEdges(state, pid);
-    if (!first.length) return null;
-    const e1 = first[0];
-    const second = legalRoadEdges(state, pid, { extraRoads: { [e1]: true } }).filter((e) => e !== e1);
-    const edges = second.length ? [e1, second[0]] : [e1];
-    return { score: 2.2, params: { edges } };
+    const params = chooseRoadBuilding(state, pid);
+    return params ? { score: 2.2, params } : null;
   },
 
   smith(state, pid) {

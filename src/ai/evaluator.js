@@ -2,6 +2,7 @@
 
 import { LAYOUT, PIPS, TERRAIN_RESOURCE, vertexHexesOf } from '../rules/board.js';
 import { islandAtVertex } from '../rules/sea.js';
+import { roadBuildingCount, roadBuildingSpots } from '../rules/road-building.js';
 
 // 金鉱は好きな資源を選べるので、資源重みは最大値として扱う
 const GOLD_WEIGHT = 1.3;
@@ -125,4 +126,37 @@ export function surplusOver(player, cost) {
     if (extra > 0) surplus[r] = extra;
   }
   return surplus;
+}
+
+// 道の先の拡張価値(空き頂点で隣に建物がない = 将来の入植候補)
+export function roadEdgeValue(state, pid, eid) {
+  let v = 0.1;
+  for (const vid of LAYOUT.edges[eid].v) {
+    if (state.buildings[vid]) continue;
+    const blocked = LAYOUT.vertexAdj[vid].some((a) => state.buildings[a]);
+    const val = vertexValue(state, pid, vid);
+    v = Math.max(v, blocked ? val * 0.2 : val);
+  }
+  return v;
+}
+
+// 街道建設で置く駒の組み合わせを選ぶ。公式どおり「置ける数はきっちり置く」ので、
+// 貪欲に選んだ1本目のせいで2本目が消えるときは、その1本目を諦めて選び直す。
+// 航海者たちでは船も候補に混ざる(道か船かは駒ごとに持つ)。
+export function chooseRoadBuilding(state, pid) {
+  const need = roadBuildingCount(state, pid);
+  if (need === 0) return null;
+  const value = (s) => roadEdgeValue(state, pid, s.edgeId) + (s.piece === 'ship' ? -0.05 : 0);
+  const firsts = [...roadBuildingSpots(state, pid)].sort((a, b) => value(b) - value(a));
+  if (need === 1) {
+    const one = firsts[0];
+    return { edges: [one.edgeId], pieces: [one.piece] };
+  }
+  for (const a of firsts) {
+    const rest = roadBuildingSpots(state, pid, [a]);
+    if (!rest.length) continue; // この1本目だと2本目が置けない
+    const b = rest.reduce((x, y) => (value(x) >= value(y) ? x : y));
+    return { edges: [a.edgeId, b.edgeId], pieces: [a.piece, b.piece] };
+  }
+  return null;
 }
