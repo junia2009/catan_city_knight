@@ -1,16 +1,93 @@
-// Service Worker — ネットワーク優先戦略
+// Service Worker — ネットワーク優先 + install 時のプリキャッシュ
 //
 // 方針: オンライン時は常にネットワークから最新を取得し、取得できたものを
 // キャッシュへ保存する。キャッシュはオフライン時のフォールバック専用。
 // これにより「古いバージョンが表示され続ける」ことは構造的に起きない。
 //
+// プリキャッシュ: CPU 戦のロジックは全てクライアント側にあるので、配信物さえ
+// 手元にあれば完全オフラインで遊べる。ところが SW が制御を握るのは
+// 起動用モジュールが読み終わったあとなので、放っておくと初回訪問では
+// ほとんど何もキャッシュに入らない(オフラインで動くのはブラウザの HTTP
+// キャッシュ頼みで、容量が逼迫すれば捨てられる)。そこで install 時に
+// まとめて取り込み、一度の訪問だけでオフライン化を完結させる。
+//
 // SW 自体の更新も即時反映: skipWaiting + clients.claim。
 // (登録側は updateViaCache: 'none' で HTTP キャッシュを介さず sw.js を確認する)
 
-const CACHE = 'hexfrontier-net-first-v1';
+// >>> precache:generated (scripts/gen-precache.mjs で生成。手で編集しない)
+const PRECACHE_VERSION = 'c70e6b1c29b5';
+const PRECACHE = [
+  './',
+  './icons/apple-touch-icon.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './index.html',
+  './manifest.webmanifest',
+  './src/actions.js',
+  './src/ai/cpu-player.js',
+  './src/ai/evaluator.js',
+  './src/ai/legal-moves.js',
+  './src/ai/progress-ai.js',
+  './src/audio/bgm.js',
+  './src/audio/ctx.js',
+  './src/audio/sfx.js',
+  './src/demo/driver.js',
+  './src/demo/scenario.js',
+  './src/demo/script.js',
+  './src/input.js',
+  './src/main.js',
+  './src/net/client.js',
+  './src/render/avatars.js',
+  './src/render/board-render.js',
+  './src/render/hud-render.js',
+  './src/render/rules-content.js',
+  './src/render3d/board3d.js',
+  './src/rng.js',
+  './src/rules/board.js',
+  './src/rules/build.js',
+  './src/rules/cak/barbarians.js',
+  './src/rules/cak/improvements.js',
+  './src/rules/cak/knights.js',
+  './src/rules/cak/progress-cards.js',
+  './src/rules/dice.js',
+  './src/rules/dragon.js',
+  './src/rules/fish.js',
+  './src/rules/road-building.js',
+  './src/rules/robber.js',
+  './src/rules/sea.js',
+  './src/rules/trade.js',
+  './src/rules/victory.js',
+  './src/state.js',
+  './src/storage.js',
+  './vendor/addons/controls/OrbitControls.js',
+  './vendor/three.core.min.js',
+  './vendor/three.module.min.js',
+];
+// <<< precache:generated
 
-self.addEventListener('install', () => {
-  self.skipWaiting(); // 新しい SW を待機させず即座に有効化
+// 中身が1ファイルでも変われば PRECACHE_VERSION が変わり、
+// 新しいキャッシュに入れ直したうえで古いものを捨てる。
+const CACHE = `hexfrontier-${PRECACHE_VERSION}`;
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE);
+      // 1つでも失敗すると addAll は全部やめてしまうので、1件ずつ入れる。
+      // 取りこぼしても致命的ではない(次のオンライン時に fetch 経由で入る)。
+      await Promise.all(
+        PRECACHE.map(async (url) => {
+          try {
+            const res = await fetch(new Request(url, { cache: 'reload' }));
+            if (res.ok) await cache.put(url, res);
+          } catch {
+            // ネットワークが不安定なだけなので、この1件は諦める
+          }
+        }),
+      );
+      await self.skipWaiting(); // 新しい SW を待機させず即座に有効化
+    })(),
+  );
 });
 
 self.addEventListener('activate', (event) => {
