@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node --test 'test/*.test.js'",
     "selfplay": "node scripts/selfplay.js",
+    "gen:precache": "node scripts/gen-precache.mjs",
     "serve": "python3 -m http.server 8000",
     "server": "wrangler dev --port 8787",
     "deploy:server": "wrangler deploy"

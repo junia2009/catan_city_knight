@@ -12,6 +12,7 @@ npm run selfplay              # セルフプレイゲート(scripts/selfplay.js 
 node scripts/selfplay.js 1000 # ゲーム数を指定して回す(モード引数も可)
 node scripts/dice-audit.mjs   # 乱数の統計監査(χ²バッテリー)
 npm run server                # オンライン対戦サーバー(wrangler dev, :8787)
+npm run gen:precache          # sw.js のプリキャッシュ一覧を生成(ファイルを足したら実行)
 npm run deploy:server         # Cloudflare へ手動デプロイ(要ログイン。通常は不要 → デプロイの節)
 ```
 
@@ -92,6 +93,23 @@ npm run serve         # 静的サイト(:8000)
   `addInitScript` で `localStorage['hexfrontier.clientId']` を固定すると再接続を再現できる。
   SwiftShader で WebGL を2つ動かすと重いので、待ち時間は長めに取る。
 - `window.hexDebug.getNet() / netJoin() / netStart() / netLeave()` が E2E 用のフック。
+
+## オフライン対応(PWA)
+
+CPU 戦のロジックは全てクライアント側にあるので、配信物さえ手元にあれば
+完全オフラインで遊べる。`sw.js` が **install 時に全ファイルをプリキャッシュ**して、
+初回訪問1回でオフライン化を完結させている。
+
+- 一覧は `scripts/gen-precache.mjs` が `sw.js` のマーカー間に書き出す。
+  **`src/` `vendor/` `icons/` にファイルを足したら `npm run gen:precache`**。
+  忘れると `test/sw-precache.test.js` が落ちる。
+- キャッシュ名には全ファイルの中身のハッシュが入る。1ファイルでも変われば
+  `sw.js` が変わってブラウザが SW を入れ直し、プリキャッシュも取り直される。
+- 取得方針は従来どおりネットワーク優先。プリキャッシュはオフライン時の
+  フォールバック専用なので、「古い版で起動し続ける」ことは起きない。
+- オフラインの確認はスクラッチパッドの E2E で
+  `ctx.setOffline(true)` + CDP の `Network.setCacheDisabled`(HTTP キャッシュを
+  切らないと、SW ではなくブラウザのキャッシュで動いているだけかもしれない)。
 
 ## デプロイ
 
