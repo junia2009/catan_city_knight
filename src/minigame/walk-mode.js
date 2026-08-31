@@ -9,6 +9,12 @@ import * as THREE from 'three';
 import { makeGround, spawnPoint } from './ground.js';
 import { Walker, WALK_SPEED } from './walker.js';
 
+// フレームレートに依らない追従係数。
+// dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
+function smooth(rate, dt) {
+  return 1 - Math.exp(-rate * dt);
+}
+
 export class WalkMode {
   constructor(board3d, state) {
     this.b = board3d;
@@ -85,7 +91,10 @@ export class WalkMode {
   }
 
   _frame(t) {
-    const dt = this.last ? Math.min(0.1, (t - this.last) / 1000) : 0.016;
+    // フレーム落ちしても飛ばないように上限を切る。
+    // 歩く側と同じ値を使う(片方だけ刻むと、低フレームで
+    // 「本人はゆっくり・カメラだけ瞬間移動」になってガタつく)。
+    const dt = this.last ? Math.min(0.05, (t - this.last) / 1000) : 0.016;
     this.last = t;
 
     const kb = this._keyInput();
@@ -98,24 +107,27 @@ export class WalkMode {
     if (speed > WALK_SPEED * 0.35) {
       const want = this.walker.facing;
       let d = ((want - this.camYaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
-      this.camYaw += d * Math.min(1, dt * 1.6);
+      this.camYaw += d * smooth(1.6, dt);
     }
     this._placeCamera(dt, false);
   }
 
   _placeCamera(dt, snap) {
     const cam = this.b.camera;
-    const w = this.walker.parts.group.position;
+    // 追うのは「足元の位置」。描画上のモデル位置を追うと、
+    // アニメーションの上下がそのまま画面の揺れになる。
+    const w = this.walker.pos;
     const h = Math.sin(this.camPitch) * this.camDist;
     const flat = Math.cos(this.camPitch) * this.camDist;
+    const groundY = this.ground(w.x, w.z).y;
     const want = new THREE.Vector3(
       w.x - Math.sin(this.camYaw) * flat,
-      w.y + 0.42 + h,
+      groundY + 0.42 + h,
       w.z - Math.cos(this.camYaw) * flat,
     );
     if (snap) cam.position.copy(want);
-    else cam.position.lerp(want, Math.min(1, dt * 9));
-    cam.lookAt(w.x, w.y + 0.36, w.z);
+    else cam.position.lerp(want, smooth(9, dt));
+    cam.lookAt(w.x, groundY + 0.36, w.z);
   }
 
   // いま立っているヘックスの地形(HUD に出す)

@@ -1564,7 +1564,11 @@ export class Board3D {
 
     const loop = (t) => {
       if (this.disposed) return;
-      this.controls.update();
+      // カメラを誰が持つか。onFrame(ミニゲーム)がいる間は向こうが持つ。
+      // controls.enabled = false は「入力を受けない」だけで、update() は
+      // damping でカメラを動かし続ける ── そのまま呼ぶと、ミニゲーム側の
+      // カメラ操作と毎フレーム取り合って画面がガタつく。
+      if (!this.onFrame) this.controls.update();
       // 選べる場所は屋外のスマホでも見える濃さで点滅させる(下限を上げる)
       const a = 0.62 + 0.18 * Math.sin(t / 260);
       for (const m of this.pulseMats) m.opacity = a;
