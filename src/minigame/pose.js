@@ -9,6 +9,8 @@
 
 const JOINT = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const LIMB = (rootX = 0, rootZ = 0, knee = 0) => ({ rootX, rootZ, knee });
+// 口。0 = にっこり / 1 = 「お」の口(驚き)
+const MOUTH = (open = 0) => ({ open });
 
 // 歩き。手足を交互に振るだけの素直なもの。
 // 体は上下しない ── カメラが追うので、揺らすと画面全体が揺れて見づらい。
@@ -16,6 +18,7 @@ export function walkPose(phase, gait, facing) {
   const t = phase;
   return {
     group: JOINT(0, facing, 0),
+    mouth: MOUTH(0),
     // 走るほど前傾する(それらしく見せるのはこれだけで足りる)
     hips: JOINT(gait * 0.12, 0, 0),
     chest: JOINT(0, 0, 0),
@@ -47,6 +50,7 @@ export function airPose(vy, facing) {
   const drop = Math.max(0, -up);
   return {
     group: JOINT(0, facing, 0),
+    mouth: MOUTH(1),   // 跳んでいる間は「お」
     hips: JOINT(tuck * 0.3 - drop * 0.1, 0, 0),
     chest: JOINT(0, 0, 0),
     head: JOINT(0, 0, 0),
@@ -74,6 +78,7 @@ export function tumblePose(spin, facing) {
   const t = spin * 2.4;
   return {
     group: JOINT(Math.sin(spin * 1.7) * 0.45, facing, spin),
+    mouth: MOUTH(1),   // 落ちている間は「お」
     hips: JOINT(-0.25, 0, 0),
     chest: JOINT(Math.sin(t * 1.3) * 0.2, 0, Math.sin(t) * 0.12),
     head: JOINT(0.2, 0, 0),
@@ -105,6 +110,7 @@ export function sinkPose(t, facing, spin) {
       facing + spin * 1.2,
       Math.sin(t * 0.7) * 0.26,
     ),
+    mouth: MOUTH(1),   // 水の中でも口は開いたまま
     hips: JOINT(-0.12 + Math.sin(t * 1.1) * 0.06, 0, 0),
     chest: JOINT(0.12, 0, Math.sin(t * 0.9) * 0.1),
     head: JOINT(-0.18, 0, 0),
@@ -127,16 +133,19 @@ export function sinkPose(t, facing, spin) {
   };
 }
 
-// テストから使う: 姿勢が持つ項目の一覧(順序を揃えて比較できるように)
+// テストから使う: 姿勢が持つ項目の一覧(順序を揃えて比較できるように)。
+// 中身を決め打ちせず、そのまま辿る ── 項目を増やしたときに
+// ここを直し忘れて検査から漏れる、を防ぐため。
 export function poseKeys(pose) {
   const keys = [];
-  for (const part of ['group', 'hips', 'chest', 'head']) {
-    for (const axis of Object.keys(pose[part]).sort()) keys.push(`${part}.${axis}`);
-  }
-  for (const part of ['legs', 'arms']) {
-    pose[part].forEach((limb, i) => {
-      for (const k of Object.keys(limb).sort()) keys.push(`${part}[${i}].${k}`);
-    });
-  }
+  const walk = (obj, prefix) => {
+    for (const k of Object.keys(obj).sort()) {
+      const v = obj[k];
+      if (Array.isArray(v)) v.forEach((e, i) => walk(e, `${prefix}${k}[${i}].`));
+      else if (v && typeof v === 'object') walk(v, `${prefix}${k}.`);
+      else keys.push(prefix + k);
+    }
+  };
+  walk(pose, '');
   return keys;
 }

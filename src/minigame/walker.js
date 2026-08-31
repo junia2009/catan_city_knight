@@ -1,8 +1,10 @@
-// 島を歩く棒人間(ミニゲーム)
+// 島を歩く人(ミニゲーム)
 //
 // 動きは素直な歩行アニメーションだけ。手足を交互に振り、わずかに上下する。
 // 一度「ばねで行き過ぎさせてぐらつかせる」実装にしたが、画面が揺れて
 // 見づらいだけだったのでやめた ── 揺らすなら、まず滑らかに歩けること。
+//
+// 見た目(メッシュの組み立てと寸法)は body.js。
 //
 // ここはゲームの state を一切知らない。地面の高さと歩ける範囲だけを
 // 外から関数で受け取る(walk-mode.js が盤面から作って渡す)。
@@ -13,90 +15,14 @@
 import * as THREE from 'three';
 import { WalkerMotion, WALK_SPEED, MAX_DT } from './motion.js';
 import { walkPose, airPose, tumblePose, sinkPose } from './pose.js';
+import { makeWalker, walkerHeight, CUTE } from './body.js';
 
 export { WALK_SPEED };
 
-export const WALKER_HEIGHT = 0.52; // 足元から頭のてっぺんまで(タイル1枚が約1.0)
+export { makeWalker };
 
-const SKIN = 0xffd9a8;
-const CLOTH = 0x2f6fd0;
-
-function limbMat(color) {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.02 });
-}
-
-// 1本の手足。上下2節で、肩(付け根)から吊り下げる。
-function makeLimb(mat, upper, lower, thick) {
-  const root = new THREE.Group();
-  const upperMesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(thick, upper, 3, 6), mat,
-  );
-  upperMesh.position.y = -upper / 2;
-  upperMesh.castShadow = true;
-  root.add(upperMesh);
-
-  const knee = new THREE.Group();
-  knee.position.y = -upper;
-  const lowerMesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry(thick * 0.86, lower, 3, 6), mat,
-  );
-  lowerMesh.position.y = -lower / 2;
-  lowerMesh.castShadow = true;
-  knee.add(lowerMesh);
-  root.add(knee);
-
-  return { root, knee };
-}
-
-export function makeWalker(color = CLOTH) {
-  const g = new THREE.Group();
-  const skin = limbMat(SKIN);
-  const cloth = limbMat(color);
-
-  // 腰。ここを動かすと全身が付いてくる
-  const hips = new THREE.Group();
-  hips.position.y = 0.26;
-  g.add(hips);
-
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.14, 4, 8), cloth);
-  torso.position.y = 0.09;
-  torso.castShadow = true;
-  hips.add(torso);
-
-  const chest = new THREE.Group();
-  chest.position.y = 0.17;
-  hips.add(chest);
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.062, 12, 10), skin);
-  head.position.y = 0.065;
-  head.castShadow = true;
-  chest.add(head);
-
-  // 目。向いている方向が分かるようにする(+Z が前)
-  const eyeGeo = new THREE.SphereGeometry(0.012, 6, 6);
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x22242a });
-  for (const sx of [-1, 1]) {
-    const eye = new THREE.Mesh(eyeGeo, eyeMat);
-    eye.position.set(sx * 0.024, 0.072, 0.052);
-    chest.add(eye);
-  }
-
-  const arms = [-1, 1].map((sx) => {
-    const limb = makeLimb(skin, 0.11, 0.10, 0.019);
-    limb.root.position.set(sx * 0.062, 0.03, 0);
-    chest.add(limb.root);
-    return limb;
-  });
-
-  const legs = [-1, 1].map((sx) => {
-    const limb = makeLimb(cloth, 0.13, 0.12, 0.024);
-    limb.root.position.set(sx * 0.032, 0, 0);
-    hips.add(limb.root);
-    return limb;
-  });
-
-  return { group: g, hips, chest, head, arms, legs };
-}
+// 足元から頭のてっぺんまで(タイル1枚が約1.0)
+export const WALKER_HEIGHT = walkerHeight(CUTE);
 
 export class Walker {
   // groundAt(x, z) → { y, ok }。ok が false なら「そこは地面でない」
@@ -151,6 +77,8 @@ export class Walker {
       const a = pose[part];
       p[part].rotation.set(a.x, a.y, a.z);
     }
+    p.mouth.smile.visible = pose.mouth.open < 0.5;
+    p.mouth.open.visible = pose.mouth.open >= 0.5;
     for (const part of ['legs', 'arms']) {
       pose[part].forEach((limb, i) => {
         p[part][i].root.rotation.x = limb.rootX;
