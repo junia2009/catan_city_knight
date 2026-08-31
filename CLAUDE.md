@@ -19,6 +19,12 @@ npm run deploy:server         # Cloudflare へ手動デプロイ(要ログイン
 ビルド工程はない。ES Modules を直接ブラウザが読む(Three.js は `vendor/` + importmap)。
 サーバーだけは wrangler が esbuild でバンドルする(`src/` のルールエンジンをそのまま取り込む)。
 
+**テストは `node_modules` 無しで通ること。** CI は `npm install` をせずに `npm test` を回す。
+手元には `three` が入っているので、`import * as THREE from 'three'` したモジュールを
+テストから読むと**手元だけ通って CI で落ちる**。計算はレンダリングから切り離して置く
+(`src/minigame/ground.js` `motion.js` が例)。`test/no-bare-imports.test.js` が
+テストから辿れる import を静的に検査して、これを防いでいる。
+
 ## 変更時の検証フロー
 
 1. **ルール変更** → `npm test`。新ルールには必ずテストを足す。

@@ -9,6 +9,7 @@ import { createGame } from '../src/state.js';
 import { LAYOUT } from '../src/rules/board.js';
 import { isLandHex } from '../src/rules/sea.js';
 import { makeGround, spawnPoint } from '../src/minigame/ground.js';
+import { WalkerMotion } from '../src/minigame/motion.js';
 
 const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 
@@ -107,6 +108,28 @@ test('walk: 立っている地面の高さは一定(タイル上面)', () => {
   assert.equal(ys.size, 1, `高さが揃っていない: ${[...ys].join(',')}`);
 });
 
+test('walk: 島の端を踏み外すと落ち、直前の足場に戻る', () => {
+  const s = game('base');
+  const ground = makeGround(s);
+  const start = spawnPoint(s);
+  const w = new WalkerMotion(ground);
+  w.setPosition(start.x, start.y);
+
+  // 一方向に歩き続ければ、いずれ島の端から海へ出る
+  let fell = false;
+  let back = null;
+  for (let i = 0; i < 2000; i++) {
+    const r = w.update(1 / 60, { x: 0, y: 1 }, 0);
+    if (r.falling) fell = true;
+    if (r.respawned) { back = { x: w.pos.x, z: w.pos.z }; break; }
+  }
+
+  assert.ok(fell, '端まで歩いても落ちない');
+  assert.ok(back, '落ちたまま戻ってこない');
+  assert.ok(ground(back.x, back.z).ok, '復帰先が陸でない');
+  assert.equal(w.falling, false, '復帰後も落下中のまま');
+});
+
 // 入力の向き。左右が反転していても盤面の判定は全部通るので、
 // テストが無いと気づけない(実際に一度反転させたまま出してしまった)。
 //
@@ -114,17 +137,13 @@ test('walk: 立っている地面の高さは一定(タイル上面)', () => {
 //   画面奥  = ( sin(camYaw),  cos(camYaw))
 //   画面右  = (-cos(camYaw),  sin(camYaw))
 // スティックを倒した向きへ、この基準で動くことを確かめる。
-test('walk: スティックの向きと移動の向きが一致する(左右が反転しない)', async () => {
-  const { Walker } = await import('../src/minigame/walker.js');
+test('walk: スティックの向きと移動の向きが一致する(左右が反転しない)', () => {
   const s = game('base');
   const ground = makeGround(s);
   const start = spawnPoint(s);
 
-  // THREE を使わずに済むよう、Walker が必要とする最小限の scene を渡す
-  const scene = { add() {} };
-
   const run = (input, camYaw) => {
-    const w = new Walker(scene, ground, 0);
+    const w = new WalkerMotion(ground);
     w.setPosition(start.x, start.y);
     for (let i = 0; i < 30; i++) w.update(1 / 60, input, camYaw);
     const dx = w.pos.x - start.x;
