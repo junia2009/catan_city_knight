@@ -2205,6 +2205,7 @@ window.hexDebug = {
     facing: walk.walker.facing, camYaw: walk.camYaw,
     falling: walk.walker.falling,
     at: state ? walk.standingOn(state) : null,
+    obstacles: walk.obstacles,
   } : null),
   walkStick: (x, y) => walk?.setStick(x, y),
   getBgm: () => bgm,

@@ -99,10 +99,11 @@ export function makeWalker(color = CLOTH) {
 
 export class Walker {
   // groundAt(x, z) → { y, ok }。ok が false なら「そこは地面でない」
-  constructor(scene, groundAt, color) {
+  // blockAt: 盤の上の物にめり込ませないための関数(obstacles.js)
+  constructor(scene, groundAt, color, blockAt = null) {
     this.parts = makeWalker(color);
     scene.add(this.parts.group);
-    this.motion = new WalkerMotion(groundAt);
+    this.motion = new WalkerMotion(groundAt, blockAt);
     this.phase = 0;       // 歩行サイクル
   }
 
@@ -110,6 +111,7 @@ export class Walker {
   get pos() { return this.motion.pos; }
   get vel() { return this.motion.vel; }
   get facing() { return this.motion.facing; }
+  get falling() { return this.motion.falling; }
 
   setPosition(x, z) {
     this.motion.setPosition(x, z);

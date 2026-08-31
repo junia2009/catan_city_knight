@@ -9,7 +9,8 @@ import { createGame } from '../src/state.js';
 import { LAYOUT } from '../src/rules/board.js';
 import { isLandHex } from '../src/rules/sea.js';
 import { makeGround, spawnPoint } from '../src/minigame/ground.js';
-import { WalkerMotion } from '../src/minigame/motion.js';
+import { WalkerMotion, WALK_SPEED } from '../src/minigame/motion.js';
+import { makeBlocker, WALKER_RADIUS } from '../src/minigame/obstacles.js';
 
 const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 
@@ -106,6 +107,71 @@ test('walk: 立っている地面の高さは一定(タイル上面)', () => {
     ys.add(g(c.x, c.y).y);
   }
   assert.equal(ys.size, 1, `高さが揃っていない: ${[...ys].join(',')}`);
+});
+
+// 盤の上の物への当たり判定。すり抜けるとゲームとして目に見えて壊れて見える
+// (実際に盗賊を貫通した状態で出してしまった)。
+test('walk: 障害物にめり込まない', () => {
+  const block = makeBlocker([{ x: 0, z: 0, r: 0.25 }]);
+  const need = 0.25 + WALKER_RADIUS;
+
+  // 正面から突っ込む
+  const head = block(-1, 0, 0.05, 0);
+  assert.equal(head.hit, true, '重なっているのに hit でない');
+  assert.ok(Math.hypot(head.x, head.z) >= need - 1e-9, `めり込んでいる(${Math.hypot(head.x, head.z)})`);
+
+  // 触れていなければ動かさない(端から落ちる挙動を邪魔しない)
+  const clear = block(-1, 0, -0.9, 0);
+  assert.equal(clear.hit, false, '触れていないのに hit');
+});
+
+test('walk: 障害物に当たっても横には進める(滑る)', () => {
+  const block = makeBlocker([{ x: 0, z: 0, r: 0.25 }]);
+  // 斜めに当てる。押し出されても、進みたかった横方向には出ている
+  const r = block(-0.5, -0.5, -0.2, -0.2);
+  assert.equal(r.hit, true);
+  assert.ok(r.x > -0.5 && r.z > -0.5, `横に進めていない (${r.x}, ${r.z})`);
+});
+
+test('walk: 障害物に挟まれても、どれにもめり込まない', () => {
+  const obs = [
+    { x: 0, z: 0, r: 0.2 },
+    { x: 0.5, z: 0, r: 0.2 },
+    { x: 0.25, z: 0.45, r: 0.2 },
+  ];
+  const block = makeBlocker(obs);
+  // 3つの真ん中(隙間)へ押し込む
+  const r = block(0.25, -1, 0.25, 0.15);
+  for (const o of obs) {
+    const d = Math.hypot(r.x - o.x, r.z - o.z);
+    assert.ok(d >= o.r + WALKER_RADIUS - 1e-6, `(${o.x},${o.z}) にめり込んでいる(${d.toFixed(3)})`);
+  }
+});
+
+// 押し出しは位置を直すだけなので、1フレームの移動量が障害物の直径より
+// 大きいとすり抜ける。実際の値がそうなっていないことを数字で押さえる。
+test('walk: 1フレームの移動量が、いちばん小さい障害物より小さい', () => {
+  const perFrame = WALK_SPEED * 0.05; // 速さ × 刻みの上限
+  const smallest = (0.09 + WALKER_RADIUS) * 2; // 実測でいちばん細い木 + 棒人間
+  assert.ok(perFrame < smallest, `すり抜けうる(1フレーム ${perFrame} / 直径 ${smallest}`);
+});
+
+test('walk: 盤の上の物を通り抜けられない(歩き続けても中に入らない)', () => {
+  const s = game('base');
+  const ground = makeGround(s);
+  const start = spawnPoint(s);
+  // 進行方向の少し先に障害物を置く
+  const o = { x: start.x, z: start.y + 0.5, r: 0.25 };
+  const w = new WalkerMotion(ground, makeBlocker([o]));
+  w.setPosition(start.x, start.y);
+
+  let closest = Infinity;
+  for (let i = 0; i < 120; i++) {
+    w.update(1 / 60, { x: 0, y: 1 }, 0);
+    closest = Math.min(closest, Math.hypot(w.pos.x - o.x, w.pos.z - o.z));
+  }
+  assert.ok(closest >= o.r + WALKER_RADIUS - 1e-6, `中に入った(最接近 ${closest.toFixed(3)})`);
+  assert.ok(w.pos.z > start.y, '障害物の手前まで進んでいない');
 });
 
 test('walk: 島の端を踏み外すと落ち、直前の足場に戻る', () => {
