@@ -559,13 +559,73 @@
   body[data-screen="records"] #screen-records { display: flex; }
 
   /* ---------- 戦績と実績 ---------- */
-  .rec-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .rec-table th, .rec-table td { padding: 5px 6px; text-align: right; }
-  .rec-table th { color: var(--dim); font-weight: 600; }
+  .rec-tabs { display: flex; gap: 6px; }
+  .rec-tabs button { flex: 1; padding: 8px 6px; font-size: 13px; }
+  .rec-tabs button.sel { background: linear-gradient(180deg, var(--accent2), var(--accent)); color: #4a2f00; font-weight: 700; }
+  .rec-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .rec-table th, .rec-table td { padding: 6px 4px; text-align: right; }
+  .rec-table th { color: var(--dim); font-weight: 600; font-size: 11px; }
   .rec-table th:first-child, .rec-table td:first-child { text-align: left; }
   .rec-table tbody tr { border-top: 1px solid rgba(255, 255, 255, 0.08); }
-  .rec-table .zero { color: var(--dim); }
+  .rec-table .zero { color: var(--dim); opacity: 0.5; }
   .rec-total { font-weight: 700; }
+
+  /* 難度ごとの獲得数 */
+  .tiers { display: flex; gap: 6px; }
+  .tchip {
+    flex: 1; text-align: center; padding: 5px 4px; border-radius: 8px;
+    font-size: 12px; font-weight: 700;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--tc, var(--line));
+    color: var(--tc, var(--dim));
+  }
+  .tchip.done { background: color-mix(in srgb, var(--tc) 22%, transparent); }
+  .t-gold { --tc: #ffd45e; }
+  .t-silver { --tc: #cfd8e3; }
+  .t-bronze { --tc: #d99a63; }
+
+  /* バッジのグリッド。22個が1画面に収まるように6列 */
+  .badges { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .badge-a {
+    position: relative; aspect-ratio: 1; padding: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: 10px; border: 1.5px solid var(--tc, var(--line));
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .badge-a.got { background: color-mix(in srgb, var(--tc) 20%, transparent); }
+  .badge-a.locked { border-color: rgba(255, 255, 255, 0.12); }
+  .badge-a.locked .bicon { filter: grayscale(1); opacity: 0.4; }
+  .badge-a.sel { box-shadow: 0 0 0 2px var(--accent2); }
+  .badge-a .bicon { font-size: 19px; line-height: 1; }
+  .badge-a small {
+    position: absolute; bottom: 2px; font-size: 9px; color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 選んだバッジの詳細 */
+  .ach-detail {
+    border: 1px solid var(--tc, var(--line)); border-radius: 11px;
+    padding: 11px 12px; background: rgba(255, 255, 255, 0.04);
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .ach-detail.got { background: color-mix(in srgb, var(--tc) 12%, transparent); }
+  .ach-dhead { display: flex; align-items: center; gap: 9px; }
+  .ach-dhead .bicon { font-size: 24px; line-height: 1; }
+  .ach-dhead b { font-size: 14px; }
+  .ach-dhead small { display: block; color: var(--dim); font-size: 11px; }
+  .ach-detail p { font-size: 12px; color: var(--text); }
+  .pbar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.1); overflow: hidden; }
+  .pbar i { display: block; height: 100%; background: var(--tc, var(--accent)); }
+  .pnum { color: var(--dim); font-size: 11px; }
+  .ach-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ach-title-row button { margin-left: auto; }
+  .ttag {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    border: 1px dashed var(--line); color: var(--dim);
+  }
+  .ttag.on { border-style: solid; border-color: var(--accent2); color: var(--accent2); }
+  .ach-hint { color: var(--dim); font-size: 11.5px; }
+
+  /* 勝敗ダイアログの「解除しました」 */
   .ach {
     display: flex; align-items: center; gap: 9px;
     padding: 7px 9px; border-radius: 9px;
@@ -575,11 +635,11 @@
   .ach + .ach { margin-top: 5px; }
   .ach .aicon { font-size: 20px; line-height: 1; width: 26px; text-align: center; }
   .ach span > small { display: block; color: var(--dim); font-size: 11px; }
-  /* 未解除は伏せる。何を狙えばいいかは分かるよう、説明だけは見せる */
-  .ach.locked { opacity: 0.45; }
-  .ach.locked .aicon { filter: grayscale(1); }
   .ach.new { border-color: var(--accent2); background: rgba(255, 210, 120, 0.12); }
   .ach-head { color: var(--accent2); margin: 10px 0 6px; font-size: 13px; }
+
+  /* 対戦中のプレイヤー名に付く称号 */
+  .ptitle { color: var(--accent2); font-size: 10.5px; opacity: 0.9; }
 
   /* ---------- 説明書 ---------- */
   .rules-panel {

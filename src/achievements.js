@@ -1,20 +1,25 @@
-// 実績の定義(設計書 §11)
+// 実績と称号の定義(設計書 §11)
 //
-// 判定は「終局時の state」と「累計の戦績」だけで行う。ゲーム中に別途カウンタを
-// 持たせるとルールエンジンに手を入れることになり、既存の挙動(回帰ハッシュ)を
-// 揺らすので、そこには触らない。
+// 判定材料は「終局時の state から取った到達値(marks)」と「この対戦の記録」と
+// 「累計の戦績」だけ。ゲーム中に別途カウンタを持たせるとルールエンジンに
+// 手を入れることになり、既存の挙動(回帰ハッシュ)を揺らすので、そこには触らない。
 //
-// check(ctx) → true なら解除。ctx は:
-//   state   終局時の state
-//   me      自分の席番号
-//   result  この対戦の記録(mode / difficulty / won / points / turns / players)
-//   stats   この対戦を含めた累計(progress.summarize の戻り値)
-// 判定は何度呼ばれても同じ答えを返すこと(解除済みかどうかは呼び出し側が見る)。
+// 実績の書き方は2通り:
+//   数値もの   { mark, goal, needsWin? }  … marks[mark] >= goal で解除。進捗も出せる
+//   それ以外   { check(ctx) }             … 真偽だけ。進捗は出ない
+//
+// 数値ものを marks 経由にしているのは、**戦績画面で「3/4」と進捗を出すため**。
+// 進捗には過去の最高到達値が要るので、marks を対戦記録に焼き付けて集計する。
+//
+// tier は「取ったときの手応え」。実測(CPU 同士を各モード30戦)の出現率で決めた。
+//   bronze … 普通に遊んでいれば取れる
+//   silver … 狙わないと取れない
+//   gold   … かなり狙って、かつ噛み合わないと取れない
 
 import { longestRoadLength } from './rules/victory.js';
 import { hasOldShoe } from './rules/fish.js';
 
-const MODE_JP = {
+export const MODE_JP = {
   base: '基本',
   cak: '都市と騎士',
   dragon: 'ドラゴンの島',
@@ -22,25 +27,59 @@ const MODE_JP = {
   sea: '航海者たち',
 };
 
+export const TIERS = ['gold', 'silver', 'bronze'];
+export const TIER_JP = { gold: '金', silver: '銀', bronze: '銅' };
+export const TIER_ICON = { gold: '🥇', silver: '🥈', bronze: '🥉' };
+
+// ---- 到達値(marks)----
+// 終局時の state から、実績の判定と進捗に使う数値だけを取り出す。
+// state を読むのはここだけ。以降は marks しか見ない。
+export function marksOf(state, me) {
+  const mine = (obj, key) => Object.values(obj ?? {}).filter((x) => x[key ?? 'player'] === me);
+  const p = state.players?.[me];
+  if (!p) return {};
+  const metropolis = Object.values(state.metropolis ?? {})
+    .filter((vid) => vid != null && state.buildings?.[vid]?.player === me).length;
+  return {
+    cities: mine(state.buildings).filter((b) => b.type === 'city').length,
+    roadLen: safe(() => longestRoadLength(state, me), 0),
+    knights: mine(state.knights).length,
+    ships: mine(state.ships).length,
+    metropolis,
+    defender: p.defenderPoints ?? 0,
+    maxTrack: Math.max(0, ...Object.values(p.improvements ?? {})),
+    treasures: p.treasures ?? 0,
+    islands: (p.islands ?? []).filter((i) => i !== 0).length,
+    largestArmy: state.largestArmy?.player === me ? 1 : 0,
+    oldShoe: safe(() => (hasOldShoe(p) ? 1 : 0), 0),
+  };
+}
+
+function safe(fn, fallback) {
+  try {
+    return fn();
+  } catch {
+    return fallback;
+  }
+}
+
+// 進捗を出すときの単位(「3/4体」の「体」)
+const UNIT = {
+  cities: 'つ', roadLen: '', knights: '体', ships: '隻',
+  metropolis: 'つ', defender: '回', maxTrack: 'Lv', treasures: 'つ', islands: 'つ',
+};
+
 // そのモードで勝った実績(5モードぶん自動で作る)
 const modeWins = Object.entries(MODE_JP).map(([mode, jp]) => ({
   id: `win-${mode}`,
   name: `${jp}を制す`,
   desc: `${jp}で勝利する`,
+  title: `${jp}の覇者`,
   icon: '🏆',
+  tier: 'bronze',
   mode,
   check: ({ result }) => result.won && result.mode === mode,
 }));
-
-function myKnights(state, me) {
-  return Object.values(state.knights ?? {}).filter((k) => k.player === me);
-}
-
-function myBuildings(state, me, type) {
-  return Object.values(state.buildings).filter(
-    (b) => b.player === me && (type == null || b.type === type),
-  );
-}
 
 export const ACHIEVEMENTS = [
   ...modeWins,
@@ -49,64 +88,79 @@ export const ACHIEVEMENTS = [
     id: 'win-all-modes',
     name: '全ルール制覇',
     desc: '5つのルール全てで勝利する',
-    icon: '👑',
+    title: '大開拓者',
+    icon: '👑', tier: 'gold',
     check: ({ stats }) => Object.values(stats.byMode).every((m) => m.won > 0),
+    // 「5モード中いくつ勝ったか」を進捗として出す
+    progress: ({ stats }) => ({
+      now: Object.values(stats.byMode).filter((m) => m.won > 0).length, goal: 5, unit: 'ルール',
+    }),
   },
   {
     id: 'win-hard',
     name: '強敵を退ける',
     desc: 'CPU の強さ「強い」で勝利する',
-    icon: '🔥',
+    title: '猛者',
+    icon: '🔥', tier: 'bronze',
     check: ({ result }) => result.won && result.difficulty === 'hard',
   },
   {
     id: 'win-4p-hard',
     name: '四面楚歌',
     desc: 'CPU3体・強さ「強い」で勝利する',
-    icon: '⚔️',
+    title: '孤高',
+    icon: '⚔️', tier: 'silver',
     check: ({ result }) => result.won && result.difficulty === 'hard' && result.players >= 4,
   },
   {
     id: 'win-fast',
     name: '電光石火',
     desc: '50ターン以内に勝利する',
-    icon: '⚡',
+    title: '疾風',
+    icon: '⚡', tier: 'silver',
     check: ({ result }) => result.won && result.turns <= 50,
   },
   {
     id: 'longest-road',
     name: '街道王',
     desc: '長さ10以上の交易路をつないで勝利する',
-    icon: '🛤️',
-    check: ({ state, me, result }) => result.won && longestRoadLength(state, me) >= 10,
+    title: '街道王',
+    icon: '🛤️', tier: 'silver',
+    mark: 'roadLen', goal: 10, needsWin: true,
   },
   {
     id: 'all-cities',
     name: '都市国家',
     desc: '都市4つを全て建てて勝利する',
-    icon: '🏰',
-    check: ({ state, me, result }) => result.won && myBuildings(state, me, 'city').length >= 4,
+    title: '都市の主',
+    icon: '🏰', tier: 'bronze',
+    mark: 'cities', goal: 4, needsWin: true,
   },
   {
     id: 'largest-army',
     name: '常勝軍',
     desc: '最大騎士力を持ったまま勝利する(都市と騎士以外)',
-    icon: '🎖',
-    check: ({ state, me, result }) => result.won && state.largestArmy?.player === me,
+    title: '将軍',
+    icon: '🎖', tier: 'silver',
+    check: ({ marks, result }) => result.won && marks.largestArmy === 1,
   },
   {
     id: 'games-10',
     name: '常連',
     desc: '10回遊ぶ',
-    icon: '📘',
+    title: '常連',
+    icon: '📘', tier: 'bronze',
     check: ({ stats }) => stats.total.played >= 10,
+    progress: ({ stats }) => ({ now: stats.total.played, goal: 10, unit: '回' }),
   },
   {
     id: 'games-50',
     name: '開拓者の鑑',
     desc: '50回遊ぶ',
-    icon: '📚',
+    title: '生涯開拓者',
+    icon: '📚', tier: 'silver',
     check: ({ stats }) => stats.total.played >= 50,
+    progress: ({ stats }) => ({ now: stats.total.played, goal: 50, unit: '回' }),
   },
 
   // ---- 都市と騎士 ----
@@ -114,49 +168,43 @@ export const ACHIEVEMENTS = [
     id: 'cak-two-metropolis',
     name: '二大都市',
     desc: 'メトロポリスを2つ持って勝利する',
-    icon: '🏙',
-    mode: 'cak',
-    check: ({ state, me, result }) => {
-      if (!result.won || state.mode !== 'cak') return false;
-      const mine = Object.values(state.metropolis)
-        .filter((vid) => vid != null && state.buildings[vid]?.player === me);
-      return mine.length >= 2;
-    },
+    title: '大都市の主',
+    icon: '🏙', tier: 'silver', mode: 'cak',
+    mark: 'metropolis', goal: 2, needsWin: true,
   },
   {
-    id: 'cak-defender-3',
+    id: 'cak-defender',
     name: '島の守護者',
     desc: '蛮族の襲来を3度しのいで最大の功を挙げる',
-    icon: '🛡',
-    mode: 'cak',
-    check: ({ state, me }) => (state.players[me].defenderPoints ?? 0) >= 3,
+    title: '守護者',
+    icon: '🛡', tier: 'silver', mode: 'cak',
+    mark: 'defender', goal: 3,
   },
   {
     id: 'cak-knights',
     name: '騎士団',
     desc: '騎士を4体そろえる',
-    icon: '🐴',
-    mode: 'cak',
-    check: ({ state, me }) => myKnights(state, me).length >= 4,
+    title: '騎士団長',
+    icon: '🐴', tier: 'gold', mode: 'cak',
+    mark: 'knights', goal: 4,
   },
   {
     id: 'cak-max-track',
     name: '極めし者',
     desc: '都市改良をひとつの系統で Lv5 まで上げる',
-    icon: '🔬',
-    mode: 'cak',
-    check: ({ state, me }) =>
-      state.mode === 'cak' && Object.values(state.players[me].improvements).some((lv) => lv >= 5),
+    title: '賢者',
+    icon: '🔬', tier: 'silver', mode: 'cak',
+    mark: 'maxTrack', goal: 5,
   },
 
   // ---- ドラゴンの島 ----
   {
-    id: 'dragon-treasure-3',
+    id: 'dragon-treasure',
     name: '竜の宝',
     desc: '財宝を3つ集める',
-    icon: '💎',
-    mode: 'dragon',
-    check: ({ state, me }) => (state.players[me].treasures ?? 0) >= 3,
+    title: '宝物庫',
+    icon: '💎', tier: 'bronze', mode: 'dragon',
+    mark: 'treasures', goal: 3,
   },
 
   // ---- 漁師たち ----
@@ -164,10 +212,9 @@ export const ACHIEVEMENTS = [
     id: 'fish-shoe-win',
     name: '泥沼の勝利',
     desc: '古い靴を抱えたまま勝利する',
-    icon: '👟',
-    mode: 'fish',
-    check: ({ state, me, result }) =>
-      result.won && state.mode === 'fish' && hasOldShoe(state.players[me]),
+    title: '泥中の蓮',
+    icon: '👟', tier: 'silver', mode: 'fish',
+    check: ({ marks, result }) => result.won && result.mode === 'fish' && marks.oldShoe === 1,
   },
 
   // ---- 航海者たち ----
@@ -175,29 +222,35 @@ export const ACHIEVEMENTS = [
     id: 'sea-islands',
     name: '島から島へ',
     desc: '小島3つに入植する',
-    icon: '🏝',
-    mode: 'sea',
-    check: ({ state, me }) =>
-      (state.players[me].islands ?? []).filter((i) => i !== 0).length >= 3,
+    title: '島の王',
+    icon: '🏝', tier: 'gold', mode: 'sea',
+    mark: 'islands', goal: 3,
   },
   {
     id: 'sea-fleet',
     name: '大船団',
     desc: '船を13隻ならべる',
-    icon: '⛵',
-    mode: 'sea',
-    check: ({ state, me }) =>
-      Object.values(state.ships ?? {}).filter((s) => s.player === me).length >= 13,
+    title: '提督',
+    icon: '⛵', tier: 'gold', mode: 'sea',
+    mark: 'ships', goal: 13,
   },
 ];
 
-// 判定が例外で落ちても対戦の締めを止めないようにする
-// (実績は「おまけ」なので、盤面の状態が想定外でも黙って見送る)
+// 数値ものの判定は共通(check を書かなくてよい)
+function passes(a, ctx) {
+  if (a.check) return !!a.check(ctx);
+  if (a.mark == null) return false;
+  if (a.needsWin && !ctx.result.won) return false;
+  if (a.mode && ctx.result.mode !== a.mode) return false;
+  return (ctx.marks?.[a.mark] ?? 0) >= a.goal;
+}
+
+// 判定が例外で落ちても対戦の締めを止めない(実績はおまけなので黙って見送る)
 export function unlockedBy(ctx) {
   const out = [];
   for (const a of ACHIEVEMENTS) {
     try {
-      if (a.check(ctx)) out.push(a.id);
+      if (passes(a, ctx)) out.push(a.id);
     } catch {
       // この実績だけ見送る
     }
@@ -205,8 +258,27 @@ export function unlockedBy(ctx) {
   return out;
 }
 
+// 戦績画面で出す進捗。{ now, goal, unit } | null
+// 数値ものは「これまでの最高到達値」、それ以外は progress() を持つものだけ。
+export function progressOf(a, stats) {
+  try {
+    if (a.progress) return { unit: '', ...a.progress({ stats }) };
+    if (a.mark == null) return null;
+    return { now: stats.bests?.[a.mark] ?? 0, goal: a.goal, unit: UNIT[a.mark] ?? '' };
+  } catch {
+    return null;
+  }
+}
+
 export function achievementById(id) {
   return ACHIEVEMENTS.find((a) => a.id === id) ?? null;
 }
 
-export { MODE_JP };
+export function achievementsByTier(tier) {
+  return ACHIEVEMENTS.filter((a) => a.tier === tier);
+}
+
+// 称号は実績と1対1。持っている実績の称号だけ名乗れる。
+export function titleOf(id) {
+  return achievementById(id)?.title ?? null;
+}

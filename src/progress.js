@@ -6,7 +6,7 @@
 
 import { lsGet, lsSet, lsRemove } from './storage.js';
 import { computePoints } from './rules/victory.js';
-import { ACHIEVEMENTS, unlockedBy } from './achievements.js';
+import { ACHIEVEMENTS, marksOf, titleOf, unlockedBy } from './achievements.js';
 
 const KEY = 'progress';
 export const PROGRESS_VERSION = 1;
@@ -15,7 +15,7 @@ export const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 
 export function emptyProgress() {
-  return { v: PROGRESS_VERSION, games: [], achievements: {} };
+  return { v: PROGRESS_VERSION, games: [], achievements: {}, title: null };
 }
 
 // 対戦1回ぶんの記録。state をそのまま持つと重いので、要点だけ取り出す。
@@ -30,6 +30,9 @@ export function resultOf(state, me, now = Date.now()) {
     won: state.winner === me,
     points: computePoints(state, me, { includeHidden: true }),
     turns: state.turn,
+    // 実績の進捗(「騎士 3/4」)には過去の最高到達値が要るので、
+    // その対戦での到達値をここで焼き付けておく。
+    marks: marksOf(state, me),
   };
 }
 
@@ -45,7 +48,12 @@ export function summarize(progress) {
     }
   }
   const total = { played: 0, won: 0, bestPoints: 0, bestTurns: null };
+  // 到達値の自己最高。実績の進捗表示に使う
+  const bests = {};
   for (const g of progress.games) {
+    for (const [k, v] of Object.entries(g.marks ?? {})) {
+      if (typeof v === 'number' && v > (bests[k] ?? 0)) bests[k] = v;
+    }
     const m = byMode[g.mode];
     if (!m) continue; // 知らないモードの記録(将来の版で遊んだ)は数えない
     const d = m[g.difficulty] ?? m.normal;
@@ -59,7 +67,7 @@ export function summarize(progress) {
     if (g.points > m.bestPoints) m.bestPoints = g.points;
     if (g.points > total.bestPoints) total.bestPoints = g.points;
   }
-  return { byMode, total };
+  return { byMode, total, bests };
 }
 
 export function winRate(n) {
@@ -83,7 +91,23 @@ export function addResult(progress, result, ctx) {
     next.achievements[id] = { at: result.at, mode: result.mode };
     unlocked.push(id);
   }
+  // 初めて実績を取ったら、その称号を自動で名乗らせる
+  // (設定画面まで行かないと何も起きない、という体験を避ける)
+  if (next.title == null && unlocked.length) next.title = unlocked[0];
   return { progress: next, unlocked };
+}
+
+// 名乗る称号を選ぶ。持っていない実績の称号は名乗れない(null で「称号なし」)。
+export function setTitle(progress, id) {
+  if (id != null && !progress.achievements[id]) return progress;
+  return { ...progress, title: id };
+}
+
+// いま名乗っている称号の文字列。持っていない実績を指していたら null。
+export function currentTitle(progress) {
+  const id = progress.title;
+  if (!id || !progress.achievements[id]) return null;
+  return titleOf(id);
 }
 
 export function achievementCount(progress) {
@@ -105,6 +129,7 @@ export function parseProgress(raw) {
       v: PROGRESS_VERSION,
       games: Array.isArray(p.games) ? p.games.filter((g) => g && typeof g === 'object') : [],
       achievements: p.achievements && typeof p.achievements === 'object' ? p.achievements : {},
+      title: typeof p.title === 'string' ? p.title : null,
     };
   } catch {
     return emptyProgress();
