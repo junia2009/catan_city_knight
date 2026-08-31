@@ -1556,6 +1556,8 @@ export class Board3D {
     this.gameKey = null;
     this.disposed = false;
 
+    this.onFrame = null; // ミニゲームの割り込み(walk-mode.js が差す)
+
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(container);
     this.onResize();
@@ -1574,6 +1576,10 @@ export class Board3D {
       this._tickSpawns(t);
       this._tickShip(t);
       this._tickAmbient(t);
+      // ミニゲーム(島を歩く)が1フレームごとに割り込む口。
+      // WebGL コンテキストを2つ持つとモバイルで重すぎるので、
+      // レンダラーも rAF もここのものを共有する。
+      this.onFrame?.(t);
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(loop);
     };
