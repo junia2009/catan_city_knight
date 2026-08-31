@@ -1634,6 +1634,9 @@ function walkStickHide() {
 
 function walkPointerDown(e) {
   if (!walk) return;
+  // ボタンの上で始まったなぞりは、移動にも視点にも使わない
+  // (ジャンプや「もどる」を押しただけで視点が回ってしまう)
+  if (e.target.closest('button')) return;
   const left = e.clientX < window.innerWidth / 2;
   if (left && walkTouch.move == null) {
     walkTouch.move = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -1670,9 +1673,25 @@ window.addEventListener('pointerdown', walkPointerDown);
 window.addEventListener('pointermove', walkPointerMove);
 window.addEventListener('pointerup', walkPointerUp);
 window.addEventListener('pointercancel', walkPointerUp);
+
+// ジャンプは押した瞬間に跳ぶ(click を待つと一拍遅れて跳んだ感じが出ない)
+const jumpEl = () => document.getElementById('walk-jump');
+jumpEl()?.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  if (!walk) return;
+  walk.jump();
+  jumpEl()?.classList.add('on');
+});
+// 指を離す場所はボタンの外かもしれないので、押した見た目は window で戻す
+for (const ev of ['pointerup', 'pointercancel']) {
+  window.addEventListener(ev, () => jumpEl()?.classList.remove('on'));
+}
+
 window.addEventListener('keydown', (e) => {
   if (!walk) return;
   if (e.code === 'Escape') { exitWalk(); return; }
+  // スペースでページが送られないように(歩いている間だけ)
+  if (e.code === 'Space') e.preventDefault();
   walk.setKey(e.code, true);
 });
 window.addEventListener('keyup', (e) => walk?.setKey(e.code, false));
@@ -2204,10 +2223,13 @@ window.hexDebug = {
     speed: Math.hypot(walk.walker.vel.x, walk.walker.vel.z),
     facing: walk.walker.facing, camYaw: walk.camYaw,
     falling: walk.walker.falling,
+    y: walk.walker.motion.y,
+    grounded: walk.walker.motion.grounded,
     at: state ? walk.standingOn(state) : null,
     obstacles: walk.obstacles,
   } : null),
   walkStick: (x, y) => walk?.setStick(x, y),
+  walkJump: () => walk?.jump(),
   getBgm: () => bgm,
   getViewState: () => ({ viewMode, has3d: !!renderer3d, failed: renderer3dFailed, screen }),
   // オンライン対戦(E2E用)

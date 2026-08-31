@@ -9,7 +9,7 @@ import { createGame } from '../src/state.js';
 import { LAYOUT } from '../src/rules/board.js';
 import { isLandHex } from '../src/rules/sea.js';
 import { makeGround, spawnPoint } from '../src/minigame/ground.js';
-import { WalkerMotion, WALK_SPEED } from '../src/minigame/motion.js';
+import { WalkerMotion, WALK_SPEED, JUMP_HEIGHT } from '../src/minigame/motion.js';
 import { makeBlocker, WALKER_RADIUS } from '../src/minigame/obstacles.js';
 
 const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
@@ -194,6 +194,141 @@ test('walk: 島の端を踏み外すと落ち、直前の足場に戻る', () =>
   assert.ok(back, '落ちたまま戻ってこない');
   assert.ok(ground(back.x, back.z).ok, '復帰先が陸でない');
   assert.equal(w.falling, false, '復帰後も落下中のまま');
+});
+
+// ---- ジャンプ ----
+
+// 平らな地面で跳ばせて、高さの推移を記録する
+function jumpRun(frames = 120, opts = {}) {
+  const s = game('base');
+  const ground = makeGround(s);
+  const start = spawnPoint(s);
+  const w = new WalkerMotion(ground, opts.block ?? null);
+  w.setPosition(start.x, start.y);
+  const ys = [];
+  const events = [];
+  for (let i = 0; i < frames; i++) {
+    if (opts.jumpAt?.includes(i)) w.jump();
+    const r = w.update(1 / 60, opts.input ?? { x: 0, y: 0 }, 0);
+    ys.push(w.y);
+    if (r.jumped) events.push(['jumped', i]);
+    if (r.landed) events.push(['landed', i]);
+  }
+  return { w, ys, events, start };
+}
+
+test('walk: ジャンプの高さと滞空時間が狙いどおり', () => {
+  const { ys, events } = jumpRun(120, { jumpAt: [0] });
+  const apex = Math.max(...ys);
+  assert.ok(Math.abs(apex - JUMP_HEIGHT) < 0.03, `頂点がずれている(${apex.toFixed(3)})`);
+
+  const jumped = events.find((e) => e[0] === 'jumped');
+  const landed = events.find((e) => e[0] === 'landed');
+  assert.ok(jumped && landed, `踏み切り/着地が出ていない(${JSON.stringify(events)})`);
+  const air = (landed[1] - jumped[1]) / 60;
+  assert.ok(Math.abs(air - 0.8) < 0.06, `滞空時間がずれている(${air.toFixed(2)}秒)`);
+});
+
+test('walk: 着地したら高さが 0 に戻る', () => {
+  const { w, ys } = jumpRun(120, { jumpAt: [0] });
+  assert.equal(w.grounded, true, '着地していない');
+  assert.equal(w.y, 0, `着地後に浮いている(${w.y})`);
+  assert.ok(ys.every((y) => y <= JUMP_HEIGHT + 0.01), '狙いより高く跳んでいる');
+});
+
+test('walk: 空中では二段ジャンプできない', () => {
+  // 踏み切った直後に何度も押しても、高さは1回ぶんのまま
+  const spam = Array.from({ length: 60 }, (_, i) => i);
+  const { ys, events } = jumpRun(120, { jumpAt: spam });
+  const apex = Math.max(...ys);
+  assert.ok(apex < JUMP_HEIGHT + 0.03, `連打で高く跳べてしまう(${apex.toFixed(3)})`);
+  // 1回の跳躍あたり踏み切りは1回(着地後にまた跳ぶのは正しい)
+  const jumps = events.filter((e) => e[0] === 'jumped').length;
+  const lands = events.filter((e) => e[0] === 'landed').length;
+  assert.equal(jumps, lands + (jumps > lands ? 1 : 0), '踏み切りと着地の数が合わない');
+  assert.ok(jumps <= 2, `120フレームで跳びすぎ(${jumps}回)`);
+});
+
+test('walk: 押しっぱなしでは跳び続けない(押した瞬間だけ)', () => {
+  // jump() を1回だけ呼び、あとは呼ばない = 押しっぱなし相当
+  const { events } = jumpRun(200, { jumpAt: [0] });
+  assert.equal(events.filter((e) => e[0] === 'jumped').length, 1);
+});
+
+test('walk: 低い物は跳び越えられ、高い物は跳んでも越えられない', () => {
+  const s = game('base');
+  const ground = makeGround(s);
+  const start = spawnPoint(s);
+
+  const tryPass = (h) => {
+    const o = { x: start.x, z: start.y + 0.8, r: 0.2, h };
+    const w = new WalkerMotion(ground, makeBlocker([o]));
+    w.setPosition(start.x, start.y);
+    for (let i = 0; i < 200; i++) {
+      // 障害物の手前で踏み切る
+      if (Math.abs(w.pos.z - (o.z - 0.55)) < 0.03 && w.grounded) w.jump();
+      w.update(1 / 60, { x: 0, y: 1 }, 0);
+    }
+    return w.pos.z > o.z + o.r; // 向こう側へ抜けたか
+  };
+
+  assert.equal(tryPass(0.2), true, '低い物を跳び越えられない');
+  assert.equal(tryPass(1.2), false, '高い物を跳んで通り抜けてしまう');
+});
+
+// フレームが出ない端末でも同じ速さで動くこと。
+// 長い dt をただ切り詰めていた頃は、10fps だと全部がスローモーションになり、
+// ジャンプの滞空だけ妙に長い、という状態だった。
+test('walk: フレームレートが変わっても、跳ぶ高さと進む距離は変わらない', () => {
+  const s = game('base');
+  const start = spawnPoint(s);
+
+  const run = (fps) => {
+    const w = new WalkerMotion(makeGround(s));
+    w.setPosition(start.x, start.y);
+    const dt = 1 / fps;
+    w.jump();
+    let apex = 0;
+    let landedAt = null;
+    // 実時間で 1.5 秒ぶん回す
+    for (let t = 0; t < 1.5; t += dt) {
+      const r = w.update(dt, { x: 0, y: 1 }, 0);
+      apex = Math.max(apex, w.y);
+      if (r.landed && landedAt == null) landedAt = t;
+    }
+    return { apex, landedAt, dist: Math.hypot(w.pos.x - start.x, w.pos.z - start.y) };
+  };
+
+  const fast = run(60);
+  for (const fps of [30, 15, 8]) {
+    const slow = run(fps);
+    assert.ok(Math.abs(slow.apex - fast.apex) < 0.04,
+      `${fps}fps で跳ぶ高さが違う(${slow.apex.toFixed(3)} / 60fps は ${fast.apex.toFixed(3)})`);
+    assert.ok(Math.abs(slow.landedAt - fast.landedAt) < 0.15,
+      `${fps}fps で着地の時刻が違う(${slow.landedAt?.toFixed(2)} / ${fast.landedAt?.toFixed(2)})`);
+    assert.ok(Math.abs(slow.dist - fast.dist) < 0.2,
+      `${fps}fps で進む距離が違う(${slow.dist.toFixed(2)} / ${fast.dist.toFixed(2)})`);
+  }
+});
+
+test('walk: 崖から跳んでも海の上では跳び直せない', () => {
+  const s = game('base');
+  const ground = makeGround(s);
+  const start = spawnPoint(s);
+  const w = new WalkerMotion(ground);
+  w.setPosition(start.x, start.y);
+
+  // 端まで歩いて踏み外し、落ちている間ずっと跳ぼうとする
+  let sawFall = false;
+  let respawned = false;
+  for (let i = 0; i < 3000; i++) {
+    if (sawFall) w.jump();
+    const r = w.update(1 / 60, { x: 0, y: 1 }, 0);
+    if (r.falling) sawFall = true;
+    if (r.respawned) { respawned = true; break; }
+  }
+  assert.ok(sawFall, '端から落ちていない');
+  assert.ok(respawned, '跳び直して落下から抜け出せてしまった(復帰しない)');
 });
 
 // 入力の向き。左右が反転していても盤面の判定は全部通るので、

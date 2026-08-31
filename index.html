@@ -672,6 +672,23 @@
     background: rgba(255, 217, 125, 0.75);
     box-shadow: 0 2px 10px rgba(0,0,0,0.5);
   }
+  /* 右下のジャンプ。視点のなぞりと場所が重なるので、押した所は取り合わない */
+  #walk-jump {
+    position: absolute; pointer-events: auto;
+    right: calc(18px + env(safe-area-inset-right));
+    bottom: calc(28px + env(safe-area-inset-bottom));
+    width: 82px; height: 82px; border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px; padding: 0;
+    border: 2px solid rgba(255,255,255,0.3);
+    background: rgba(8, 22, 38, 0.42);
+    color: #fff; font-size: 24px; line-height: 1;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 90ms ease, background 90ms ease;
+  }
+  #walk-jump span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; }
+  #walk-jump.on { transform: scale(0.92); background: rgba(255, 217, 125, 0.4); }
 
   /* 対戦中のプレイヤー名に付く称号 */
   .ptitle { color: var(--accent2); font-size: 10.5px; opacity: 0.9; }
@@ -1141,7 +1158,8 @@
       <button data-act="walk-exit">✕ もどる</button>
     </div>
     <div id="walk-stick"><i></i></div>
-    <div class="walk-hint">左半分をなぞって移動 / 右半分をなぞって視点</div>
+    <button id="walk-jump" type="button" aria-label="ジャンプ">⤒<span>ジャンプ</span></button>
+    <div class="walk-hint">左半分をなぞって移動 / 右半分をなぞって視点 / ⤒ でジャンプ</div>
   </div>
   <div id="netbadge"><span class="dot"></span><span class="txt"></span></div>
   <div id="dialog-root"></div>
