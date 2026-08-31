@@ -119,14 +119,17 @@ dispatch(state, action)
 
 ```
 src/
-├── main.js       # 画面フロー(title/select/rules/game)・入力モード・CPUスケジューラ・演出
+├── main.js       # 画面フロー(title/select/rules/records/game)・入力モード・CPUスケジューラ・演出
 ├── actions.js    # validate / apply の一本道
 ├── state.js      # createGame と定数
+├── progress.js   # 戦績と実績の保存・集計(localStorage)
+├── achievements.js # 実績の定義(終局時の state と累計だけで判定する)
 ├── rng.js        # makeRng / rngNext / rngInt / shuffled(mulberry32)
 ├── input.js      # ポインタ入力の正規化
 ├── rules/
 │   ├── board.js      # LAYOUT(hex/vertex/edge の隣接表)・盤の形の導出・盤面生成・PIPS
 │   ├── build.js      # 建設コスト・配置判定・手札上限
+│   ├── road-building.js # 街道建設(道/船を2つ)の判定・適用。発展カードと進歩カードで共通
 │   ├── dice.js       # 資源分配(distributeForRoll)
 │   ├── robber.js     # 略奪対象・ランダムスチール
 │   ├── trade.js      # tradeRate(港・商船隊・商人・商業Lv3)
@@ -351,6 +354,28 @@ main.js ── 通常の refresh・dispatch・演出がそのまま動く
 - 再生中は `demoRunning` で CPU スケジューラを止め、全面シールドで人の入力も遮る。
 - `test/demo.test.js` が台本をブラウザ抜きで空回しし、
   **全ビートの手が validate を通ること**と保存則を検証する。
+
+## 戦績と実績(`progress.js` / `achievements.js`)
+
+やりこみ要素。**端末のローカルに閉じる**(オフラインで遊べるアプリなので、
+サーバーには送らないし、送らなくても成立する形にしてある)。
+
+- `progress.js` は localStorage を触るのが `load/save/clear` だけで、
+  集計(`summarize`)と記録(`addResult`)は純粋関数。
+  テストが localStorage なしで全部書ける。
+- **実績の判定はルールエンジンに手を入れない**。判定材料は
+  「終局時の state」と「累計の戦績」だけに限る ── ゲーム中にカウンタを足すと
+  既存の挙動(回帰ハッシュ)が揺れるので、そこには触らない。
+  逆に言うと「1ターンに進歩カードを3枚使う」のような、state に残らない実績は作れない。
+- しきい値は**実測して決める**。CPU 同士を各モード30戦回して分布を取り、
+  到達不能な数字(例: 「25ターン以内に勝利」← 実際の中央値は70〜92)を避ける。
+  `scripts/` には置いていないので、必要になったらスクラッチパッドで測り直す。
+- 実績はフィールド名を1文字間違えても「静かに解除されないだけ」で気づけない。
+  `test/progress.test.js` が、条件を満たす state を組み立てて
+  **確かに解除されること**を1つずつ確かめている。
+- 記録は1対戦につき1回。終局は毎フレーム通るので、
+  `recordedState === state` で二重記録を防ぐ(新しい対戦なら別オブジェクトになる)。
+- オンライン対戦は数えていない(席の入れ替わりや観戦があるため)。
 
 ## テスト戦略
 

@@ -11,6 +11,8 @@ import { TOWER_COST } from '../rules/dragon.js';
 import { FISH_USES, fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
 import { SHIP_COST, SHIP_LIMIT, movableShips } from '../rules/sea.js';
 import { roadBuildingCount, roadBuildingSpots } from '../rules/road-building.js';
+import { ACHIEVEMENTS, MODE_JP, achievementById } from '../achievements.js';
+import { achievementCount, summarize, winRate } from '../progress.js';
 import { legalSetupEdges } from '../ai/legal-moves.js';
 import { diplomatMovable, weddingGiftSize } from '../rules/cak/progress-cards.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
@@ -1126,9 +1128,22 @@ function dialogHtml(state, ui) {
         <span>${i === 0 ? '🏆' : `${i + 1}位`}</span><span class="chip">${avatarSvg(pl.id)}</span>
         <span class="pname">${pl.name}</span><b>${pts}点</b></div>`)
       .join('');
+    // この対戦で新しく解除した実績があれば、順位表の下に出す。
+    // 一度に何個も解除されることがあるので、並べるのは3つまで
+    // (全部並べると「もう一度」ボタンが画面の外へ押し出される)。
+    const all = (ui.unlocked ?? []).map(achievementById).filter(Boolean);
+    const shown = all.slice(0, 3);
+    const rest = all.length - shown.length;
+    const got = shown
+      .map((a) => `<div class="ach new"><span class="aicon">${a.icon}</span>
+        <span><b>${a.name}</b><small>${a.desc}</small></span></div>`)
+      .join('') + (rest > 0 ? `<div class="ach new"><span class="aicon">🎖</span>
+        <span><b>ほか${rest}件</b><small>「📊 戦績」で確認できます</small></span></div>` : '');
     return `<h3 class="win-title">🏆 ${state.players[state.winner].name}の勝利!</h3>
       ${rows}
+      ${got ? `<p class="ach-head">🎉 実績を解除しました</p>${got}` : ''}
       <div class="row end">
+        <button data-act="goto-records">📊 戦績</button>
         <button data-act="new-game">もう一度</button>
         <button class="primary" data-act="goto-title">タイトルへ</button>
       </div>`;

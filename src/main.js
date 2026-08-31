@@ -9,6 +9,8 @@ import { totalCards } from './rules/build.js';
 import {
   pieceForEdge, roadBuildingCount, roadBuildingSpots,
 } from './rules/road-building.js';
+import { addResult, clearProgress, loadProgress, resultOf, saveProgress } from './progress.js';
+import { recordsHtml } from './render/records.js';
 import {
   legalCityVertices,
   legalRoadEdges,
@@ -46,6 +48,8 @@ const board3dWrap = document.getElementById('board3d');
 let state = null;
 let ui = null;
 let view = null;
+// 戦績と実績(端末のローカルに保存。読み込みは1回だけ)
+let progress = loadProgress();
 let cpuTimer = null;
 let viewMode = '3d'; // '2d' | '3d'
 let renderer3d = null;
@@ -482,6 +486,15 @@ function renderRulesPanel() {
     <div class="row end rules-close"><button class="primary" data-act="rules-back">${backLabel}</button></div>`;
 }
 
+// 戦績と実績の画面。保存されているのは端末のローカルだけ。
+let confirmingClear = false;
+
+function renderRecordsPanel() {
+  const panel = document.getElementById('records-panel');
+  if (!panel || screen !== 'records') return;
+  panel.innerHTML = recordsHtml(progress, { confirmingClear });
+}
+
 // モバイル判定: レイアウトを body.mobile で切り替える
 const mobileQuery = window.matchMedia('(max-width: 820px)');
 function updateMobileClass() {
@@ -516,6 +529,7 @@ function freshUi() {
     highlights: {},
     selected: null,
     expandedPlayer: null, // モバイルのプレイヤーチップ展開
+    unlocked: [], // 直前の対戦で新しく解除した実績(勝敗ダイアログで出す)
   };
 }
 
@@ -582,6 +596,7 @@ function syncUi() {
   if (state.phase === 'ended') {
     ui.mode = 'idle';
     ui.pending = null;
+    recordFinishedGame();
     if (ui.dialog?.type !== 'winner') ui.dialog = { type: 'winner' };
     return;
   }
@@ -625,6 +640,24 @@ function syncUi() {
     ui.pendingVertex = null;
     ui.setupPiece = 'road';
   }
+}
+
+// ---- 戦績と実績 ----
+
+// 終局は syncUi から毎フレーム通るので、1対戦につき1回だけ記録する。
+// 「どの対戦を記録したか」を state そのもので覚える(新しい対戦なら別物になる)。
+let recordedState = null;
+
+function recordFinishedGame() {
+  if (recordedState === state) return;
+  recordedState = state;
+  // オンライン対戦は席の入れ替わりや観戦があるので、まずは CPU 戦だけ数える
+  if (isOnline()) return;
+  const result = resultOf(state, HUMAN);
+  const { progress: next, unlocked } = addResult(progress, result, { state, me: HUMAN });
+  progress = next;
+  saveProgress(progress);
+  ui.unlocked = unlocked; // 勝敗ダイアログで「新しく解除した実績」を出す
 }
 
 function computeHighlights() {
@@ -858,6 +891,7 @@ function refresh() {
   renderSelectPanel();
   renderRulesPanel();
   renderOnlinePanel();
+  renderRecordsPanel();
   // タイトル画面の読み込み状態表示
   const note = document.getElementById('load-note');
   if (note) {
@@ -1526,6 +1560,26 @@ document.addEventListener('click', (e) => {
       if (screen !== 'rules') rulesFrom = screen;
       if (arg) rulesTab = arg;
       setScreen('rules');
+      return;
+    case 'goto-records':
+      ui.dialog = null; // 勝敗ダイアログから来ることがある
+      confirmingClear = false;
+      setScreen('records');
+      return;
+    // 消したら戻せないので、2段階にする(ダイアログは対戦画面でしか出せない)
+    case 'records-clear':
+      confirmingClear = true;
+      refresh();
+      return;
+    case 'records-clear-cancel':
+      confirmingClear = false;
+      refresh();
+      return;
+    case 'records-clear-do':
+      clearProgress();
+      progress = loadProgress();
+      confirmingClear = false;
+      refresh();
       return;
     case 'demo': startDemo(arg, screen === 'rules' ? 'rules' : 'title'); return;
     case 'reload-app': location.reload(); return;

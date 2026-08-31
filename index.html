@@ -291,6 +291,8 @@
     border-radius: 14px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.6);
     padding: 20px; min-width: 340px; max-width: 92vw;
+    /* 中身が増えても画面からはみ出さない(実績が一度に何個も解除されたとき) */
+    max-height: 86dvh; overflow-y: auto;
     display: flex; flex-direction: column; gap: 11px;
     animation: popIn 0.22s cubic-bezier(0.2, 1.4, 0.4, 1);
   }
@@ -554,6 +556,30 @@
   body[data-screen="select"] #screen-select { display: flex; }
   body[data-screen="rules"] #screen-rules { display: flex; }
   body[data-screen="online"] #screen-online { display: flex; }
+  body[data-screen="records"] #screen-records { display: flex; }
+
+  /* ---------- 戦績と実績 ---------- */
+  .rec-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .rec-table th, .rec-table td { padding: 5px 6px; text-align: right; }
+  .rec-table th { color: var(--dim); font-weight: 600; }
+  .rec-table th:first-child, .rec-table td:first-child { text-align: left; }
+  .rec-table tbody tr { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+  .rec-table .zero { color: var(--dim); }
+  .rec-total { font-weight: 700; }
+  .ach {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 9px; border-radius: 9px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .ach + .ach { margin-top: 5px; }
+  .ach .aicon { font-size: 20px; line-height: 1; width: 26px; text-align: center; }
+  .ach span > small { display: block; color: var(--dim); font-size: 11px; }
+  /* 未解除は伏せる。何を狙えばいいかは分かるよう、説明だけは見せる */
+  .ach.locked { opacity: 0.45; }
+  .ach.locked .aicon { filter: grayscale(1); }
+  .ach.new { border-color: var(--accent2); background: rgba(255, 210, 120, 0.12); }
+  .ach-head { color: var(--accent2); margin: 10px 0 6px; font-size: 13px; }
 
   /* ---------- 説明書 ---------- */
   .rules-panel {
@@ -992,6 +1018,7 @@
       <button class="big" data-act="goto-online">🌐 オンライン対戦</button>
       <button class="big" data-act="demo:setup">▶ あそびかた(動画)</button>
       <button class="big" data-act="goto-rules">📖 あそびかた(文章)</button>
+      <button class="big" data-act="goto-records">📊 戦績と実績</button>
       <button data-act="bgm-toggle">🔊 BGM オン</button>
       <div id="load-note"></div>
       <!-- 版の表示。デプロイ時に BUILD_ID がコミットの短縮SHAへ置換される。
@@ -1007,6 +1034,9 @@
   </div>
   <div id="screen-online" class="screen">
     <div class="select-panel" id="online-panel"></div>
+  </div>
+  <div id="screen-records" class="screen">
+    <div class="select-panel rules-panel" id="records-panel"></div>
   </div>
 
   <div id="netbadge"><span class="dot"></span><span class="txt"></span></div>
