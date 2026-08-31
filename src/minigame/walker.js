@@ -131,7 +131,9 @@ export class Walker {
     let wantX = 0;
     let wantZ = 0;
     if (mag > 0.06) {
-      const dir = Math.atan2(input.x, input.y) + camYaw;
+      // 画面右は -X 方向。カメラは +Z を向いて置いてあるので、
+      // 入力の x をそのまま使うと左右が逆になる(符号を反転させる)。
+      const dir = Math.atan2(-input.x, input.y) + camYaw;
       wantX = Math.sin(dir) * WALK_SPEED * mag;
       wantZ = Math.cos(dir) * WALK_SPEED * mag;
       this.facing = approachAngle(this.facing, dir, TURN_SPEED * step);
