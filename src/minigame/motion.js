@@ -15,7 +15,13 @@ const ACCEL = 9;                 // 加速(小さいほどぬるっと動く)
 const AIR_ACCEL = 3.5;           // 空中での効き(地上より鈍く。跳んだ勢いが残る)
 const MAX_STEP = 0.05;           // 1回の計算で進める上限(すり抜け防止)
 export const MAX_DT = 0.25;      // これを超えた分は捨てる(タブ復帰で飛ばない)
-const FALL_LIMIT = -1.6;         // ここまで沈んだら海に落ちた扱い
+
+// 海。タイル上面を 0 とした高さで持つ(board3d の SEA_Y 0.02 − TILE_TOP 0.26)
+export const WATER_Y = -0.24;
+const WATER_DRAG = 3.2;          // 水の抵抗。落ちてきた勢いがここで殺される
+const SINK_SPEED = -0.5;         // 沈んでいく速さ(終端速度)
+export const SINK_DEPTH = -1.9;  // ここまで沈んだら岸へ戻す
+const WATER_SWAY = 0.9;          // 水中でゆらゆら漂う速さ
 
 // ジャンプ。頂点 0.5 タイル(棒人間の背丈くらい)、滞空 0.8 秒になるよう決めた。
 //   h = g t² / 8,  v0 = g t / 2
@@ -40,6 +46,8 @@ export class WalkerMotion {
     this.y = 0;           // タイル上面からの高さ(0 = 立っている)
     this.vy = 0;
     this.spin = 0;        // 海へ落ちている間の回転
+    this.inWater = false; // 水面より下にいる
+    this.sinkT = 0;       // 着水してからの時間(演出の進み具合に使う)
     this.grounded = true;
     this.coyote = 0;      // 地面を離れてからの猶予の残り
     this.wantJump = false;
@@ -54,6 +62,8 @@ export class WalkerMotion {
     this.y = 0;
     this.vy = 0;
     this.spin = 0;
+    this.inWater = false;
+    this.sinkT = 0;
     this.grounded = true;
     this.coyote = 0;
     this.wantJump = false;
@@ -156,31 +166,56 @@ export class WalkerMotion {
     const g = this.groundAt(this.pos.x, this.pos.z);
     let landed = false;
 
+    // 足場が無い。歩いて踏み外した場合はここで落ち始める
+    if (!g.ok && this.grounded) {
+      this.grounded = false;
+      this.vy = 0;
+    }
+
+    const submerged = !g.ok && this.y <= WATER_Y;
     if (!this.grounded) {
-      this.vy -= GRAVITY * step;
+      if (submerged) {
+        // 水の中。抵抗で落ちてきた勢いが殺され、ゆっくり沈むだけになる
+        const k = Math.min(1, WATER_DRAG * step);
+        this.vy += (SINK_SPEED - this.vy) * k;
+        this.vel.x -= this.vel.x * k;
+        this.vel.z -= this.vel.z * k;
+      } else {
+        this.vy -= GRAVITY * step;
+      }
       this.y += this.vy * step;
     }
 
     if (!g.ok) {
-      // 足場が無い。歩いて踏み外した場合はここで落ち始める
-      if (this.grounded) {
-        this.grounded = false;
-        this.vy = 0;
+      const wasInWater = this.inWater;
+      this.inWater = this.y <= WATER_Y;
+      const splashed = this.inWater && !wasInWater;
+
+      if (this.inWater) {
+        this.sinkT += step;
+        this.spin += step * WATER_SWAY * 0.35; // 水中はゆっくり漂う
+      } else {
+        this.spin += step * 3;                 // 空中はぐるぐる回る
       }
-      this.spin += step * 3;
-      if (this.y < FALL_LIMIT) {
+
+      if (this.y < SINK_DEPTH) {
         const { x, z } = this.respawn;
         this.setPosition(x, z);
         return {
           falling: false, respawned: true, grounded: true, landed: true, jumped,
+          splashed, inWater: false, sinkT: 0, depth: 0,
           y: 0, groundY: this.groundAt(x, z).y, speed: 0,
         };
       }
       return {
         falling: true, respawned: false, grounded: false, landed: false, jumped,
+        splashed, inWater: this.inWater, sinkT: this.sinkT,
+        depth: Math.max(0, WATER_Y - this.y),
         y: this.y, groundY: g.y, speed: Math.hypot(this.vel.x, this.vel.z),
       };
     }
+    this.inWater = false;
+    this.sinkT = 0;
 
     // 足場の上。降りてきたら着地する
     this.spin = 0;
@@ -201,6 +236,7 @@ export class WalkerMotion {
 
     return {
       falling: false, respawned: false, grounded: this.grounded, landed, jumped,
+      splashed: false, inWater: false, sinkT: 0, depth: 0,
       y: this.y, groundY: g.y, speed: Math.hypot(this.vel.x, this.vel.z),
     };
   }
@@ -214,6 +250,7 @@ function mergeStep(a, b) {
     ...b,
     jumped: a.jumped || b.jumped,
     landed: a.landed || b.landed,
+    splashed: a.splashed || b.splashed,
     respawned: a.respawned || b.respawned,
   };
 }

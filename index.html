@@ -672,6 +672,15 @@
     background: rgba(255, 217, 125, 0.75);
     box-shadow: 0 2px 10px rgba(0,0,0,0.5);
   }
+  /* 沈みきる直前に water の色で覆う。岸へ戻る瞬間の切り替わりを隠す。
+     深くなるときは演出に合わせて上書きするので transition なし、
+     戻ったあとの明転だけゆっくり効かせる */
+  #walk-dive {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 40%, #0b3d5c 0%, #03172b 100%);
+    opacity: 0; transition: opacity 900ms ease-out;
+  }
+  #walk-dive.sinking { transition: none; }
   /* 右下のジャンプ。視点のなぞりと場所が重なるので、押した所は取り合わない */
   #walk-jump {
     position: absolute; pointer-events: auto;
@@ -1157,6 +1166,7 @@
       <span id="walk-where"></span>
       <button data-act="walk-exit">✕ もどる</button>
     </div>
+    <div id="walk-dive"></div>
     <div id="walk-stick"><i></i></div>
     <button id="walk-jump" type="button" aria-label="ジャンプ">⤒<span>ジャンプ</span></button>
     <div class="walk-hint">左半分をなぞって移動 / 右半分をなぞって視点 / ⤒ でジャンプ</div>
