@@ -1,8 +1,8 @@
 // 島を歩く棒人間(ミニゲーム)
 //
-// 物理エンジンは使わない。手足を「目標角度へばねで追従する関節」にして、
-// 行き過ぎ(overshoot)と減衰でぐらつかせている。本物のラグドールではないが、
-// 歩き出し・急停止・向き変えでちゃんと振り回されるので、それらしく見える。
+// 動きは素直な歩行アニメーションだけ。手足を交互に振り、わずかに上下する。
+// 一度「ばねで行き過ぎさせてぐらつかせる」実装にしたが、画面が揺れて
+// 見づらいだけだったのでやめた ── 揺らすなら、まず滑らかに歩けること。
 //
 // ここはゲームの state を一切知らない。地面の高さと歩ける範囲だけを
 // 外から関数で受け取る(walk-mode.js が盤面から作って渡す)。
@@ -91,28 +91,6 @@ export function makeWalker(color = CLOTH) {
   return { group: g, hips, chest, head, arms, legs };
 }
 
-// 角度を目標へ追従させるばね。行き過ぎるので、止まるとしばらく揺れる。
-class Spring {
-  constructor(stiffness = 120, damping = 12) {
-    this.v = 0;
-    this.x = 0;
-    this.k = stiffness;
-    this.d = damping;
-  }
-
-  step(target, dt) {
-    // 大きい dt で発散しないように刻む(タブ復帰直後など)
-    const steps = Math.min(4, Math.max(1, Math.ceil(dt / 0.02)));
-    const h = dt / steps;
-    for (let i = 0; i < steps; i++) {
-      const a = (target - this.x) * this.k - this.v * this.d;
-      this.v += a * h;
-      this.x += this.v * h;
-    }
-    return this.x;
-  }
-}
-
 export const WALK_SPEED = 1.9;   // タイル/秒
 const TURN_SPEED = 9;            // 向き変えの速さ
 const ACCEL = 9;                 // 加速(小さいほどぬるっと動く)
@@ -132,10 +110,6 @@ export class Walker {
     this.falling = false;
     this.respawn = new THREE.Vector3(0, 0, 0);
 
-    // ぐらつき用のばね(体幹の前後・左右の傾き)
-    this.leanZ = new Spring(90, 9);
-    this.leanX = new Spring(90, 9);
-    this.bobS = new Spring(200, 14);
   }
 
   setPosition(x, z) {
@@ -157,14 +131,15 @@ export class Walker {
     let wantX = 0;
     let wantZ = 0;
     if (mag > 0.06) {
-      const dir = Math.atan2(input.x, input.y) + camYaw;
+      // 画面右は -X 方向。カメラは +Z を向いて置いてあるので、
+      // 入力の x をそのまま使うと左右が逆になる(符号を反転させる)。
+      const dir = Math.atan2(-input.x, input.y) + camYaw;
       wantX = Math.sin(dir) * WALK_SPEED * mag;
       wantZ = Math.cos(dir) * WALK_SPEED * mag;
       this.facing = approachAngle(this.facing, dir, TURN_SPEED * step);
     }
 
-    // 速度を目標へ寄せる(急に止まらないので、止まり際に上体が前へ流れる)
-    const prevSpeed = Math.hypot(this.vel.x, this.vel.z);
+    // 速度を目標へ寄せる(ぬるっと動き出し、ぬるっと止まる)
     this.vel.x += (wantX - this.vel.x) * Math.min(1, ACCEL * step);
     this.vel.z += (wantZ - this.vel.z) * Math.min(1, ACCEL * step);
 
@@ -183,7 +158,7 @@ export class Walker {
 
     const speed = Math.hypot(this.vel.x, this.vel.z);
     this.phase += speed * step * 5.2;
-    this._pose(step, speed, (speed - prevSpeed) / Math.max(step, 1e-4), g.y);
+    this._pose(speed, g.y);
     return { falling: false };
   }
 
@@ -200,26 +175,21 @@ export class Walker {
     return { falling: true };
   }
 
-  // 手足と体幹の姿勢。歩行サイクル + ばねのぐらつき。
-  _pose(dt, speed, accel, groundY) {
+  // 歩行アニメーション。手足を交互に振るだけの素直なもの。
+  // 体は上下しない ── カメラが追うので、揺らすと画面全体が揺れて見づらい。
+  _pose(speed, groundY) {
     const p = this.parts;
     const t = this.phase;
     const gait = Math.min(1, speed / WALK_SPEED);
 
-    // 上下の弾み。着地のたびに少し沈む
-    const bob = this.bobS.step(Math.abs(Math.sin(t)) * 0.022 * gait, dt);
-    p.group.position.set(this.pos.x, groundY + bob, this.pos.z);
+    p.group.position.set(this.pos.x, groundY, this.pos.z);
     p.group.rotation.set(0, this.facing, 0);
 
-    // 体幹: 加速で前後に、旋回で左右に振られる
-    const lean = this.leanZ.step(Math.max(-0.5, Math.min(0.5, accel * 0.035)), dt);
-    const roll = this.leanX.step(Math.sin(t) * 0.09 * gait, dt);
-    p.hips.rotation.x = lean;
-    p.hips.rotation.z = roll;
-    p.chest.rotation.x = -lean * 0.5 + Math.sin(t * 2) * 0.03 * gait;
-    p.chest.rotation.y = Math.sin(t) * 0.18 * gait;
-    p.head.rotation.z = -roll * 1.4;
-    p.head.rotation.x = -lean * 0.8;
+    // 走るほど前傾する(それらしく見せるのはこれだけで足りる)
+    p.hips.rotation.x = gait * 0.12;
+    p.hips.rotation.z = 0;
+    p.chest.rotation.set(0, 0, 0);
+    p.head.rotation.set(0, 0, 0);
 
     // 脚: 交互に振る。膝は振り出しのときだけ曲げる
     p.legs.forEach((leg, i) => {
@@ -227,16 +197,15 @@ export class Walker {
       const swing = Math.sin(t) * s;
       leg.root.rotation.x = swing * 0.62 * gait;
       leg.knee.rotation.x = Math.max(0, -swing) * 0.9 * gait;
-      leg.root.rotation.z = 0;
     });
 
-    // 腕: 脚と逆位相。速く歩くほど大きく、止まるとぶらぶら残る
+    // 腕: 脚と逆位相
     p.arms.forEach((arm, i) => {
       const s = i === 0 ? -1 : 1;
       const swing = Math.sin(t) * s;
-      arm.root.rotation.x = swing * 0.75 * gait - lean * 0.6;
-      arm.root.rotation.z = (i === 0 ? -1 : 1) * (0.14 + roll * 0.6);
-      arm.knee.rotation.x = 0.25 + Math.max(0, swing) * 0.5 * gait;
+      arm.root.rotation.x = swing * 0.7 * gait;
+      arm.root.rotation.z = (i === 0 ? -1 : 1) * 0.14;
+      arm.knee.rotation.x = 0.25 + Math.max(0, swing) * 0.4 * gait;
     });
   }
 

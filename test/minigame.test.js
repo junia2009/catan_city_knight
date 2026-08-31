@@ -106,3 +106,50 @@ test('walk: 立っている地面の高さは一定(タイル上面)', () => {
   }
   assert.equal(ys.size, 1, `高さが揃っていない: ${[...ys].join(',')}`);
 });
+
+// 入力の向き。左右が反転していても盤面の判定は全部通るので、
+// テストが無いと気づけない(実際に一度反転させたまま出してしまった)。
+//
+// カメラは walker の後ろ(-Z 側)から +Z を向いて置く。つまり
+//   画面奥  = ( sin(camYaw),  cos(camYaw))
+//   画面右  = (-cos(camYaw),  sin(camYaw))
+// スティックを倒した向きへ、この基準で動くことを確かめる。
+test('walk: スティックの向きと移動の向きが一致する(左右が反転しない)', async () => {
+  const { Walker } = await import('../src/minigame/walker.js');
+  const s = game('base');
+  const ground = makeGround(s);
+  const start = spawnPoint(s);
+
+  // THREE を使わずに済むよう、Walker が必要とする最小限の scene を渡す
+  const scene = { add() {} };
+
+  const run = (input, camYaw) => {
+    const w = new Walker(scene, ground, 0);
+    w.setPosition(start.x, start.y);
+    for (let i = 0; i < 30; i++) w.update(1 / 60, input, camYaw);
+    const dx = w.pos.x - start.x;
+    const dz = w.pos.z - start.y;
+    const fwd = { x: Math.sin(camYaw), z: Math.cos(camYaw) };
+    const right = { x: -Math.cos(camYaw), z: Math.sin(camYaw) };
+    return {
+      screenX: dx * right.x + dz * right.z,
+      screenDepth: dx * fwd.x + dz * fwd.z,
+    };
+  };
+
+  // カメラの向きを変えても、スティックの向きと画面上の動きは一致する
+  for (const camYaw of [0, Math.PI / 2, Math.PI, -Math.PI / 3]) {
+    const label = `camYaw=${camYaw.toFixed(2)}`;
+    const right = run({ x: 1, y: 0 }, camYaw);
+    assert.ok(right.screenX > 0.05, `${label}: 右に倒したのに画面右へ行かない (${right.screenX.toFixed(3)})`);
+
+    const left = run({ x: -1, y: 0 }, camYaw);
+    assert.ok(left.screenX < -0.05, `${label}: 左に倒したのに画面左へ行かない (${left.screenX.toFixed(3)})`);
+
+    const fwd = run({ x: 0, y: 1 }, camYaw);
+    assert.ok(fwd.screenDepth > 0.05, `${label}: 前に倒したのに画面奥へ行かない (${fwd.screenDepth.toFixed(3)})`);
+
+    const back = run({ x: 0, y: -1 }, camYaw);
+    assert.ok(back.screenDepth < -0.05, `${label}: 後に倒したのに手前へ来ない (${back.screenDepth.toFixed(3)})`);
+  }
+});
