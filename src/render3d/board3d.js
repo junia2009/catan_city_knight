@@ -2164,6 +2164,7 @@ export class Board3D {
       });
     const sea = makeSea(centersXZ);
     this.seaUniforms = sea.uniforms;
+    this.seaMesh = sea.mesh; // 潜ったとき、水面を裏からも描くために持っておく
     this.staticGroup.add(sea.mesh);
     // ShaderMaterial は影を受けないため、透明な影受け面を重ねる
     this.seaShadowMat = new THREE.ShadowMaterial({ opacity: 0.24 });

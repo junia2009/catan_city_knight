@@ -124,9 +124,9 @@ export class Walker {
     const r = m.update(dt, input, camYaw);
 
     if (r.falling) {
-      // 海へ落ちている間はぐるぐる回りながら沈む
       this.parts.group.position.set(m.pos.x, r.groundY + m.y, m.pos.z);
-      this.parts.group.rotation.set(0, m.facing, m.spin);
+      if (r.inWater) this._poseSink(r.sinkT, m);
+      else this._poseTumble(m);
       return r;
     }
 
@@ -202,6 +202,57 @@ export class Walker {
       // 左右に開かないと、後ろから見たときに2本が重なって1本に見える
       arm.root.rotation.z = s * (0.38 + drop * 0.5);
       arm.knee.rotation.x = 0.2 + tuck * 0.3;
+    });
+  }
+
+  // 海へ落ちていく途中。回りながら手足をじたばたさせる。
+  _poseTumble(m) {
+    const p = this.parts;
+    const t = m.spin * 2.4;
+    p.group.rotation.set(Math.sin(m.spin * 1.7) * 0.45, m.facing, m.spin);
+    p.hips.rotation.set(-0.25, 0, 0);
+    p.chest.rotation.set(Math.sin(t * 1.3) * 0.2, 0, Math.sin(t) * 0.12);
+    p.head.rotation.set(0.2, 0, 0);
+
+    p.legs.forEach((leg, i) => {
+      const s = i === 0 ? 1 : -1;
+      leg.root.rotation.x = Math.sin(t + s * 1.6) * 0.85 - 0.2;
+      leg.root.rotation.z = s * 0.2;
+      leg.knee.rotation.x = 0.5 + Math.max(0, Math.sin(t * 1.2 + s)) * 0.7;
+    });
+    p.arms.forEach((arm, i) => {
+      const s = i === 0 ? -1 : 1;
+      arm.root.rotation.x = -2.2 + Math.sin(t * 1.5 + s * 2.1) * 1.1;
+      arm.root.rotation.z = s * (0.5 + Math.sin(t * 0.9) * 0.2);
+      arm.knee.rotation.x = 0.4 + Math.max(0, Math.sin(t * 1.4 + s * 2)) * 0.5;
+    });
+  }
+
+  // 水の中。もがくのをやめ、手足が水に押されて上へ流れる。
+  // ゆっくりした周期だけで動かす ── 速い動きを混ぜると水の重さが消える。
+  _poseSink(sinkT, m) {
+    const p = this.parts;
+    const t = sinkT;
+    p.group.rotation.set(
+      0.28 + Math.sin(t * 0.8) * 0.12,
+      m.facing + m.spin * 1.2,
+      Math.sin(t * 0.7) * 0.26,
+    );
+    p.hips.rotation.set(-0.12 + Math.sin(t * 1.1) * 0.06, 0, 0);
+    p.chest.rotation.set(0.12, 0, Math.sin(t * 0.9) * 0.1);
+    p.head.rotation.set(-0.18, 0, 0);
+
+    p.legs.forEach((leg, i) => {
+      const s = i === 0 ? 1 : -1;
+      leg.root.rotation.x = -0.35 + Math.sin(t * 0.9 + s) * 0.18;
+      leg.root.rotation.z = s * 0.22;
+      leg.knee.rotation.x = 0.45 + Math.sin(t * 0.8 + s) * 0.15;
+    });
+    p.arms.forEach((arm, i) => {
+      const s = i === 0 ? -1 : 1;
+      arm.root.rotation.x = -2.75 + Math.sin(t * 0.85 + s * 1.2) * 0.22;
+      arm.root.rotation.z = s * (0.55 + Math.sin(t * 0.7) * 0.12);
+      arm.knee.rotation.x = 0.3 + Math.sin(t * 0.75 + s) * 0.15;
     });
   }
 

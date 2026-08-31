@@ -9,7 +9,7 @@ import { createGame } from '../src/state.js';
 import { LAYOUT } from '../src/rules/board.js';
 import { isLandHex } from '../src/rules/sea.js';
 import { makeGround, spawnPoint } from '../src/minigame/ground.js';
-import { WalkerMotion, WALK_SPEED, JUMP_HEIGHT } from '../src/minigame/motion.js';
+import { WalkerMotion, WALK_SPEED, JUMP_HEIGHT, WATER_Y } from '../src/minigame/motion.js';
 import { makeBlocker, WALKER_RADIUS } from '../src/minigame/obstacles.js';
 
 const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
@@ -329,6 +329,86 @@ test('walk: 崖から跳んでも海の上では跳び直せない', () => {
   }
   assert.ok(sawFall, '端から落ちていない');
   assert.ok(respawned, '跳び直して落下から抜け出せてしまった(復帰しない)');
+});
+
+// ---- 海に落ちる ----
+
+// 端から歩いて落ち、戻ってくるまでを1回ぶん記録する
+function fallRun() {
+  const s = game('base');
+  const ground = makeGround(s);
+  const start = spawnPoint(s);
+  const w = new WalkerMotion(ground);
+  w.setPosition(start.x, start.y);
+
+  const dt = 1 / 60;
+  let t = 0;
+  const log = { fallAt: null, splashAt: null, backAt: null, splashes: 0, entryVy: 0 };
+  const sinkSpeeds = [];
+  for (let i = 0; i < 60 * 40; i++) {
+    const r = w.update(dt, { x: 0, y: 1 }, 0);
+    t += dt;
+    if (r.falling && log.fallAt == null) log.fallAt = t;
+    if (r.splashed) { log.splashes++; log.splashAt = t; log.entryVy = w.vy; }
+    if (r.inWater && r.sinkT > 0.8) sinkSpeeds.push(Math.abs(w.vy));
+    if (r.respawned && log.fallAt != null) { log.backAt = t; break; }
+  }
+  return { w, log, sinkSpeeds, start };
+}
+
+test('walk: 海に落ちると着水し、ゆっくり沈んでから岸へ戻る', () => {
+  const { w, log, start } = fallRun();
+
+  assert.ok(log.fallAt != null, '端から落ちない');
+  assert.ok(log.splashAt != null, '着水しない');
+  assert.equal(log.splashes, 1, `着水の合図が ${log.splashes} 回出ている(1回のはず)`);
+  assert.ok(log.backAt != null, '岸へ戻ってこない');
+
+  // 戻り先は陸の上で、状態が綺麗に戻っていること
+  assert.equal(w.grounded, true);
+  assert.equal(w.inWater, false);
+  assert.equal(w.y, 0);
+  assert.equal(w.sinkT, 0);
+  assert.ok(makeGround(game('base'))(w.pos.x, w.pos.z).ok, '戻り先が陸でない');
+  assert.ok(Math.hypot(w.pos.x - start.x, w.pos.z - start.y) < 8, '戻り先が遠すぎる');
+});
+
+test('walk: 沈むのは「じっくり」── 落ちるより着水後のほうがずっと長い', () => {
+  const { log } = fallRun();
+  const air = log.splashAt - log.fallAt;
+  const under = log.backAt - log.splashAt;
+  assert.ok(under > 2.0, `沈む時間が短すぎる(${under.toFixed(2)}秒)`);
+  assert.ok(under < 6.0, `沈む時間が長すぎる(${under.toFixed(2)}秒)`);
+  assert.ok(under > air * 3, `落下 ${air.toFixed(2)}秒 に対し水中 ${under.toFixed(2)}秒 では短い`);
+});
+
+test('walk: 着水で勢いが殺され、沈む速さは一定に落ち着く', () => {
+  const { log, sinkSpeeds } = fallRun();
+  assert.ok(log.entryVy < -1, `着水時に落ちる勢いがない(${log.entryVy.toFixed(2)})`);
+  assert.ok(sinkSpeeds.length > 30, '水中の記録が足りない');
+  const fastest = Math.max(...sinkSpeeds);
+  assert.ok(fastest < Math.abs(log.entryVy) * 0.6,
+    `水中でも速すぎる(最速 ${fastest.toFixed(2)} / 着水時 ${Math.abs(log.entryVy).toFixed(2)})`);
+  // 終端速度に落ち着く = ばらつきが小さい
+  const spread = fastest - Math.min(...sinkSpeeds);
+  assert.ok(spread < 0.25, `沈む速さが安定しない(幅 ${spread.toFixed(2)})`);
+});
+
+test('walk: 水面より上は空中、下は水中として扱われる', () => {
+  const s = game('base');
+  const ground = makeGround(s);
+  const start = spawnPoint(s);
+  const w = new WalkerMotion(ground);
+  w.setPosition(start.x, start.y);
+  for (let i = 0; i < 60 * 40; i++) {
+    const r = w.update(1 / 60, { x: 0, y: 1 }, 0);
+    if (!r.falling && !r.respawned) continue;
+    if (r.respawned) break;
+    // 落ちている間、水中かどうかは必ず水面の高さと一致する
+    assert.equal(r.inWater, w.y <= WATER_Y,
+      `y=${w.y.toFixed(2)} で inWater=${r.inWater}(水面は ${WATER_Y})`);
+    if (r.inWater) assert.ok(r.depth >= 0, '深さが負');
+  }
 });
 
 // 入力の向き。左右が反転していても盤面の判定は全部通るので、

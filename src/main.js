@@ -506,7 +506,9 @@ async function enterWalk() {
   r.update(state, freshUi());
   const mod = await import('./minigame/walk-mode.js');
   walk = new mod.WalkMode(r, state);
-  walk.onRespawn = () => { walkNote('🌊 海に落ちた!'); };
+  // 落ちた合図は着水の瞬間に出す(戻ってきたときではもう遅い)
+  walk.onSplash = () => { walkNote('🌊 海に落ちた!'); };
+  walk.onSink = setDiveVeil;
   document.getElementById('walk-hud')?.classList.remove('moved');
   setScreen('walk');
   applyViewMode();
@@ -516,7 +518,17 @@ async function enterWalk() {
 function exitWalk() {
   walk?.dispose();
   walk = null;
+  setDiveVeil(0);
   setScreen('title');
+}
+
+// 沈みきる手前で画面を水の色で覆い、岸へ戻ったらゆっくり明ける。
+// 沈んでいる間は演出に合わせて毎フレーム値を入れるので transition は切る。
+function setDiveVeil(v) {
+  const el = document.getElementById('walk-dive');
+  if (!el) return;
+  el.classList.toggle('sinking', v > 0);
+  el.style.opacity = String(v);
 }
 
 let walkNoteTimer = null;

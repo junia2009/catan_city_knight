@@ -8,13 +8,22 @@
 import * as THREE from 'three';
 import { makeGround, spawnPoint } from './ground.js';
 import { makeBlocker } from './obstacles.js';
-import { MAX_DT } from './motion.js';
+import { MAX_DT, SINK_DEPTH, WATER_Y } from './motion.js';
 import { Walker, WALK_SPEED } from './walker.js';
+import { WaterFx } from './water-fx.js';
 
 // フレームレートに依らない追従係数。
 // dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
 function smooth(rate, dt) {
   return 1 - Math.exp(-rate * dt);
+}
+
+// 暗転は沈みきる手前から。早くから暗くすると、せっかくの水中が見えない。
+const VEIL_FROM = 0.72; // 沈む深さのこの割合を過ぎたら暗くしはじめる
+function sinkVeil(depth) {
+  const total = WATER_Y - SINK_DEPTH;
+  const k = (depth / total - VEIL_FROM) / (1 - VEIL_FROM);
+  return Math.max(0, Math.min(1, k));
 }
 
 const TILE_TOP = 0.26;      // board3d.js と同じタイル上面の高さ
@@ -73,6 +82,9 @@ export class WalkMode {
     this.last = 0;
     this.onRespawn = null;
     this.onJump = null;
+    this.onSplash = null;
+    this.onSink = null;    // 沈み具合(0〜1)。画面を暗くするのに使う
+    this.fx = new WaterFx(board3d.scene);
 
     // カメラと操作を借りるので、元の状態を覚えておいて出るときに戻す
     this.saved = {
@@ -93,6 +105,8 @@ export class WalkMode {
       board3d.scene.fog.near = 8;
       board3d.scene.fog.far = 90;
     }
+    // 水中の霧はここから寄せる(歩いているときの値が基準)
+    this.savedFog = { near: 8, far: 90 };
 
     // カメラは進行方向の後ろから始める
     this.camYaw = this.walker.facing;
@@ -148,9 +162,20 @@ export class WalkMode {
 
     const kb = this._keyInput();
     const inp = (kb.x || kb.y) ? kb : this.input;
+    const w = this.walker.pos;
     const r = this.walker.update(dt, inp, this.camYaw);
-    if (r?.respawned) this.onRespawn?.();
     if (r?.jumped) this.onJump?.();
+    if (r?.splashed) {
+      this.fx.splash(w.x, w.z);
+      this.onSplash?.();
+    }
+    if (r?.respawned) this.onRespawn?.();
+
+    // 沈んでいる間だけ泡を出す。画面の暗転は「もうすぐ戻る」ぶんだけ。
+    const m = this.walker.motion;
+    const inWater = r?.inWater && !r.respawned;
+    this.fx.update(dt, inWater ? { x: w.x, y: this.ground(0, 0).y + m.y, z: w.z } : null);
+    this.onSink?.(r?.respawned ? 0 : sinkVeil(r?.depth ?? 0));
 
     // 動いている間は、カメラをゆっくり後ろへ回り込ませる
     const speed = Math.hypot(this.walker.vel.x, this.walker.vel.z);
@@ -160,6 +185,14 @@ export class WalkMode {
       this.camYaw += d * smooth(1.6, dt);
     }
     this._placeCamera(dt, false);
+
+    // 霧・背景・水面は _tickSky が毎フレーム書き直すので、その後(= ここ)で
+    // 上書きする。カメラが水面より下にある間だけ効く。
+    WaterFx.applyUnderwater(
+      this.b.scene, this.b.seaMesh,
+      WaterFx.submersion(this.b.camera.position.y),
+      r?.depth ?? 0, this.savedFog,
+    );
   }
 
   _placeCamera(dt, snap) {
@@ -173,15 +206,28 @@ export class WalkMode {
     // ジャンプには半分だけ付いていく。1:1 で追うと画面全体が跳ねて酔うし、
     // 全く追わないと跳んだ本人が画面から出ていく。
     // 立っているときは y = 0 なので、歩いている間の揺れはこれまでどおり無い。
-    const lift = this.walker.motion.y * 0.5;
+    //
+    // 逆に、海へ落ちるとき(y < 0)は丸ごと付いていく。カメラも一緒に潜って、
+    // 沈んでいくところを水の中から見せたいため。
+    const my = this.walker.motion.y;
+    // 水中はカメラをわざと沈み遅れさせる。同じ速さで下ろすと本人が画面に
+    // 貼りついたままで、沈んでいる感じが出ない(水面だけが遠ざかる)。
+    const lift = my > 0 ? my * 0.5
+      : (my > WATER_Y ? my : WATER_Y + (my - WATER_Y) * 0.72);
+
+    // 沈むにつれてカメラを本人の高さまで下ろす。見下ろしたままだと
+    // カメラが水面より下に来るのが最後の一瞬だけになり、水中が見えない。
+    const dive = Math.max(0, Math.min(1, -my / 0.6));
+    const eye = (0.42 + h) * (1 - dive) + 0.16 * dive;
+
     const want = new THREE.Vector3(
       w.x - Math.sin(this.camYaw) * flat,
-      groundY + lift + 0.42 + h,
+      groundY + lift + eye,
       w.z - Math.cos(this.camYaw) * flat,
     );
     if (snap) cam.position.copy(want);
     else cam.position.lerp(want, smooth(9, dt));
-    cam.lookAt(w.x, groundY + lift + 0.36, w.z);
+    cam.lookAt(w.x, groundY + lift + 0.36 * (1 - dive) + 0.1 * dive, w.z);
   }
 
   // いま立っているヘックスの地形(HUD に出す)
@@ -195,6 +241,8 @@ export class WalkMode {
   dispose() {
     this.b.onFrame = null;
     this.walker.dispose();
+    this.fx.dispose();
+    if (this.b.seaMesh) this.b.seaMesh.material.side = THREE.FrontSide;
     const cam = this.b.camera;
     cam.position.copy(this.saved.pos);
     cam.near = this.saved.near;
