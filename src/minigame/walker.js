@@ -11,7 +11,7 @@
 // このファイルは「その結果をメッシュに反映する」だけ。
 
 import * as THREE from 'three';
-import { WalkerMotion, WALK_SPEED } from './motion.js';
+import { WalkerMotion, WALK_SPEED, MAX_DT } from './motion.js';
 
 export { WALK_SPEED };
 
@@ -124,26 +124,31 @@ export class Walker {
     const r = m.update(dt, input, camYaw);
 
     if (r.falling) {
-      // 落下中はぐるぐる回りながら沈む
-      this.parts.group.position.set(m.pos.x, m.fallY, m.pos.z);
+      // 海へ落ちている間はぐるぐる回りながら沈む
+      this.parts.group.position.set(m.pos.x, r.groundY + m.y, m.pos.z);
       this.parts.group.rotation.set(0, m.facing, m.spin);
       return r;
     }
 
-    this.phase += r.speed * Math.min(dt, 0.05) * 5.2;
-    this._pose(r.speed, r.groundY);
+    this.phase += r.speed * Math.min(dt, MAX_DT) * 5.2;
+    this._pose(r.speed, r.groundY + m.y, r.grounded, m.vy);
     return r;
   }
 
   // 歩行アニメーション。手足を交互に振るだけの素直なもの。
   // 体は上下しない ── カメラが追うので、揺らすと画面全体が揺れて見づらい。
-  _pose(speed, groundY) {
+  _pose(speed, y, grounded = true, vy = 0) {
     const p = this.parts;
     const t = this.phase;
     const gait = Math.min(1, speed / WALK_SPEED);
 
-    p.group.position.set(this.pos.x, groundY, this.pos.z);
+    p.group.position.set(this.pos.x, y, this.pos.z);
     p.group.rotation.set(0, this.facing, 0);
+
+    if (!grounded) {
+      this._poseAir(vy);
+      return;
+    }
 
     // 走るほど前傾する(それらしく見せるのはこれだけで足りる)
     p.hips.rotation.x = gait * 0.12;
@@ -166,6 +171,37 @@ export class Walker {
       arm.root.rotation.x = swing * 0.7 * gait;
       arm.root.rotation.z = (i === 0 ? -1 : 1) * 0.14;
       arm.knee.rotation.x = 0.25 + Math.max(0, swing) * 0.4 * gait;
+    });
+  }
+
+  // 空中の姿勢。上りは膝を抱えて縮み、下りは脚を伸ばして着地に備える。
+  // vy の符号だけで上り下りが分かるので、それを -1〜1 に均して混ぜる。
+  _poseAir(vy) {
+    const p = this.parts;
+    const up = Math.max(-1, Math.min(1, vy / 2));  // +1 上昇 / -1 落下
+    const tuck = Math.max(0, up);
+    const drop = Math.max(0, -up);
+
+    p.hips.rotation.x = tuck * 0.3 - drop * 0.1;
+    p.hips.rotation.z = 0;
+    p.chest.rotation.set(0, 0, 0);
+    p.head.rotation.set(0, 0, 0);
+
+    p.legs.forEach((leg, i) => {
+      const s = i === 0 ? 1 : -1;
+      leg.root.rotation.x = -tuck * 0.85 + drop * 0.25 + s * 0.12;
+      leg.knee.rotation.x = tuck * 1.25 + drop * 0.1;
+    });
+
+    // 腕は上へ。手足は下向きに垂れているので、真上に挙げるには約 180°(π)いる
+    // ── ここを浅くすると「前へならえ」になってゾンビみたいに見える。
+    // 落ちている間は横へ開く(バランスを取っている風に)。
+    p.arms.forEach((arm, i) => {
+      const s = i === 0 ? -1 : 1;
+      arm.root.rotation.x = -2.95 + drop * 0.75;
+      // 左右に開かないと、後ろから見たときに2本が重なって1本に見える
+      arm.root.rotation.z = s * (0.38 + drop * 0.5);
+      arm.knee.rotation.x = 0.2 + tuck * 0.3;
     });
   }
 

@@ -11,9 +11,11 @@ export const WALKER_RADIUS = 0.10; // 棒人間の太さ(肩幅ぶん)
 const PASSES = 3;
 
 // 障害物の一覧から「めり込みを直す関数」を作る。
+// 一覧の各要素は { x, z, r, h }。h は「タイル上面からの高さ」(省略可)。
 //
-// resolve(fromX, fromZ, toX, toZ, selfR) → { x, z, hit }
+// resolve(fromX, fromZ, toX, toZ, selfR, feetY) → { x, z, hit }
 //   hit が false なら、行き先はどこにも触れていない(そのまま進んでよい)。
+//   feetY は足の高さ。それより低い物は跳び越えたことにして無視する。
 //
 // 位置を押し出すだけなので、1フレームの移動量が障害物の直径より
 // 大きいとすり抜ける。歩く速さは 1.9 タイル/秒・刻みは最大 0.05 秒なので
@@ -23,14 +25,18 @@ export function makeBlocker(list) {
   const obs = list.filter((o) => o.r > 0);
   if (obs.length === 0) return () => ({ hit: false });
 
-  return (fromX, fromZ, toX, toZ, selfR = WALKER_RADIUS) => {
+  return (fromX, fromZ, toX, toZ, selfR = WALKER_RADIUS, feetY = 0) => {
+    // 足より低い物は跳び越えている最中なので、当たらない
+    const here = feetY > 0 ? obs.filter((o) => (o.h ?? Infinity) > feetY) : obs;
+    if (here.length === 0) return { x: toX, z: toZ, hit: false };
+
     let x = toX;
     let z = toZ;
     let hit = false;
 
     for (let pass = 0; pass < PASSES; pass++) {
       let moved = false;
-      for (const o of obs) {
+      for (const o of here) {
         const need = o.r + selfR;
         let dx = x - o.x;
         let dz = z - o.z;
@@ -55,8 +61,8 @@ export function makeBlocker(list) {
 
     // 押し出しきれない場所がある ── 木が2本近すぎて、間に立てる余地が
     // どこにも無い場合など。そこへは入れず、来た場所に留める。
-    if (overlaps(obs, x, z, selfR)) {
-      if (!overlaps(obs, fromX, fromZ, selfR)) return { x: fromX, z: fromZ, hit: true };
+    if (overlaps(here, x, z, selfR)) {
+      if (!overlaps(here, fromX, fromZ, selfR)) return { x: fromX, z: fromZ, hit: true };
       // 元の場所も重なっている(湧いた位置が物の中など)。
       // 留まると永久に抜けられないので、押し出した先へ進める。
     }

@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { makeGround, spawnPoint } from './ground.js';
 import { makeBlocker } from './obstacles.js';
+import { MAX_DT } from './motion.js';
 import { Walker, WALK_SPEED } from './walker.js';
 
 // フレームレートに依らない追従係数。
@@ -38,9 +39,11 @@ function collectObstacles(b) {
     box.getSize(size);
     box.getCenter(center);
     const r = Math.max(size.x, size.z) / 2;
-    if (box.max.y - TILE_TOP < BLOCK_MIN_HEIGHT) return;
+    const h = box.max.y - TILE_TOP;
+    if (h < BLOCK_MIN_HEIGHT) return;
     if (r > BLOCK_MAX_RADIUS) return;
-    list.push({ x: center.x, z: center.z, r });
+    // h も持たせる。跳んで足が越えていれば、その物は当たらなくなる
+    list.push({ x: center.x, z: center.z, r, h });
   };
 
   for (const c of b.staticGroup.children) scan(c);   // 木・山・サボテン・港の看板
@@ -69,6 +72,7 @@ export class WalkMode {
     this.camDist = 2.1;
     this.last = 0;
     this.onRespawn = null;
+    this.onJump = null;
 
     // カメラと操作を借りるので、元の状態を覚えておいて出るときに戻す
     this.saved = {
@@ -105,9 +109,16 @@ export class WalkMode {
   }
 
   setKey(code, down) {
-    if (down) this.keys.add(code);
-    else this.keys.delete(code);
+    if (down) {
+      // 押しっぱなしで跳び続けないよう、押した瞬間だけ拾う
+      if ((code === 'Space' || code === 'KeyJ') && !this.keys.has(code)) this.jump();
+      this.keys.add(code);
+    } else {
+      this.keys.delete(code);
+    }
   }
+
+  jump() { this.walker.motion.jump(); }
 
   // カメラを回す(画面の右半分のドラッグ / マウスドラッグ)
   orbit(dx, dy) {
@@ -129,16 +140,17 @@ export class WalkMode {
   }
 
   _frame(t) {
-    // フレーム落ちしても飛ばないように上限を切る。
-    // 歩く側と同じ値を使う(片方だけ刻むと、低フレームで
-    // 「本人はゆっくり・カメラだけ瞬間移動」になってガタつく)。
-    const dt = this.last ? Math.min(0.05, (t - this.last) / 1000) : 0.016;
+    // フレーム落ちしても飛ばないように上限を切る。歩く側と同じ値を使う
+    // (片方だけ刻むと、低フレームで「本人はゆっくり・カメラだけ瞬間移動」
+    //  になってガタつく)。長い dt は motion 側が細かく刻んで消化する。
+    const dt = this.last ? Math.min(MAX_DT, (t - this.last) / 1000) : 0.016;
     this.last = t;
 
     const kb = this._keyInput();
     const inp = (kb.x || kb.y) ? kb : this.input;
     const r = this.walker.update(dt, inp, this.camYaw);
     if (r?.respawned) this.onRespawn?.();
+    if (r?.jumped) this.onJump?.();
 
     // 動いている間は、カメラをゆっくり後ろへ回り込ませる
     const speed = Math.hypot(this.walker.vel.x, this.walker.vel.z);
@@ -158,14 +170,18 @@ export class WalkMode {
     const h = Math.sin(this.camPitch) * this.camDist;
     const flat = Math.cos(this.camPitch) * this.camDist;
     const groundY = this.ground(w.x, w.z).y;
+    // ジャンプには半分だけ付いていく。1:1 で追うと画面全体が跳ねて酔うし、
+    // 全く追わないと跳んだ本人が画面から出ていく。
+    // 立っているときは y = 0 なので、歩いている間の揺れはこれまでどおり無い。
+    const lift = this.walker.motion.y * 0.5;
     const want = new THREE.Vector3(
       w.x - Math.sin(this.camYaw) * flat,
-      groundY + 0.42 + h,
+      groundY + lift + 0.42 + h,
       w.z - Math.cos(this.camYaw) * flat,
     );
     if (snap) cam.position.copy(want);
     else cam.position.lerp(want, smooth(9, dt));
-    cam.lookAt(w.x, groundY + 0.36, w.z);
+    cam.lookAt(w.x, groundY + lift + 0.36, w.z);
   }
 
   // いま立っているヘックスの地形(HUD に出す)
