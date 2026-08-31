@@ -488,6 +488,60 @@ function renderRulesPanel() {
     <div class="row end rules-close"><button class="primary" data-act="rules-back">${backLabel}</button></div>`;
 }
 
+// ---- ミニゲーム: 島を歩く ----
+
+let walk = null; // WalkMode | null
+
+// 盤がないと歩けないので、対戦中でなければ今の設定で島を1つ作る。
+async function enterWalk() {
+  const r = await ensureRenderer3d();
+  if (!r) {
+    ui.toast = '3D が使えないため歩けません';
+    refresh();
+    return;
+  }
+  if (!state) newGame(); // 島がなければ作る(手は進めない)
+  clearTimeout(cpuTimer); // 歩いている間に CPU が指し進めないように止める
+  r.setGame(state);
+  r.update(state, freshUi());
+  const mod = await import('./minigame/walk-mode.js');
+  walk = new mod.WalkMode(r, state);
+  walk.onRespawn = () => { walkNote('🌊 海に落ちた!'); };
+  document.getElementById('walk-hud')?.classList.remove('moved');
+  setScreen('walk');
+  applyViewMode();
+  updateWalkHud();
+}
+
+function exitWalk() {
+  walk?.dispose();
+  walk = null;
+  setScreen('title');
+}
+
+let walkNoteTimer = null;
+function walkNote(text) {
+  const el = document.getElementById('walk-where');
+  if (!el) return;
+  el.textContent = text;
+  clearTimeout(walkNoteTimer);
+  walkNoteTimer = setTimeout(updateWalkHud, 1600);
+}
+
+const TERRAIN_JP = {
+  forest: '🌲 森', pasture: '🐑 牧草地', field: '🌾 畑', hill: '🧱 丘',
+  mountain: '⛰ 山', desert: '🏜 砂漠', gold: '💰 金鉱', lake: '💧 湖', sea: '🌊 海',
+};
+
+function updateWalkHud() {
+  const el = document.getElementById('walk-where');
+  if (!el || !walk || !state) return;
+  const at = walk.standingOn(state);
+  el.textContent = at
+    ? `${TERRAIN_JP[at.terrain] ?? at.terrain}${at.token ? ` の ${at.token}` : ''}`
+    : '';
+}
+
 // 戦績と実績の画面。保存されているのは端末のローカルだけ。
 // 戦績画面の見た目の状態(state ではないので ui とは別に持つ)
 let recordsView = { tab: 'stats', selected: null, confirmingClear: false };
@@ -1544,6 +1598,87 @@ function cancelMode() {
   refresh();
 }
 
+// ---- 島を歩く: 操作 ----
+//
+// 左半分をなぞると移動スティック、右半分をなぞると視点。
+// 盤面のタップ判定とはぶつからない(歩行中は data-screen が 'walk' なので
+// 対戦用のハンドラは state を見て何もしない)。
+
+const walkTouch = { move: null, look: null };
+const stickEl = () => document.getElementById('walk-stick');
+
+function walkStickShow(x, y) {
+  const el = stickEl();
+  if (!el) return;
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  el.classList.add('on');
+  el.firstElementChild.style.transform = 'translate(0,0)';
+}
+
+function walkStickMove(dx, dy) {
+  document.getElementById('walk-hud')?.classList.add('moved');
+  const el = stickEl();
+  const max = 44;
+  const d = Math.hypot(dx, dy);
+  const k = d > max ? max / d : 1;
+  if (el) el.firstElementChild.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
+  // 画面の下方向が -y(前に進む)
+  walk?.setStick((dx * k) / max, (-dy * k) / max);
+}
+
+function walkStickHide() {
+  stickEl()?.classList.remove('on');
+  walk?.setStick(0, 0);
+}
+
+function walkPointerDown(e) {
+  if (!walk) return;
+  const left = e.clientX < window.innerWidth / 2;
+  if (left && walkTouch.move == null) {
+    walkTouch.move = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    walkStickShow(e.clientX, e.clientY);
+  } else if (!left && walkTouch.look == null) {
+    walkTouch.look = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  }
+}
+
+function walkPointerMove(e) {
+  if (!walk) return;
+  const m = walkTouch.move;
+  if (m && m.id === e.pointerId) {
+    walkStickMove(e.clientX - m.x, e.clientY - m.y);
+    return;
+  }
+  const l = walkTouch.look;
+  if (l && l.id === e.pointerId) {
+    walk.orbit(e.clientX - l.x, e.clientY - l.y);
+    l.x = e.clientX;
+    l.y = e.clientY;
+  }
+}
+
+function walkPointerUp(e) {
+  if (walkTouch.move?.id === e.pointerId) {
+    walkTouch.move = null;
+    walkStickHide();
+  }
+  if (walkTouch.look?.id === e.pointerId) walkTouch.look = null;
+}
+
+window.addEventListener('pointerdown', walkPointerDown);
+window.addEventListener('pointermove', walkPointerMove);
+window.addEventListener('pointerup', walkPointerUp);
+window.addEventListener('pointercancel', walkPointerUp);
+window.addEventListener('keydown', (e) => {
+  if (!walk) return;
+  if (e.code === 'Escape') { exitWalk(); return; }
+  walk.setKey(e.code, true);
+});
+window.addEventListener('keyup', (e) => walk?.setKey(e.code, false));
+// 立っている場所の表示は毎フレームだと重いので、間引いて更新する
+setInterval(() => { if (walk) updateWalkHud(); }, 400);
+
 // ---- HUD クリック(data-act 委譲) ----
 
 document.addEventListener('click', (e) => {
@@ -1569,6 +1704,12 @@ document.addEventListener('click', (e) => {
       if (screen !== 'rules') rulesFrom = screen;
       if (arg) rulesTab = arg;
       setScreen('rules');
+      return;
+    case 'goto-walk':
+      enterWalk();
+      return;
+    case 'walk-exit':
+      exitWalk();
       return;
     case 'goto-records':
       ui.dialog = null; // 勝敗ダイアログから来ることがある
@@ -2057,6 +2198,15 @@ window.hexDebug = {
   getUi: () => ui,
   screenPos: (kind, id) => (renderer3d ? renderer3d.screenPos(kind, id) : null),
   getRenderer: () => renderer3d,
+  // 島を歩く(E2E 用)
+  getWalk: () => (walk ? {
+    x: walk.walker.pos.x, z: walk.walker.pos.z,
+    speed: Math.hypot(walk.walker.vel.x, walk.walker.vel.z),
+    facing: walk.walker.facing, camYaw: walk.camYaw,
+    falling: walk.walker.falling,
+    at: state ? walk.standingOn(state) : null,
+  } : null),
+  walkStick: (x, y) => walk?.setStick(x, y),
   getBgm: () => bgm,
   getViewState: () => ({ viewMode, has3d: !!renderer3d, failed: renderer3dFailed, screen }),
   // オンライン対戦(E2E用)

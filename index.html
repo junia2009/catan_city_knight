@@ -638,6 +638,41 @@
   .ach.new { border-color: var(--accent2); background: rgba(255, 210, 120, 0.12); }
   .ach-head { color: var(--accent2); margin: 10px 0 6px; font-size: 13px; }
 
+  /* ---------- 島を歩く(ミニゲーム)---------- */
+  #walk-hud { position: fixed; inset: 0; z-index: 15; pointer-events: none; display: none; }
+  body[data-screen="walk"] #walk-hud { display: block; }
+  .walk-top {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
+    background: linear-gradient(180deg, rgba(8,22,38,0.75), transparent);
+  }
+  .walk-top button { pointer-events: auto; }
+  #walk-where { flex: 1; font-size: 13px; color: var(--accent2); font-weight: 700; }
+  .walk-hint {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    padding: 5px 12px; border-radius: 999px;
+    background: rgba(8, 22, 38, 0.72);
+    font-size: 11px; color: #cfdcea; white-space: nowrap;
+    transition: opacity 0.6s ease-out;
+  }
+  /* 一度でも動かしたら引っ込める(遊びの邪魔をしない) */
+  #walk-hud.moved .walk-hint { opacity: 0; }
+  /* 左下のスティック。触れた場所に出す */
+  #walk-stick {
+    position: absolute; width: 108px; height: 108px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.25); background: rgba(8,22,38,0.28);
+    transform: translate(-50%, -50%); display: none;
+  }
+  #walk-stick.on { display: block; }
+  #walk-stick i {
+    position: absolute; left: 50%; top: 50%; width: 46px; height: 46px;
+    margin: -23px 0 0 -23px; border-radius: 50%;
+    background: rgba(255, 217, 125, 0.75);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  }
+
   /* 対戦中のプレイヤー名に付く称号 */
   .ptitle { color: var(--accent2); font-size: 10.5px; opacity: 0.9; }
 
@@ -1079,6 +1114,7 @@
       <button class="big" data-act="demo:setup">▶ あそびかた(動画)</button>
       <button class="big" data-act="goto-rules">📖 あそびかた(文章)</button>
       <button class="big" data-act="goto-records">📊 戦績と実績</button>
+      <button class="big" data-act="goto-walk">🚶 島を歩く</button>
       <button data-act="bgm-toggle">🔊 BGM オン</button>
       <div id="load-note"></div>
       <!-- 版の表示。デプロイ時に BUILD_ID がコミットの短縮SHAへ置換される。
@@ -1099,6 +1135,14 @@
     <div class="select-panel rules-panel" id="records-panel"></div>
   </div>
 
+  <div id="walk-hud">
+    <div class="walk-top">
+      <span id="walk-where"></span>
+      <button data-act="walk-exit">✕ もどる</button>
+    </div>
+    <div id="walk-stick"><i></i></div>
+    <div class="walk-hint">左半分をなぞって移動 / 右半分をなぞって視点</div>
+  </div>
   <div id="netbadge"><span class="dot"></span><span class="txt"></span></div>
   <div id="dialog-root"></div>
   <!-- あそびかたデモ(自動再生)。中身の制御は src/demo/driver.js -->
