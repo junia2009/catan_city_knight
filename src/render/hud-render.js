@@ -11,8 +11,7 @@ import { TOWER_COST } from '../rules/dragon.js';
 import { FISH_USES, fishCount, hasOldShoe, shoeTargets } from '../rules/fish.js';
 import { SHIP_COST, SHIP_LIMIT, movableShips } from '../rules/sea.js';
 import { roadBuildingCount, roadBuildingSpots } from '../rules/road-building.js';
-import { ACHIEVEMENTS, MODE_JP, achievementById } from '../achievements.js';
-import { achievementCount, summarize, winRate } from '../progress.js';
+import { achievementById } from '../achievements.js';
 import { legalSetupEdges } from '../ai/legal-moves.js';
 import { diplomatMovable, weddingGiftSize } from '../rules/cak/progress-cards.js';
 import { BARBARIAN_TRACK_LENGTH, knightContribution, barbarianStrength } from '../rules/cak/barbarians.js';
@@ -28,6 +27,11 @@ import { avatarSvg } from './avatars.js';
 
 // 自分の席番号。ローカル戦は常に 0、オンライン対戦ではサーバーが割り当てた席になる。
 let HUMAN = 0;
+// 自分が名乗っている称号。progress は render の管轄外なので main.js から渡す
+let playerTitle = null;
+export function setPlayerTitle(t) {
+  playerTitle = t || null;
+}
 
 export function setHumanSeat(seat) {
   HUMAN = seat;
@@ -99,7 +103,10 @@ function renderPlayers(state, ui) {
         style="--pc:${PLAYER_COLORS[p.id]}" data-act="pexpand:${p.id}">
         <div class="prow">
           <span class="chip">${avatarSvg(p.id)}</span>
-          <span class="pname">${p.name}</span>
+          <span class="pname">${p.name}${
+            // 自分だけ、名乗っている称号を出す(実績を取る意味をここで返す)
+            p.id === HUMAN && playerTitle ? `<span class="ptitle">〈${playerTitle}〉</span>` : ''
+          }</span>
           <span class="ppts">${pts}<small>/${goal}</small></span>
         </div>
         <div class="prow pinfo">${info}${stock}${badges}</div>
@@ -1126,7 +1133,9 @@ function dialogHtml(state, ui) {
       .sort((a, b) => b.pts - a.pts)
       .map(({ pl, pts }, i) => `<div class="wrow" style="--pc:${PLAYER_COLORS[pl.id]}">
         <span>${i === 0 ? '🏆' : `${i + 1}位`}</span><span class="chip">${avatarSvg(pl.id)}</span>
-        <span class="pname">${pl.name}</span><b>${pts}点</b></div>`)
+        <span class="pname">${pl.name}${
+          pl.id === HUMAN && playerTitle ? `<span class="ptitle">〈${playerTitle}〉</span>` : ''
+        }</span><b>${pts}点</b></div>`)
       .join('');
     // この対戦で新しく解除した実績があれば、順位表の下に出す。
     // 一度に何個も解除されることがあるので、並べるのは3つまで
@@ -1138,12 +1147,13 @@ function dialogHtml(state, ui) {
       .map((a) => `<div class="ach new"><span class="aicon">${a.icon}</span>
         <span><b>${a.name}</b><small>${a.desc}</small></span></div>`)
       .join('') + (rest > 0 ? `<div class="ach new"><span class="aicon">🎖</span>
-        <span><b>ほか${rest}件</b><small>「📊 戦績」で確認できます</small></span></div>` : '');
+        <span><b>ほか${rest}件</b><small>「🎖 実績」で確認できます</small></span></div>` : '');
     return `<h3 class="win-title">🏆 ${state.players[state.winner].name}の勝利!</h3>
       ${rows}
       ${got ? `<p class="ach-head">🎉 実績を解除しました</p>${got}` : ''}
       <div class="row end">
-        <button data-act="goto-records">📊 戦績</button>
+        <button data-act="goto-records:${all.length ? 'ach' : 'stats'}">
+          ${all.length ? '🎖 実績' : '📊 戦績'}</button>
         <button data-act="new-game">もう一度</button>
         <button class="primary" data-act="goto-title">タイトルへ</button>
       </div>`;

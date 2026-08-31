@@ -9,7 +9,9 @@ import { totalCards } from './rules/build.js';
 import {
   pieceForEdge, roadBuildingCount, roadBuildingSpots,
 } from './rules/road-building.js';
-import { addResult, clearProgress, loadProgress, resultOf, saveProgress } from './progress.js';
+import {
+  addResult, clearProgress, currentTitle, loadProgress, resultOf, saveProgress, setTitle,
+} from './progress.js';
 import { recordsHtml } from './render/records.js';
 import {
   legalCityVertices,
@@ -30,7 +32,7 @@ import {
 } from './rules/cak/progress-cards.js';
 import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-render.js';
 import { avatarSvg } from './render/avatars.js';
-import { renderHUD, RES_ICON, COM_ICON, setHumanSeat } from './render/hud-render.js';
+import { renderHUD, RES_ICON, COM_ICON, setHumanSeat, setPlayerTitle } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
 import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
@@ -487,12 +489,13 @@ function renderRulesPanel() {
 }
 
 // 戦績と実績の画面。保存されているのは端末のローカルだけ。
-let confirmingClear = false;
+// 戦績画面の見た目の状態(state ではないので ui とは別に持つ)
+let recordsView = { tab: 'stats', selected: null, confirmingClear: false };
 
 function renderRecordsPanel() {
   const panel = document.getElementById('records-panel');
   if (!panel || screen !== 'records') return;
-  panel.innerHTML = recordsHtml(progress, { confirmingClear });
+  panel.innerHTML = recordsHtml(progress, recordsView);
 }
 
 // モバイル判定: レイアウトを body.mobile で切り替える
@@ -654,7 +657,7 @@ function recordFinishedGame() {
   // オンライン対戦は席の入れ替わりや観戦があるので、まずは CPU 戦だけ数える
   if (isOnline()) return;
   const result = resultOf(state, HUMAN);
-  const { progress: next, unlocked } = addResult(progress, result, { state, me: HUMAN });
+  const { progress: next, unlocked } = addResult(progress, result, { marks: result.marks });
   progress = next;
   saveProgress(progress);
   ui.unlocked = unlocked; // 勝敗ダイアログで「新しく解除した実績」を出す
@@ -881,6 +884,7 @@ function applyViewMode() {
 
 function refresh() {
   syncUi();
+  setPlayerTitle(currentTitle(progress));
   if (screen !== 'game') {
     // タイトル/選択画面中はダイアログ・入力モードを持ち込まない
     ui.dialog = null;
@@ -977,6 +981,7 @@ function showTurnFx(pid) {
   const fxEl = document.getElementById('fx');
   fxEl.querySelector('.turnfx')?.remove(); // 早送り気味に進んだときは前の合図を捨てる
   const mine = pid === HUMAN;
+  const myTitle = currentTitle(progress);
   const div = document.createElement('div');
   div.className = `turnfx ${mine ? 'me' : ''}`;
   div.style.setProperty('--pc', PLAYER_COLORS[pid]);
@@ -986,7 +991,11 @@ function showTurnFx(pid) {
       <span class="chip">${avatarSvg(pid)}</span>
       <span class="turnfx-text">
         <b>${mine ? 'あなたの番' : `${p.name}の番`}</b>
-        <small>${state.phase === 'setup' ? '初期配置' : `${state.turn + 1}ターン目`}</small>
+        <small>${
+          // 自分の手番では称号を出す。モバイルはプレイヤー行が畳まれていて
+          // 名前の横の称号が見えないので、毎手番ここで返す。
+          mine && myTitle ? `〈${myTitle}〉 ` : ''
+        }${state.phase === 'setup' ? '初期配置' : `${state.turn + 1}ターン目`}</small>
       </span>
     </span>`;
   fxEl.appendChild(div);
@@ -1563,22 +1572,44 @@ document.addEventListener('click', (e) => {
       return;
     case 'goto-records':
       ui.dialog = null; // 勝敗ダイアログから来ることがある
-      confirmingClear = false;
+      // 実績を解除した直後なら、その実績を開いた状態で見せる
+      recordsView = {
+        tab: arg === 'ach' || ui.unlocked?.length ? 'ach' : 'stats',
+        selected: ui.unlocked?.[0] ?? null,
+        confirmingClear: false,
+      };
       setScreen('records');
+      return;
+    case 'rec-tab':
+      recordsView = { ...recordsView, tab: arg, confirmingClear: false };
+      refresh();
+      return;
+    case 'ach-pick':
+      // もう一度押したら閉じる
+      recordsView = {
+        ...recordsView,
+        selected: recordsView.selected === arg ? null : arg,
+      };
+      refresh();
+      return;
+    case 'title-set':
+      progress = setTitle(progress, arg === 'none' ? null : arg);
+      saveProgress(progress);
+      refresh();
       return;
     // 消したら戻せないので、2段階にする(ダイアログは対戦画面でしか出せない)
     case 'records-clear':
-      confirmingClear = true;
+      recordsView = { ...recordsView, confirmingClear: true };
       refresh();
       return;
     case 'records-clear-cancel':
-      confirmingClear = false;
+      recordsView = { ...recordsView, confirmingClear: false };
       refresh();
       return;
     case 'records-clear-do':
       clearProgress();
       progress = loadProgress();
-      confirmingClear = false;
+      recordsView = { tab: 'stats', selected: null, confirmingClear: false };
       refresh();
       return;
     case 'demo': startDemo(arg, screen === 'rules' ? 'rules' : 'title'); return;

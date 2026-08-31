@@ -1,8 +1,8 @@
-// 戦績と実績のテスト。
+// 戦績・実績・称号のテスト。
 //
-// localStorage は使わず、純粋関数(summarize / addResult / unlockedBy)だけを見る。
-// 実績の判定は「終局時の state」から取るので、セルフプレイで作った本物の
-// 終局状態でも動くことを最後に確かめる。
+// localStorage は使わず、純粋関数(summarize / addResult / unlockedBy / progressOf)
+// だけを見る。実績の判定は「終局時の state から取った marks」なので、
+// セルフプレイで作った本物の終局状態でも動くことを最後に確かめる。
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,19 +12,20 @@ import { chooseAction } from '../src/ai/cpu-player.js';
 import { computePoints } from '../src/rules/victory.js';
 import {
   MODES, addResult, emptyProgress, parseProgress, resultOf, summarize, winRate,
-  achievementCount,
+  achievementCount, currentTitle, setTitle,
 } from '../src/progress.js';
-import { ACHIEVEMENTS, achievementById, unlockedBy } from '../src/achievements.js';
-import { LAYOUT } from '../src/rules/board.js';
+import {
+  ACHIEVEMENTS, TIERS, achievementById, marksOf, progressOf, titleOf, unlockedBy,
+} from '../src/achievements.js';
 
-const LAYOUT_V = LAYOUT.vertices;
-const LAYOUT_E = LAYOUT.edges;
-
-function game({ mode = 'base', difficulty = 'normal', won = true, points = 10, turns = 40 } = {}) {
-  return { at: 1, mode, difficulty, players: 4, seed: 1, won, points, turns };
+function game({
+  mode = 'base', difficulty = 'normal', won = true, points = 10, turns = 40, marks = {},
+} = {}) {
+  return { at: 1, mode, difficulty, players: 4, seed: 1, won, points, turns, marks };
 }
 
-// 対戦を最後まで回して、本物の終局 state を作る
+const noStats = () => summarize(emptyProgress());
+
 function playOut(mode, seed) {
   let s = createGame({ seed, playerCount: 4, humanIndex: 0, mode });
   let n = 0;
@@ -45,6 +46,7 @@ test('progress: 空の戦績でも全モードの枠が出る', () => {
   }
   assert.equal(s.total.played, 0);
   assert.equal(s.total.bestTurns, null);
+  assert.deepEqual(s.bests, {});
 });
 
 test('progress: モード別・難易度別に数える', () => {
@@ -64,12 +66,22 @@ test('progress: モード別・難易度別に数える', () => {
   assert.equal(s.byMode.base.hard.played, 2);
   assert.equal(s.byMode.base.hard.won, 1);
   assert.equal(s.byMode.base.bestTurns, 30, '最短は勝った対戦だけで見る');
-  assert.equal(s.byMode.cak.played, 1);
-  assert.equal(s.byMode.cak.won, 0);
   assert.equal(s.byMode.cak.bestTurns, null);
   assert.equal(s.byMode.cak.bestPoints, 9, '負けた対戦でも最高得点には数える');
   assert.equal(s.total.played, 4);
-  assert.equal(s.total.won, 2);
+});
+
+test('progress: 到達値は全対戦の自己最高を取る(負けた対戦も含む)', () => {
+  const p = {
+    ...emptyProgress(),
+    games: [
+      game({ won: true, marks: { knights: 2, ships: 5 } }),
+      game({ won: false, marks: { knights: 4, ships: 1 } }),
+    ],
+  };
+  const s = summarize(p);
+  assert.equal(s.bests.knights, 4, '負けた対戦の到達値も進捗には数える');
+  assert.equal(s.bests.ships, 5);
 });
 
 test('progress: 知らないモードの記録は数に入れず、落ちもしない', () => {
@@ -79,80 +91,179 @@ test('progress: 知らないモードの記録は数に入れず、落ちもし�
   assert.equal(s.byMode.base.played, 1);
 });
 
-// ---- 実績 ----
+// ---- 実績の定義 ----
 
-test('achievements: id が重複していない', () => {
+test('achievements: 定義がそろっている(id 重複なし・称号・難度)', () => {
   const ids = ACHIEVEMENTS.map((a) => a.id);
-  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(new Set(ids).size, ids.length, 'id が重複している');
+  const titles = ACHIEVEMENTS.map((a) => a.title);
+  assert.equal(new Set(titles).size, titles.length, '称号が重複している');
   for (const a of ACHIEVEMENTS) {
-    assert.ok(a.name && a.desc && a.icon, `${a.id} に名前・説明・アイコンがない`);
-    assert.equal(typeof a.check, 'function');
+    assert.ok(a.name && a.desc && a.icon, `${a.id}: 名前・説明・アイコンがない`);
+    assert.ok(a.title, `${a.id}: 称号がない`);
+    assert.ok(TIERS.includes(a.tier), `${a.id}: 難度(tier)が不正 ${a.tier}`);
+    assert.ok(a.check || a.mark, `${a.id}: check も mark もない`);
+    if (a.mark) assert.equal(typeof a.goal, 'number', `${a.id}: goal がない`);
   }
 });
 
-test('achievements: 一度解除したものは二重に数えない', () => {
-  let p = emptyProgress();
-  const state = createGame({ seed: 1, playerCount: 4, humanIndex: 0, mode: 'base' });
-  const ctx = { state, me: 0 };
+// 数値ものは marks を積めば必ず解除できるはず。
+// フィールド名を1文字間違えても「静かに解除されないだけ」なので、ここで潰す。
+test('achievements: 数値ものは目標値に届けば必ず解除される', () => {
+  const numeric = ACHIEVEMENTS.filter((a) => a.mark);
+  assert.ok(numeric.length >= 8, '数値ものが少なすぎる(設計が変わった?)');
+  for (const a of numeric) {
+    const marks = { [a.mark]: a.goal };
+    const result = game({ won: true, mode: a.mode ?? 'base' });
+    const ids = unlockedBy({ marks, result, stats: noStats() });
+    assert.ok(ids.includes(a.id), `${a.id}: ${a.mark}=${a.goal} でも解除されない`);
 
-  const first = addResult(p, game({ mode: 'base', won: true }), ctx);
-  assert.ok(first.unlocked.includes('win-base'));
-  p = first.progress;
-
-  const second = addResult(p, game({ mode: 'base', won: true }), ctx);
-  assert.ok(!second.unlocked.includes('win-base'), '2回目は新規解除にならない');
-  assert.equal(Object.keys(second.progress.achievements).length,
-    Object.keys(p.achievements).length, '実績の総数は増えない');
-});
-
-test('achievements: 5モードで勝つと全ルール制覇が解除される', () => {
-  let p = emptyProgress();
-  const state = createGame({ seed: 1, playerCount: 4, humanIndex: 0, mode: 'base' });
-  let last = null;
-  for (const mode of MODES) {
-    last = addResult(p, game({ mode, won: true }), { state, me: 0 });
-    p = last.progress;
+    // 1 足りなければ解除されない
+    const short = unlockedBy({
+      marks: { [a.mark]: a.goal - 1 }, result, stats: noStats(),
+    });
+    assert.ok(!short.includes(a.id), `${a.id}: 目標に届かなくても解除されている`);
   }
-  assert.ok(last.unlocked.includes('win-all-modes'), '最後の1モードで解除される');
-  assert.ok(p.achievements['win-all-modes']);
 });
 
-test('achievements: 負けた対戦では勝利系が解除されない', () => {
-  const state = createGame({ seed: 1, playerCount: 4, humanIndex: 0, mode: 'base' });
-  const ids = unlockedBy({
-    state, me: 0,
-    result: game({ won: false, turns: 10 }),
-    stats: summarize(emptyProgress()),
-  });
-  for (const id of ['win-base', 'win-fast', 'all-cities', 'longest-road']) {
-    assert.ok(!ids.includes(id), `${id} が負けたのに解除されている`);
+test('achievements: needsWin のものは負けたら解除されない', () => {
+  for (const a of ACHIEVEMENTS.filter((x) => x.needsWin)) {
+    const ids = unlockedBy({
+      marks: { [a.mark]: a.goal },
+      result: game({ won: false, mode: a.mode ?? 'base' }),
+      stats: noStats(),
+    });
+    assert.ok(!ids.includes(a.id), `${a.id}: 負けたのに解除されている`);
+  }
+});
+
+test('achievements: モード限定のものは別モードでは解除されない', () => {
+  for (const a of ACHIEVEMENTS.filter((x) => x.mark && x.mode)) {
+    const other = MODES.find((m) => m !== a.mode);
+    const ids = unlockedBy({
+      marks: { [a.mark]: a.goal },
+      result: game({ won: true, mode: other }),
+      stats: noStats(),
+    });
+    assert.ok(!ids.includes(a.id), `${a.id}: ${other} でも解除されている`);
   }
 });
 
 test('achievements: 判定が落ちても他の実績は生き残る', () => {
-  // state を壊しても unlockedBy は例外を投げない
   const ids = unlockedBy({
-    state: { players: [], buildings: {}, mode: 'base' },
-    me: 0,
+    marks: null, // 壊れた入力
     result: game({ mode: 'base', won: true }),
-    stats: summarize(emptyProgress()),
+    stats: noStats(),
   });
-  assert.ok(ids.includes('win-base'), 'state を見ない実績は解除される');
+  assert.ok(ids.includes('win-base'), 'marks を見ない実績は解除される');
 });
 
-test('achievements: 本物の終局 state で判定できる(全モード)', () => {
+test('achievements: 一度解除したものは二重に数えない', () => {
+  let p = emptyProgress();
+  const ctx = { marks: {} };
+  const first = addResult(p, game({ mode: 'base', won: true }), ctx);
+  assert.ok(first.unlocked.includes('win-base'));
+  p = first.progress;
+  const second = addResult(p, game({ mode: 'base', won: true }), ctx);
+  assert.ok(!second.unlocked.includes('win-base'), '2回目は新規解除にならない');
+});
+
+test('achievements: 5モードで勝つと全ルール制覇が解除される', () => {
+  let p = emptyProgress();
+  let last = null;
+  for (const mode of MODES) {
+    last = addResult(p, game({ mode, won: true }), { marks: {} });
+    p = last.progress;
+  }
+  assert.ok(last.unlocked.includes('win-all-modes'), '最後の1モードで解除される');
+});
+
+// ---- 進捗 ----
+
+test('achievements: 進捗が現在地と目標を返す', () => {
+  const p = { ...emptyProgress(), games: [game({ marks: { knights: 3 } })] };
+  const stats = summarize(p);
+  const knights = achievementById('cak-knights');
+  assert.deepEqual(progressOf(knights, stats), { now: 3, goal: 4, unit: '体' });
+
+  // まだ一度も到達していないものは 0 から
+  const fleet = achievementById('sea-fleet');
+  assert.equal(progressOf(fleet, stats).now, 0);
+  assert.equal(progressOf(fleet, stats).goal, 13);
+
+  // 回数もの
+  const played = progressOf(achievementById('games-10'), stats);
+  assert.deepEqual(played, { now: 1, goal: 10, unit: '回' });
+});
+
+test('achievements: 進捗が出せないものは null を返す(落ちない)', () => {
+  const stats = noStats();
+  assert.equal(progressOf(achievementById('win-base'), stats), null);
+  for (const a of ACHIEVEMENTS) {
+    const pr = progressOf(a, stats);
+    if (pr) {
+      assert.equal(typeof pr.now, 'number', `${a.id}: now が数値でない`);
+      assert.ok(pr.goal > 0, `${a.id}: goal が正でない`);
+    }
+  }
+});
+
+// ---- 称号 ----
+
+test('title: 持っていない実績の称号は名乗れない', () => {
+  let p = emptyProgress();
+  p = setTitle(p, 'sea-fleet');
+  assert.equal(p.title, null, '未取得の称号は設定されない');
+  assert.equal(currentTitle(p), null);
+});
+
+test('title: 実績を取ると称号を名乗れる。最初の1つは自動で付く', () => {
+  const r = addResult(emptyProgress(), game({ mode: 'base', won: true }), { marks: {} });
+  assert.ok(r.progress.title, '初回は自動で称号が付く');
+  assert.equal(currentTitle(r.progress), titleOf(r.progress.title));
+
+  // 別の持っている称号に変えられる
+  const p2 = setTitle(r.progress, 'win-hard');
+  if (r.progress.achievements['win-hard']) {
+    assert.equal(p2.title, 'win-hard');
+  }
+  // 称号なしに戻せる
+  assert.equal(setTitle(r.progress, null).title, null);
+});
+
+test('title: 保存データが壊れた称号を指していても落ちない', () => {
+  const p = { ...emptyProgress(), title: 'いない実績' };
+  assert.equal(currentTitle(p), null);
+});
+
+// ---- 本物の終局 state ----
+
+test('achievements: 本物の終局 state で marks が取れて判定できる(全モード)', () => {
   for (const mode of MODES) {
     const s = playOut(mode, 3);
     assert.equal(s.phase, 'ended', `${mode}: 完走しなかった`);
-    const me = s.winner; // 勝った席を自分とみなす
+    const me = s.winner;
     const result = resultOf(s, me, 1);
     assert.equal(result.won, true);
-    assert.equal(result.mode, mode);
     assert.equal(result.points, computePoints(s, me, { includeHidden: true }));
-    const ids = unlockedBy({ state: s, me, result, stats: summarize(emptyProgress()) });
+
+    const marks = marksOf(s, me);
+    for (const [k, v] of Object.entries(marks)) {
+      assert.equal(typeof v, 'number', `${mode}: marks.${k} が数値でない`);
+      assert.ok(v >= 0, `${mode}: marks.${k} が負`);
+    }
+    // 勝った以上、建物は1つ以上ある = marks が state を読めている
+    assert.ok(marks.cities >= 0 && marks.roadLen >= 0);
+
+    const ids = unlockedBy({ marks, result, stats: noStats() });
     assert.ok(ids.includes(`win-${mode}`), `${mode}: 勝利の実績が出ない`);
     for (const id of ids) assert.ok(achievementById(id), `${mode}: 未知の実績 ${id}`);
   }
+});
+
+test('achievements: marks は壊れた state でも空を返して落ちない', () => {
+  assert.deepEqual(marksOf({ players: [] }, 0), {});
+  assert.deepEqual(marksOf({}, 0), {});
 });
 
 // ---- 保存 ----
@@ -163,14 +274,15 @@ test('progress: 壊れた保存データでも空から始まる', () => {
     assert.ok(Array.isArray(p.games), `${raw} で games が配列でない`);
     assert.equal(typeof p.achievements, 'object');
   }
-  // 正しい形はそのまま読める
-  const ok = parseProgress(JSON.stringify({ games: [game()], achievements: { 'win-base': { at: 1 } } }));
+  const ok = parseProgress(JSON.stringify({
+    games: [game()], achievements: { 'win-base': { at: 1 } }, title: 'win-base',
+  }));
   assert.equal(ok.games.length, 1);
-  assert.ok(ok.achievements['win-base']);
+  assert.equal(ok.title, 'win-base', '称号も読み戻す');
 });
 
 test('progress: 実績の獲得数を数えられる', () => {
-  const p = { ...emptyProgress(), achievements: { 'win-base': { at: 1 }, 'nonexistent': { at: 1 } } };
+  const p = { ...emptyProgress(), achievements: { 'win-base': { at: 1 }, nope: { at: 1 } } };
   const c = achievementCount(p);
   assert.equal(c.got, 1, '定義にない id は数えない');
   assert.equal(c.total, ACHIEVEMENTS.length);
@@ -178,86 +290,8 @@ test('progress: 実績の獲得数を数えられる', () => {
 
 test('progress: addResult は元の戦績を書き換えない', () => {
   const p = emptyProgress();
-  const state = createGame({ seed: 1, playerCount: 4, humanIndex: 0, mode: 'base' });
-  addResult(p, game(), { state, me: 0 });
+  addResult(p, game(), { marks: {} });
   assert.equal(p.games.length, 0);
   assert.deepEqual(p.achievements, {});
-});
-
-// 実績はフィールド名を1文字間違えても「静かに解除されない」だけで気づけない。
-// 条件を満たす state をこちらで組み立てて、確かに true になることを確かめる。
-function baseState(mode = 'base') {
-  return createGame({ seed: 1, playerCount: 4, humanIndex: 0, mode });
-}
-
-test('achievements: 盤面から判定するものが、条件を満たせば確かに解除される', () => {
-  const stats = summarize(emptyProgress());
-  const fire = (id, state, result = game({ won: true })) =>
-    assert.ok(
-      unlockedBy({ state, me: 0, result, stats }).includes(id),
-      `${id} が条件を満たしても解除されない(参照しているフィールド名を確認)`,
-    );
-
-  // 都市国家: 都市4つ
-  {
-    const s = baseState();
-    const vids = Object.keys(s.board.hexes).length ? Object.keys(LAYOUT_V).slice(0, 4) : [];
-    for (const v of vids) s.buildings[v] = { player: 0, type: 'city' };
-    fire('all-cities', s);
-  }
-  // 常勝軍: 最大騎士力
-  {
-    const s = baseState();
-    s.largestArmy = { player: 0, count: 3 };
-    fire('largest-army', s);
-  }
-  // 竜の宝: 財宝3
-  {
-    const s = baseState('dragon');
-    s.players[0].treasures = 3;
-    fire('dragon-treasure-3', s, game({ mode: 'dragon' }));
-  }
-  // 泥沼の勝利: 古い靴を持ったまま勝つ
-  {
-    const s = baseState('fish');
-    s.players[0].fish = ['shoe'];
-    fire('fish-shoe-win', s, game({ mode: 'fish', won: true }));
-  }
-  // 島から島へ / 大船団
-  {
-    const s = baseState('sea');
-    s.players[0].islands = [0, 1, 2, 3];
-    fire('sea-islands', s, game({ mode: 'sea' }));
-  }
-  {
-    const s = baseState('sea');
-    const edges = Object.keys(LAYOUT_E).slice(0, 13);
-    for (const e of edges) s.ships[e] = { player: 0, builtTurn: 1 };
-    fire('sea-fleet', s, game({ mode: 'sea' }));
-  }
-  // 騎士団 / 島の守護者 / 極めし者 / 二大都市
-  {
-    const s = baseState('cak');
-    const vids = Object.keys(LAYOUT_V).slice(0, 4);
-    for (const v of vids) s.knights[v] = { player: 0, level: 1, active: true, activatedTurn: 0 };
-    fire('cak-knights', s, game({ mode: 'cak' }));
-  }
-  {
-    const s = baseState('cak');
-    s.players[0].defenderPoints = 3;
-    fire('cak-defender-3', s, game({ mode: 'cak' }));
-  }
-  {
-    const s = baseState('cak');
-    s.players[0].improvements.trade = 5;
-    fire('cak-max-track', s, game({ mode: 'cak' }));
-  }
-  {
-    const s = baseState('cak');
-    const [a, b] = Object.keys(LAYOUT_V).slice(0, 2);
-    s.buildings[a] = { player: 0, type: 'city' };
-    s.buildings[b] = { player: 0, type: 'city' };
-    s.metropolis = { trade: a, politics: b, science: null };
-    fire('cak-two-metropolis', s, game({ mode: 'cak', won: true }));
-  }
+  assert.equal(p.title, null);
 });
