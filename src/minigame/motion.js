@@ -7,6 +7,8 @@
 //
 // 見た目(メッシュ・歩行アニメーション)は walker.js が持つ。
 
+import { slideVelocity } from './obstacles.js';
+
 export const WALK_SPEED = 1.9;   // タイル/秒
 const TURN_SPEED = 9;            // 向き変えの速さ
 const ACCEL = 9;                 // 加速(小さいほどぬるっと動く)
@@ -15,8 +17,10 @@ const FALL_LIMIT = -1.6;         // ここまで沈んだら海に落ちた扱�
 
 export class WalkerMotion {
   // groundAt(x, z) → { y, ok }。ok が false なら「そこは地面でない」
-  constructor(groundAt) {
+  // blockAt: obstacles.js の makeBlocker() の戻り値(省略可)
+  constructor(groundAt, blockAt = null) {
     this.groundAt = groundAt;
+    this.blockAt = blockAt;
     this.pos = { x: 0, y: 0, z: 0 };
     this.vel = { x: 0, y: 0, z: 0 };
     this.facing = 0;      // ラジアン。+Z を 0 とする
@@ -63,8 +67,34 @@ export class WalkerMotion {
 
     // 端で止めない。踏み外したら海に落ちる ── そのほうが遊びとして楽しく、
     // すぐ元の場所に戻るので詰まらない。
-    this.pos.x += this.vel.x * step;
-    this.pos.z += this.vel.z * step;
+    let nx = this.pos.x + this.vel.x * step;
+    let nz = this.pos.z + this.vel.z * step;
+
+    // 盤の上の物にめり込ませない。触れていなければ何もしないので、
+    // 「端から落ちる」はこれまでどおり動く。
+    if (this.blockAt) {
+      const r = this.blockAt(this.pos.x, this.pos.z, nx, nz);
+      if (r.hit) {
+        // 押し出された先が海なら、そこへは出さずにその場で止める
+        // (物に挟まれて海へ押し出されるのは事故でしかない)
+        if (this.groundAt(r.x, r.z).ok) {
+          const dx = r.x - nx;
+          const dz = r.z - nz;
+          const d = Math.hypot(dx, dz);
+          if (d > 1e-6) slideVelocity(this.vel, dx / d, dz / d);
+          nx = r.x;
+          nz = r.z;
+        } else {
+          nx = this.pos.x;
+          nz = this.pos.z;
+          this.vel.x = 0;
+          this.vel.z = 0;
+        }
+      }
+    }
+
+    this.pos.x = nx;
+    this.pos.z = nz;
 
     const g = this.groundAt(this.pos.x, this.pos.z);
     if (!g.ok) {

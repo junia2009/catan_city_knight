@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import { makeGround, spawnPoint } from './ground.js';
+import { makeBlocker } from './obstacles.js';
 import { Walker, WALK_SPEED } from './walker.js';
 
 // フレームレートに依らない追従係数。
@@ -15,11 +16,48 @@ function smooth(rate, dt) {
   return 1 - Math.exp(-rate * dt);
 }
 
+const TILE_TOP = 0.26;      // board3d.js と同じタイル上面の高さ
+const BLOCK_MIN_HEIGHT = 0.15; // これより低い物はまたげる(草・花・畝・砂丘)
+const BLOCK_MAX_RADIUS = 0.5;  // これより大きい物は地形そのもの(タイル・海・桟橋)
+
+// シーンに置かれている物から、ぶつかる物の一覧を作る。
+//
+// 何が障害物かを名前で列挙すると、飾りを足すたびに漏れる。
+// 「タイルより十分高くて、タイルより小さい物」= 立体物、という
+// 見たままの規則で拾う(実測して決めた値は上の定数)。
+function collectObstacles(b) {
+  const list = [];
+  const box = new THREE.Box3();
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+
+  const scan = (obj) => {
+    if (!obj || obj.visible === false) return;
+    box.setFromObject(obj);
+    if (!Number.isFinite(box.min.x)) return;
+    box.getSize(size);
+    box.getCenter(center);
+    const r = Math.max(size.x, size.z) / 2;
+    if (box.max.y - TILE_TOP < BLOCK_MIN_HEIGHT) return;
+    if (r > BLOCK_MAX_RADIUS) return;
+    list.push({ x: center.x, z: center.z, r });
+  };
+
+  for (const c of b.staticGroup.children) scan(c);   // 木・山・サボテン・港の看板
+  for (const c of b.dynamicGroup.children) scan(c);  // 建物・都市・騎士・船
+  scan(b.robber);                                    // 盗賊(またはドラゴン)
+  scan(b.merchantMesh);
+  return list;
+}
+
 export class WalkMode {
   constructor(board3d, state) {
     this.b = board3d;
     this.ground = makeGround(state);
-    this.walker = new Walker(board3d.scene, this.ground, 0x2f6fd0);
+    this.obstacles = collectObstacles(board3d);
+    this.walker = new Walker(
+      board3d.scene, this.ground, 0x2f6fd0, makeBlocker(this.obstacles),
+    );
 
     const s = spawnPoint(state);
     this.walker.setPosition(s.x, s.y);
