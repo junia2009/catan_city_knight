@@ -11,6 +11,7 @@ import { isLandHex } from '../src/rules/sea.js';
 import { makeGround, spawnPoint } from '../src/minigame/ground.js';
 import { WalkerMotion, WALK_SPEED, JUMP_HEIGHT, WATER_Y } from '../src/minigame/motion.js';
 import { makeBlocker, WALKER_RADIUS } from '../src/minigame/obstacles.js';
+import { walkPose, airPose, tumblePose, sinkPose, poseKeys } from '../src/minigame/pose.js';
 
 const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 
@@ -329,6 +330,39 @@ test('walk: 崖から跳んでも海の上では跳び直せない', () => {
   }
   assert.ok(sawFall, '端から落ちていない');
   assert.ok(respawned, '跳び直して落下から抜け出せてしまった(復帰しない)');
+});
+
+// ---- 姿勢 ----
+
+// 姿勢ごとに書く項目が違うと、前の姿勢の値が残って戻らなくなる。
+// 実際、海から上がっても足が開いたまま(交差したまま)になっていた:
+// 落下・水中の姿勢は足の開き rootZ を書くのに、歩く姿勢が書き戻していなかった。
+test('walk: どの姿勢も同じ項目を全部返す(前の姿勢が残らない)', () => {
+  const poses = {
+    歩き: walkPose(1.2, 0.8, 0.3),
+    空中: airPose(1.5, 0.3),
+    落下: tumblePose(2.1, 0.3),
+    水中: sinkPose(1.4, 0.3, 0.5),
+  };
+  const base = poseKeys(poses['歩き']);
+  assert.ok(base.length > 20, `項目が少なすぎる(${base.length})`);
+  for (const [name, pose] of Object.entries(poses)) {
+    assert.deepEqual(poseKeys(pose), base, `${name} の姿勢だけ項目が違う`);
+    // 中身が数値であること(undefined が入ると NaN になって手足が消える)
+    for (const k of base) {
+      const v = k.split(/[.[\]]+/).filter(Boolean)
+        .reduce((o, part) => o[part], pose);
+      assert.ok(Number.isFinite(v), `${name} の ${k} が数値でない(${v})`);
+    }
+  }
+});
+
+test('walk: 歩いている間は足を開かない', () => {
+  for (const phase of [0, 0.7, 1.9, 3.4]) {
+    for (const leg of walkPose(phase, 1, 0).legs) {
+      assert.equal(leg.rootZ, 0, `歩きで足が開いている(${leg.rootZ})`);
+    }
+  }
 });
 
 // ---- 海に落ちる ----
