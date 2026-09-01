@@ -22,7 +22,7 @@ const EYE = 0x22242a;
 export const CUTE = {
   // 脚の長さを変えるときは hipY も同じだけ動かすこと。
   // 足首は hipY − thigh − shin なので、脚だけ縮めると靴が宙に浮く。
-  hipY: 0.191,         // 腰の高さ(脚の付け根)
+  hipY: 0.140,         // 腰の高さ(脚の付け根)
   bodyR: 0.072,        // 胴の太さ
   bodyLen: 0.04,       // 胴の直線部(短くして豆のような形に)
   bodyY: 0.062,        // 胴の中心(腰から)
@@ -37,7 +37,7 @@ export const CUTE = {
   shoulder: { x: 0.093, y: 0.015 },
   armR: 0.031, upperArm: 0.065, foreArm: 0.055, handR: 0.037,
   hipX: 0.050,         // 脚の間隔。近すぎると2本が1本に見える
-  legR: 0.036, thigh: 0.076, shin: 0.070,
+  legR: 0.036, thigh: 0.049, shin: 0.046,
   shoe: { r: 0.038, len: 0.042, lift: -0.004, ahead: 0.022 },
 };
 
