@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 import { WalkerMotion, WALK_SPEED, MAX_DT } from './motion.js';
-import { walkPose, airPose, tumblePose, sinkPose } from './pose.js';
+import { walkPose, airPose, tumblePose, sinkPose, fishPose } from './pose.js';
 import { makeWalker, walkerHeight, CUTE } from './body.js';
 
 export { WALK_SPEED };
@@ -43,6 +43,24 @@ export class Walker {
   setPosition(x, z) {
     this.motion.setPosition(x, z);
     this.phase = 0;
+  }
+
+  // 竿を出す/しまう。出している間は歩かせない(walk-mode.js が入力を止める)
+  setRod(on) {
+    this.parts.rod.group.visible = !!on;
+  }
+
+  // 釣りの姿勢だけを当てる。歩きの update とは排他(釣り中は動かない)。
+  // t は経過秒、k は fishing.js の view() から作った { phase, tension, ... }。
+  fish(t, k) {
+    this.phase = 0;
+    const g = this.motion.groundAt(this.pos.x, this.pos.z);
+    this._apply(fishPose(t, this.motion.facing, k), g.y);
+  }
+
+  // 竿先の世界座標(糸をここから垂らす)
+  rodTip(out) {
+    return this.parts.rod.tip.getWorldPosition(out);
   }
 
   // input: { x, y } — 画面基準の入力(-1〜1)。camYaw はカメラの向き(ラジアン)

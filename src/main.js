@@ -10,7 +10,8 @@ import {
   pieceForEdge, roadBuildingCount, roadBuildingSpots,
 } from './rules/road-building.js';
 import {
-  addResult, clearProgress, currentTitle, loadProgress, resultOf, saveProgress, setTitle,
+  addCatch, addResult, clearProgress, currentTitle, loadProgress, resultOf,
+  saveProgress, setTitle,
 } from './progress.js';
 import { recordsHtml } from './render/records.js';
 import {
@@ -515,6 +516,10 @@ async function enterWalk() {
   // 落ちた合図は着水の瞬間に出す(戻ってきたときではもう遅い)
   walk.onSplash = () => { walkNote('🌊 海に落ちた!'); };
   walk.onSink = setDiveVeil;
+  walk.onSpot = onFishSpot;
+  walk.onFishStep = renderFishHud;
+  walk.onFishEvent = onFishEvent;
+  resetFishHud();
   document.getElementById('walk-hud')?.classList.remove('moved');
   setScreen('walk');
   applyViewMode();
@@ -525,7 +530,173 @@ function exitWalk() {
   walk?.dispose();
   walk = null;
   setDiveVeil(0);
+  resetFishHud();
   setScreen('title');
+}
+
+// ---- ミニゲーム: 釣り ----
+//
+// 進行は minigame/fishing.js。ここは「押しかた」と「表示」だけを持つ。
+// ボタンは1つで、段階によって役目が変わる:
+//   釣り場に立った → つる(投げる)
+//   待ち           → 押すと早あわせ(逃げられる)
+//   アタリ         → あわせる
+//   勝負           → 押している間だけ巻く
+//   釣果/おしまい  → もう一度
+
+const fishEl = () => document.getElementById('walk-fish');
+// ボタンの見た目。段階ごとに [絵, 文字, 目立たせるか]
+const FISH_BTN = {
+  ready: ['🎣', 'つる', false],
+  cast: ['🎣', 'まつ', false],
+  wait: ['🎣', 'まつ', false],
+  bite: ['❗', 'あわせる', true],
+  fight: ['🎣', 'まく', false],
+  landed: ['🎣', 'もう一度', false],
+  lost: ['🎣', 'もう一度', false],
+};
+// 逃した理由。何が悪かったのか分からないと、次に活かせない
+const FISH_LOST = {
+  early: ['💨', '早すぎた', 'まだ食いついていません'],
+  late: ['💨', '逃げられた', 'アタリのうちに あわせる'],
+  snap: ['✂️', '糸が切れた', '張りすぎ。赤くなる前に手を離す'],
+};
+
+let fishResultTimer = null;
+
+function resetFishHud() {
+  document.getElementById('walk-hud')?.classList.remove('fishing');
+  const j = jumpEl();
+  if (j) j.style.display = '';
+  fishEl()?.classList.remove('on', 'hit', 'press');
+  document.getElementById('fish-bars')?.classList.remove('on');
+  document.getElementById('fish-note')?.classList.remove('on');
+  const r = document.getElementById('fish-result');
+  if (r) { r.classList.remove('on', 'miss'); r.innerHTML = ''; }
+  clearTimeout(fishResultTimer);
+}
+
+// 釣り場に入った/出た
+function onFishSpot(spot) {
+  if (!spot) { resetFishHud(); return; }
+  setFishButton('ready');
+  walkNote('🎣 ここで釣れる');
+}
+
+function setFishButton(kind) {
+  const el = fishEl();
+  if (!el) return;
+  // 釣っている間は移動の案内を引っ込める(バーと重なる)
+  document.getElementById('walk-hud')?.classList.toggle('fishing', kind !== 'ready');
+  const [icon, label, hit] = FISH_BTN[kind] ?? FISH_BTN.ready;
+  el.innerHTML = `${icon}<span>${label}</span>`;
+  el.classList.add('on');
+  el.classList.toggle('hit', hit);
+  // 釣っている間はジャンプを引っ込める(同じ場所に重なるので)
+  const j = jumpEl();
+  if (j) j.style.display = kind === 'ready' ? '' : 'none';
+}
+
+// 毎フレーム呼ばれる。バーだけを書き換える(innerHTML は段階が変わったときだけ)
+let fishPhase = null;
+function renderFishHud(v) {
+  const bars = document.getElementById('fish-bars');
+  const fighting = v.phase === 'fight';
+  bars?.classList.toggle('on', fighting);
+  if (fighting) {
+    const t = bars.querySelector('.fbar.tension');
+    t.querySelector('i').style.transform = `scaleX(${v.tension})`;
+    t.classList.toggle('danger', v.tension > 0.78);
+    bars.querySelector('.fbar.reel i').style.transform = `scaleX(${v.progress})`;
+  }
+  if (v.phase !== fishPhase) {
+    fishPhase = v.phase;
+    setFishButton(v.phase);
+    const note = document.getElementById('fish-note');
+    if (note) {
+      note.textContent = v.phase === 'bite' ? '❗ あわせる!' : '';
+      note.classList.toggle('on', v.phase === 'bite');
+    }
+  }
+}
+
+function onFishEvent(name) {
+  if (name === 'bite') { sfx.play('bite'); return; }
+  if (name === 'burst') { sfx.play('thrash'); return; }
+  if (name === 'landed') { showCatch(); return; }
+  if (name === 'lost') showMiss();
+}
+
+// 釣れた。図鑑に足して、初めて/自己最高なら言ってあげる
+function showCatch() {
+  const f = walk?.fishing;
+  if (!f?.fish) return;
+  sfx.play('catchFish');
+  const r = addCatch(progress, f.fish.id, f.cm);
+  progress = r.progress;
+  saveProgress(progress);
+  const tag = r.isNew ? '<span class="fr-tag new">はじめて!</span>'
+    : r.isRecord ? '<span class="fr-tag best">自己最高!</span>' : '';
+  showFishResult(`
+    <div class="fr-icon">${f.fish.icon}</div>
+    <div class="fr-name">${f.fish.name}</div>
+    <div class="fr-size">${f.cm} cm</div>${tag}`, false);
+}
+
+function showMiss() {
+  const f = walk?.fishing;
+  sfx.play('escape');
+  const [icon, name, hint] = FISH_LOST[f?.lost] ?? FISH_LOST.late;
+  showFishResult(`
+    <div class="fr-icon">${icon}</div>
+    <div class="fr-name">${name}</div>
+    <div class="fr-size">${hint}</div>`, true);
+}
+
+function showFishResult(html, miss) {
+  const el = document.getElementById('fish-result');
+  if (!el) return;
+  el.innerHTML = html;
+  el.classList.toggle('miss', miss);
+  el.classList.add('on');
+  document.getElementById('fish-bars')?.classList.remove('on');
+  document.getElementById('fish-note')?.classList.remove('on');
+  clearTimeout(fishResultTimer);
+  fishResultTimer = setTimeout(() => el.classList.remove('on'), 2600);
+}
+
+// ボタンの押し始め/離し。段階によって意味が変わる
+function fishPress() {
+  if (!walk) return;
+  const f = walk.fishing;
+  if (!f) { if (walk.startFishing()) sfx.play('cast'); return; }
+  if (f.phase === 'fight') { walk.setReeling(true); return; }
+  if (f.phase === 'bite' || f.phase === 'wait' || f.phase === 'cast') {
+    // アタリなら合わせ成功、早ければ逃げられる(どちらも hookFish が判定する)
+    if (walk.hookFish()) sfx.play('ui');
+    return;
+  }
+  // 釣果を見たあと: その場でもう一度投げる
+  if (walk.recast()) { sfx.play('cast'); showFishResultClear(); }
+}
+
+function showFishResultClear() {
+  document.getElementById('fish-result')?.classList.remove('on');
+  clearTimeout(fishResultTimer);
+}
+
+function fishRelease() {
+  walk?.setReeling(false);
+}
+
+// 釣りをやめて歩きに戻る(「もどる」ではなく、竿だけしまう)
+function fishQuit() {
+  if (!walk?.isFishing) return false;
+  walk.stopFishing();
+  fishPhase = null;
+  resetFishHud();
+  if (walk.spot) setFishButton('ready');
+  return true;
 }
 
 // 沈みきる手前で画面を水の色で覆い、岸へ戻ったらゆっくり明ける。
@@ -1656,6 +1827,8 @@ function walkPointerDown(e) {
   // (ジャンプや「もどる」を押しただけで視点が回ってしまう)
   if (e.target.closest('button')) return;
   const left = e.clientX < window.innerWidth / 2;
+  // 釣っている間は動けない。視点だけは回せる
+  if (left && walk.isFishing) return;
   if (left && walkTouch.move == null) {
     walkTouch.move = { id: e.pointerId, x: e.clientX, y: e.clientY };
     walkStickShow(e.clientX, e.clientY);
@@ -1705,14 +1878,37 @@ for (const ev of ['pointerup', 'pointercancel']) {
   window.addEventListener(ev, () => jumpEl()?.classList.remove('on'));
 }
 
+// 釣りのボタン。押している間だけ巻くので、押し始めと離しの両方を拾う
+const fishBtn = () => document.getElementById('walk-fish');
+fishBtn()?.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  fishBtn()?.classList.add('press');
+  fishPress();
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  window.addEventListener(ev, () => {
+    fishBtn()?.classList.remove('press');
+    fishRelease();
+  });
+}
+
 window.addEventListener('keydown', (e) => {
   if (!walk) return;
-  if (e.code === 'Escape') { exitWalk(); return; }
+  // 釣っている間の Escape は、竿をしまうだけ(いきなりタイトルへ戻さない)
+  if (e.code === 'Escape') { if (!fishQuit()) exitWalk(); return; }
   // スペースでページが送られないように(歩いている間だけ)
   if (e.code === 'Space') e.preventDefault();
+  // 釣り場ではスペース/F が釣りの操作になる(押しっぱなしで巻く)
+  if ((e.code === 'Space' || e.code === 'KeyF') && (walk.isFishing || walk.spot)) {
+    if (!e.repeat) fishPress();
+    return;
+  }
   walk.setKey(e.code, true);
 });
-window.addEventListener('keyup', (e) => walk?.setKey(e.code, false));
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space' || e.code === 'KeyF') fishRelease();
+  walk?.setKey(e.code, false);
+});
 // 立っている場所の表示は毎フレームだと重いので、間引いて更新する
 setInterval(() => { if (walk) updateWalkHud(); }, 400);
 
@@ -1746,7 +1942,8 @@ document.addEventListener('click', (e) => {
       enterWalk();
       return;
     case 'walk-exit':
-      exitWalk();
+      // 釣っている途中なら、まず竿をしまう(押し間違いで島から出さない)
+      if (!fishQuit()) exitWalk();
       return;
     case 'goto-records':
       ui.dialog = null; // 勝敗ダイアログから来ることがある
@@ -2245,9 +2442,16 @@ window.hexDebug = {
     grounded: walk.walker.motion.grounded,
     at: state ? walk.standingOn(state) : null,
     obstacles: walk.obstacles,
+    spot: walk.spot,
   } : null),
   walkStick: (x, y) => walk?.setStick(x, y),
   walkJump: () => walk?.jump(),
+  // 島を歩く・釣り(E2E用)。港まで歩かせずに試せるようにする
+  walkTo: (x, z) => walk?.walker.setPosition(x, z),
+  fishSpots: () => walk?.spots ?? [],
+  getFishing: () => (walk?.fishing ? walk.fishing.view() : null),
+  fishReel: (on) => walk?.setReeling(on),
+  fishBook: () => progress.fish ?? {},
   getBgm: () => bgm,
   getViewState: () => ({ viewMode, has3d: !!renderer3d, failed: renderer3dFailed, screen }),
   // オンライン対戦(E2E用)
