@@ -1449,7 +1449,6 @@ export class Board3D {
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
     this.camera.position.set(0, 8.6, 8.2);
-    this._frameShift = 0;   // 構図の上下ずらし(setFrameShift)
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(0, 0, 0); // 回転軸は島の中心
@@ -2106,10 +2105,7 @@ export class Board3D {
     const Rh = (portrait ? 4.6 : 5.8) * k;
     const Rv = (portrait ? 5.6 : 5.0) * k;
     const halfV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
-    // 構図を上下にずらしているときは、そのぶん縦に使える幅が減る。
-    // 半分だけを見せる勘定になるので、島が切れないようカメラを引く。
-    const vFit = 1 - 2 * Math.abs(this._frameShift || 0);
-    const dist = Math.max(Rv / (halfV * vFit), Rh / (halfV * aspect));
+    const dist = Math.max(Rv / halfV, Rh / (halfV * aspect));
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
     if (dir.lengthSq() < 0.5) dir.copy(this._defaultDir());
     this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
@@ -2118,29 +2114,6 @@ export class Board3D {
     this.controls.minDistance = 5;
     this.scene.fog.near = dist + 14;
     this.scene.fog.far = dist + 36;
-    this._applyFrameShift();
-  }
-
-  // 構図を画面の上下にずらす。ratio は画面の高さに対する割合で、正なら島が下がる。
-  // タイトルはボタンを上下の端に寄せてあり、島は画面の中心に映る。そのままだと
-  // 「空いている帯」の中心より上に見えるので、そのぶんだけ下げるために使う。
-  // カメラ自体は動かさない(向きも距離も変わらないので、構図の作り直しが要らない)。
-  setFrameShift(ratio) {
-    const r = Math.max(-0.4, Math.min(0.4, ratio || 0));
-    if (r === this._frameShift) return;
-    this._frameShift = r;
-    // ずらすと縦に使える幅が変わるので、構図を取り直す(_applyFrameShift も中で走る)
-    this._fitCamera(this._w || this.container.clientWidth || 1,
-      this._h || this.container.clientHeight || 1);
-  }
-
-  _applyFrameShift() {
-    const w = this._w || this.container.clientWidth || 1;
-    const h = this._h || this.container.clientHeight || 1;
-    // setViewOffset は「大きな画のどこを切り出して映すか」の指定。
-    // 窓を上へずらす(y を負にする)と、映るものは下へ動く。
-    if (!this._frameShift) this.camera.clearViewOffset();
-    else this.camera.setViewOffset(w, h, 0, -h * this._frameShift, w, h);
     this.camera.updateProjectionMatrix();
   }
 
