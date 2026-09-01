@@ -952,6 +952,31 @@ function applyViewMode() {
     board3dWrap.classList.remove('on');
   }
   document.getElementById('view-reset').style.display = is3d ? 'block' : 'none';
+  syncBoardFraming();
+}
+
+// メニュー中は、島をボタンのあいだの空いた帯の中心へ寄せる。
+// 島は画面の中心に映るが、タイトルは上のかたまり(ロゴ+遊ぶ)のほうが
+// 下のドックより背が高いので、帯の中心は画面の中心より下にある ──
+// そのままだと島が上に寄って見える。
+// 帯はタイトル画面にしか無いので、測れた値を覚えて他のメニューでも使う
+// (画面を移るたびに島が飛び跳ねないように)。
+let menuFrameShift = 0;
+function syncBoardFraming() {
+  if (!renderer3d) return;
+  if (screen === 'game' || screen === 'walk') {
+    renderer3d.setFrameShift(0);
+    return;
+  }
+  const box = board3dWrap.getBoundingClientRect();
+  const head = document.querySelector('.title-head')?.getBoundingClientRect();
+  const foot = document.querySelector('.title-foot')?.getBoundingClientRect();
+  // 非表示の要素は高さ 0 で返る。測れたときだけ更新する
+  if (box.height && head?.height && foot?.height) {
+    const band = (head.bottom + foot.top) / 2;
+    menuFrameShift = (band - (box.top + box.height / 2)) / box.height;
+  }
+  renderer3d.setFrameShift(menuFrameShift);
 }
 
 function refresh() {
