@@ -9,11 +9,35 @@ import {
   ACHIEVEMENTS, MODE_JP, TIERS, TIER_ICON, TIER_JP,
   achievementById, progressOf,
 } from '../achievements.js';
-import { MODES, achievementCount, summarize, winRate } from '../progress.js';
+import { MODES, achievementCount, fishbookCount, summarize, winRate } from '../progress.js';
+import { FISH } from '../minigame/fish.js';
 
 const MODE_ICON = {
   base: '⬡', cak: '🏰', dragon: '🐉', fish: '🐟', sea: '⛵',
 };
+
+// 釣り図鑑。まだ釣っていないものは「?」で伏せる ── 何がいるか全部見えていると、
+// 港をめぐって探す楽しみが無くなる。等級だけは色で分かるようにしておく。
+const TIER_LABEL = {
+  junk: 'ガラクタ', common: 'よくいる', rare: '大物', legend: '港のぬし', myth: 'まぼろし',
+};
+
+function fishbook(progress) {
+  const book = progress.fish ?? {};
+  const c = fishbookCount(progress, FISH.length);
+  const rows = FISH.map((f) => {
+    const got = book[f.id];
+    return `<div class="fbook-a t-${f.tier} ${got ? 'got' : 'locked'}">
+      <span class="bicon">${got ? f.icon : '❔'}</span>
+      <b>${got ? f.name : '???'}</b>
+      <small>${got ? `${got.best} cm ・ ${got.n}匹` : TIER_LABEL[f.tier]}</small>
+    </div>`;
+  }).join('');
+  return `<p class="fbook-head">図鑑 <b>${c.got}/${c.total}</b> 種類 ・ ぜんぶで <b>${c.caught}</b> 匹</p>
+    <div class="fbook">${rows}</div>
+    <p><small>島を歩くモードで、港のそばに立つと釣れます。
+    「港のぬし」はその港でしか釣れません。</small></p>`;
+}
 
 const dash = '<span class="zero">—</span>';
 const num = (v, unit = '') => (v ? `${v}${unit}` : dash);
@@ -126,9 +150,12 @@ export function recordsHtml(progress, { tab = 'stats', selected = null, confirmi
   const tabs = `<div class="rec-tabs">
     <button class="${tab === 'stats' ? 'sel' : ''}" data-act="rec-tab:stats">📊 戦績</button>
     <button class="${tab === 'ach' ? 'sel' : ''}" data-act="rec-tab:ach">🎖 実績 ${c.got}/${c.total}</button>
+    <button class="${tab === 'fish' ? 'sel' : ''}" data-act="rec-tab:fish">🎣 釣り</button>
   </div>`;
 
-  const body = tab === 'ach'
+  const body = tab === 'fish'
+    ? fishbook(progress)
+    : tab === 'ach'
     ? `<div class="tiers">${tierSummary(progress)}</div>
        ${badgeGrid(progress, stats, selected)}
        ${badgeDetail(progress, stats, selected)}`

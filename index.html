@@ -570,6 +570,33 @@
   .rec-table .zero { color: var(--dim); opacity: 0.5; }
   .rec-total { font-weight: 700; }
 
+  /* 釣り図鑑。21種を2列で並べる(バッジと違い、名前と大きさを読ませたい) */
+  .fbook-head { font-size: 13px; }
+  .fbook-head b { color: var(--accent2); }
+  .fbook {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px;
+    max-height: 46dvh; overflow-y: auto; padding-right: 2px;
+  }
+  .fbook-a {
+    display: grid; grid-template-columns: 26px 1fr; grid-template-rows: auto auto;
+    align-items: center; gap: 0 8px;
+    padding: 6px 8px; border-radius: 9px;
+    border: 1px solid var(--tc, var(--line));
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .fbook-a .bicon { grid-row: 1 / 3; font-size: 20px; text-align: center; }
+  .fbook-a b { font-size: 12.5px; }
+  .fbook-a small { font-size: 10.5px; color: var(--dim); }
+  .fbook-a.got { background: color-mix(in srgb, var(--tc) 18%, transparent); }
+  .fbook-a.locked { border-color: rgba(255,255,255,0.12); opacity: 0.75; }
+  .fbook-a.locked b { color: var(--dim); }
+  /* 等級の色。港のぬしとまぼろしは特別に見せる */
+  .fbook-a.t-junk { --tc: #8b93a0; }
+  .fbook-a.t-common { --tc: #6fb7ff; }
+  .fbook-a.t-rare { --tc: #4fd18b; }
+  .fbook-a.t-legend { --tc: #ffd45e; }
+  .fbook-a.t-myth { --tc: #d08bff; }
+
   /* 難度ごとの獲得数 */
   .tiers { display: flex; gap: 6px; }
   .tchip {
@@ -657,8 +684,9 @@
     font-size: 11px; color: #cfdcea; white-space: nowrap;
     transition: opacity 0.6s ease-out;
   }
-  /* 一度でも動かしたら引っ込める(遊びの邪魔をしない) */
-  #walk-hud.moved .walk-hint { opacity: 0; }
+  /* 一度でも動かしたら引っ込める(遊びの邪魔をしない)。
+     釣っている間も出さない ── 移動の案内は関係がないうえ、バーと重なる */
+  #walk-hud.moved .walk-hint, #walk-hud.fishing .walk-hint { opacity: 0; }
   /* 左下のスティック。触れた場所に出す */
   #walk-stick {
     position: absolute; width: 108px; height: 108px; border-radius: 50%;
@@ -698,6 +726,95 @@
   }
   #walk-jump span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; }
   #walk-jump.on { transform: scale(0.92); background: rgba(255, 217, 125, 0.4); }
+
+  /* ---------- 釣り ---------- */
+  /* ジャンプの上に重ねる。釣っている間はジャンプを引っ込める(main.js) */
+  #walk-fish {
+    position: absolute; pointer-events: auto; display: none;
+    right: calc(18px + env(safe-area-inset-right));
+    bottom: calc(28px + env(safe-area-inset-bottom));
+    width: 82px; height: 82px; border-radius: 50%;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px; padding: 0;
+    border: 2px solid rgba(255, 217, 125, 0.55);
+    background: rgba(8, 22, 38, 0.52);
+    color: #fff; font-size: 26px; line-height: 1;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 90ms ease, background 90ms ease, border-color 150ms ease;
+  }
+  #walk-fish.on { display: flex; }
+  #walk-fish span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; }
+  #walk-fish.press { transform: scale(0.92); background: rgba(255, 217, 125, 0.42); }
+  /* アタリ。見落とすと逃げられるので、いちばん目立たせる */
+  #walk-fish.hit {
+    border-color: #ffd97d; background: rgba(226, 92, 60, 0.85);
+    animation: fishHit 0.32s ease-in-out infinite;
+  }
+  @keyframes fishHit { 50% { transform: scale(1.1); } }
+  @media (prefers-reduced-motion: reduce) { #walk-fish.hit { animation: none; } }
+
+  /* 張りと取り込みの2本。ボタンの左に縦置きだと親指で隠れるので、下に横置き */
+  /* ボタンの上に置く。画面のいちばん下は「もどる」の案内と親指で埋まっている */
+  #fish-bars {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: calc(126px + env(safe-area-inset-bottom));
+    width: min(230px, 56vw); display: none; flex-direction: column; gap: 5px;
+  }
+  #fish-bars.on { display: flex; }
+  .fbar {
+    position: relative; height: 11px; border-radius: 999px; overflow: hidden;
+    background: rgba(6, 18, 32, 0.72); border: 1px solid rgba(255,255,255,0.22);
+  }
+  .fbar i {
+    position: absolute; inset: 0; transform-origin: left center;
+    transform: scaleX(0); transition: transform 60ms linear;
+  }
+  /* 張り: 緑→黄→赤。切れる手前が一目で分かるように色で伝える */
+  .fbar.tension i { background: linear-gradient(90deg, #4fd18b, #ffd45e 62%, #ff5a44 88%); }
+  .fbar.reel i { background: linear-gradient(90deg, #6fb7ff, #ffd97d); }
+  /* 張りの危険域(ここを越えたら手を離す)の目印 */
+  .fbar.tension b {
+    position: absolute; top: -2px; bottom: -2px; left: 78%;
+    width: 2px; background: rgba(255,255,255,0.75);
+  }
+  .fbar.danger { animation: fishDanger 0.25s ease-in-out infinite; }
+  @keyframes fishDanger { 50% { border-color: #ff5a44; } }
+  @media (prefers-reduced-motion: reduce) { .fbar.danger { animation: none; } }
+
+  /* 「あわせろ!」などの短い合図 */
+  #fish-note {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    top: 34%; padding: 6px 16px; border-radius: 999px;
+    background: rgba(8, 22, 38, 0.78); border: 1px solid rgba(255, 217, 125, 0.5);
+    color: var(--accent2); font-size: 15px; font-weight: 800; white-space: nowrap;
+    opacity: 0; transition: opacity 160ms ease-out;
+  }
+  #fish-note.on { opacity: 1; }
+
+  /* 釣果。釣れた/逃げられたを大きく出す */
+  #fish-result {
+    position: absolute; left: 50%; top: 38%;
+    transform: translate(-50%, -50%) scale(0.9);
+    display: none; text-align: center; pointer-events: none;
+    padding: 16px 26px; border-radius: 16px;
+    background: linear-gradient(180deg, rgba(23,51,79,0.94), rgba(15,36,57,0.94));
+    border: 1px solid rgba(130, 180, 230, 0.4);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.55);
+    opacity: 0; transition: opacity 220ms ease-out, transform 220ms ease-out;
+  }
+  #fish-result.on { display: block; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #fish-result .fr-icon { font-size: 44px; line-height: 1; }
+  #fish-result .fr-name { font-size: 19px; font-weight: 800; margin-top: 4px; }
+  #fish-result .fr-size { font-size: 14px; color: var(--dim); margin-top: 2px; }
+  #fish-result .fr-tag {
+    display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 800;
+  }
+  #fish-result .fr-tag.new { background: #ffd45e; color: #4a2f00; }
+  #fish-result .fr-tag.best { background: #4fd18b; color: #06301c; }
+  #fish-result.miss { border-color: rgba(255, 120, 100, 0.45); }
+  #fish-result.miss .fr-name { color: #ffab92; }
 
   /* 対戦中のプレイヤー名に付く称号 */
   .ptitle { color: var(--accent2); font-size: 10.5px; opacity: 0.9; }
@@ -1250,7 +1367,15 @@
     <div id="walk-dive"></div>
     <div id="walk-stick"><i></i></div>
     <button id="walk-jump" type="button" aria-label="ジャンプ">⤒<span>ジャンプ</span></button>
-    <div class="walk-hint">左半分をなぞって移動 / 右半分をなぞって視点 / ⤒ でジャンプ</div>
+    <!-- 釣り。港のそばに立つと出る。押しかたが段階で変わる(main.js) -->
+    <button id="walk-fish" type="button">🎣<span>つる</span></button>
+    <div id="fish-bars">
+      <div class="fbar tension" aria-label="糸の張り"><i></i><b></b></div>
+      <div class="fbar reel" aria-label="取り込み"><i></i></div>
+    </div>
+    <div id="fish-note"></div>
+    <div id="fish-result"></div>
+    <div class="walk-hint">左半分をなぞって移動 / 右半分をなぞって視点 / ⤒ でジャンプ / 港で🎣</div>
   </div>
   <div id="netbadge"><span class="dot"></span><span class="txt"></span></div>
   <div id="dialog-root"></div>

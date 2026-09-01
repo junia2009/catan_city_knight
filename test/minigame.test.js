@@ -11,7 +11,9 @@ import { isLandHex } from '../src/rules/sea.js';
 import { makeGround, spawnPoint } from '../src/minigame/ground.js';
 import { WalkerMotion, WALK_SPEED, JUMP_HEIGHT, WATER_Y } from '../src/minigame/motion.js';
 import { makeBlocker, WALKER_RADIUS } from '../src/minigame/obstacles.js';
-import { walkPose, airPose, tumblePose, sinkPose, poseKeys } from '../src/minigame/pose.js';
+import {
+  walkPose, airPose, tumblePose, sinkPose, fishPose, poseKeys,
+} from '../src/minigame/pose.js';
 
 const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 
@@ -343,6 +345,11 @@ test('walk: どの姿勢も同じ項目を全部返す(前の姿勢が残らな�
     空中: airPose(1.5, 0.3),
     落下: tumblePose(2.1, 0.3),
     水中: sinkPose(1.4, 0.3, 0.5),
+    '釣り(待ち)': fishPose(1.1, 0.3, { phase: 'wait' }),
+    '釣り(投げ)': fishPose(0.2, 0.3, { phase: 'cast', cast: 0.5 }),
+    '釣り(アタリ)': fishPose(0.4, 0.3, { phase: 'bite' }),
+    '釣り(勝負)': fishPose(2.2, 0.3, { phase: 'fight', tension: 0.6, reeling: true, burst: true }),
+    '釣り(既定)': fishPose(1, 0.3),
   };
   const base = poseKeys(poses['歩き']);
   assert.ok(base.length > 20, `項目が少なすぎる(${base.length})`);

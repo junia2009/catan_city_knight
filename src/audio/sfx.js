@@ -243,6 +243,27 @@ const VOICES = {
     s.tone(D.a, t + 0.5, 1.4, { type: 'triangle', gain: 0.1, lp: 3000 });
     s.tone(D.d - 12, t + 0.5, 1.6, { type: 'sine', gain: 0.12 });
   },
+  // ---- 釣り(ミニゲーム)----
+  // 投げる: 糸が出ていく「シュッ」と、浮きが落ちる「ポチャン」
+  cast: (s, t) => {
+    s.noise(t, 0.22, { gain: 0.07, freq: 3200, q: 0.8, sweep: -0.5 });
+    s.tone(D.d, t + 0.42, 0.14, { type: 'sine', gain: 0.11, glide: -7 });
+  },
+  // アタリ: 浮きが沈む合図。気づいてほしいので短く高く2回
+  bite: (s, t) => {
+    s.tone(D.d2, t, 0.07, { type: 'square', gain: 0.09 });
+    s.tone(D.d2 + 4, t + 0.1, 0.09, { type: 'square', gain: 0.09 });
+  },
+  // 魚が暴れる: 水を叩く音
+  thrash: (s, t) => s.noise(t, 0.16, { gain: 0.1, freq: 600, q: 1, sweep: 0.7 }),
+  // 釣れた
+  catchFish: (s, t) => s.arp([D.d, D.f, D.a, D.d2], t, { step: 0.07, dur: 0.4, gain: 0.13 }),
+  // 逃げられた・糸が切れた
+  escape: (s, t) => {
+    s.tone(D.a, t, 0.16, { type: 'triangle', gain: 0.11, glide: -9 });
+    s.noise(t, 0.1, { gain: 0.07, freq: 1400, q: 1.5, sweep: -0.4 });
+  },
+
   // 敗北(誰かが勝った)
   lose: (s, t) => {
     s.tone(D.a, t, 0.5, { type: 'triangle', gain: 0.1, lp: 1800 });

@@ -133,6 +133,54 @@ export function sinkPose(t, facing, spin) {
   };
 }
 
+// 釣り。竿は右手(arms[1])に付いていて、腕の角度がそのまま竿の角度になる。
+//   腕の rotation.x は 0 で真下、-π/2 で前、-π で真上。
+//   竿を前上がり 35° くらいに構えたいので -(π/2 + 0.6) あたりが基準。
+//
+// k: { phase, tension, reeling, burst, cast } ── fishing.js の view() から作る。
+export function fishPose(t, facing, k = {}) {
+  const phase = k.phase ?? 'wait';
+  const tension = Math.max(0, Math.min(1, k.tension ?? 0));
+  const cast = Math.max(0, Math.min(1, k.cast ?? 0));
+  const fighting = phase === 'fight';
+  const sway = Math.sin(t * 1.3) * 0.02;   // 待っている間のわずかな揺れ
+
+  // 投げる動作: いったん後ろへ振りかぶって、勢いよく前へ振り出す
+  const back = Math.max(0, 1 - cast / 0.35);
+  const fwd = Math.max(0, (cast - 0.35) / 0.65);
+  const swing = phase === 'cast' ? back * 0.75 - fwd * 0.5 : 0;
+
+  // アタリの瞬間は竿先がぐっと入る
+  const bite = phase === 'bite' ? Math.sin(t * 22) * 0.09 : 0;
+  // 暴れている間は竿ごと揺さぶられる
+  const shake = k.burst ? Math.sin(t * 34) * 0.07 : 0;
+  // 巻いている間は少し踏ん張る
+  const hold = fighting ? tension * 0.55 + (k.reeling ? 0.1 : 0) : 0;
+
+  const rodX = -(Math.PI / 2 + 0.6) - swing - hold * 0.5 + bite + shake + sway;
+
+  return {
+    group: JOINT(0, facing, 0),
+    // 大物と格闘している間は口が開く
+    mouth: MOUTH(fighting && tension > 0.55 ? 1 : 0),
+    // 引かれるぶんだけ体を反らす
+    hips: JOINT(-hold * 0.5 - (phase === 'cast' ? swing * 0.2 : 0), 0, 0),
+    chest: JOINT(-hold * 0.25 + shake * 0.3, 0, sway * 2),
+    head: JOINT(0.14 + hold * 0.2, 0, 0),
+    // 足は少し前後に開いて踏ん張る。引かれるほど深く
+    legs: [0, 1].map((i) => {
+      const s = i === 0 ? 1 : -1;
+      return LIMB(s * (0.22 + hold * 0.35), s * 0.13, Math.max(0, s) * (0.2 + hold * 0.5));
+    }),
+    arms: [0, 1].map((i) => {
+      // 右手(1)が竿。左手(0)は下を支え、巻くときはハンドルを回す
+      if (i === 1) return LIMB(rodX, 0.22, 0.12 + hold * 0.35);
+      const crank = k.reeling ? Math.sin(t * 11) * 0.45 : 0;
+      return LIMB(-1.45 - hold * 0.3 + crank * 0.35, -0.3, 0.75 + crank);
+    }),
+  };
+}
+
 // テストから使う: 姿勢が持つ項目の一覧(順序を揃えて比較できるように)。
 // 中身を決め打ちせず、そのまま辿る ── 項目を増やしたときに
 // ここを直し忘れて検査から漏れる、を防ぐため。

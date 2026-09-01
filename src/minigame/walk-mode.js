@@ -6,11 +6,13 @@
 // (WebGL コンテキストを2つ持つとモバイルで重すぎるため)。
 
 import * as THREE from 'three';
-import { makeGround, spawnPoint } from './ground.js';
+import { makeGround, spawnPoint, fishingSpots, spotNear } from './ground.js';
 import { makeBlocker } from './obstacles.js';
 import { MAX_DT, SINK_DEPTH, WATER_Y } from './motion.js';
 import { Walker, WALK_SPEED } from './walker.js';
 import { WaterFx } from './water-fx.js';
+import { Fishing, CAST_TIME } from './fishing.js';
+import { FishingFx } from './fishing-fx.js';
 
 // フレームレートに依らない追従係数。
 // dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
@@ -27,6 +29,14 @@ function sinkVeil(depth) {
 }
 
 const TILE_TOP = 0.26;      // board3d.js と同じタイル上面の高さ
+const SEA_Y = 0.02;         // board3d.js と同じ水面の高さ
+
+// 釣っている間のカメラ。竿は右手(モデルの +X 側)なので、そちらへ回り込むと
+// 竿と糸が本人に重ならない。
+const FISH_YAW = -0.75;     // 本人の向きからどれだけ横へ回り込むか
+const FISH_PITCH = 0.30;    // 見下ろす角度
+const FISH_DIST = 1.9;
+const FISH_AIM = 0.42;      // 本人から浮きのほうへ、どれだけ先を見るか
 const BLOCK_MIN_HEIGHT = 0.15; // これより低い物はまたげる(草・花・畝・砂丘)
 const BLOCK_MAX_RADIUS = 0.5;  // これより大きい物は地形そのもの(タイル・海・桟橋)
 
@@ -63,7 +73,9 @@ function collectObstacles(b) {
 }
 
 export class WalkMode {
-  constructor(board3d, state) {
+  // fishSeed: 釣りの乱数。対戦の state.rng は絶対に使わない
+  // (回すとオンライン対戦で全員の乱数列がずれる)。
+  constructor(board3d, state, fishSeed = Date.now() >>> 0) {
     this.b = board3d;
     this.ground = makeGround(state);
     this.obstacles = collectObstacles(board3d);
@@ -73,6 +85,17 @@ export class WalkMode {
 
     const s = spawnPoint(state);
     this.walker.setPosition(s.x, s.y);
+
+    // 釣り。港のそばに立つと竿を出せる
+    this.spots = fishingSpots(state);
+    this.spot = null;        // いま近くにある釣り場
+    this.fishing = null;     // 釣っている間だけ Fishing が入る
+    this.fishSeed = fishSeed;
+    this.fishT = 0;
+    this.ffx = new FishingFx(board3d.scene, SEA_Y);
+    this.onSpot = null;      // 釣り場に入った/出た
+    this.onFishStep = null;  // 毎フレームの状態(HUD 用)
+    this.onFishEvent = null; // 'bite' / 'burst' / 'landed' / 'lost'
 
     this.input = { x: 0, y: 0 };
     this.keys = new Set();
@@ -132,7 +155,61 @@ export class WalkMode {
     }
   }
 
-  jump() { this.walker.motion.jump(); }
+  jump() {
+    if (this.fishing) return;   // 釣っている間は跳ばない
+    this.walker.motion.jump();
+  }
+
+  // ---- 釣り ----
+
+  get isFishing() { return this.fishing != null; }
+
+  // 港のそばでだけ始められる。足場に立たせ、沖を向かせてから投げる。
+  startFishing() {
+    if (this.fishing || !this.spot) return false;
+    const s = this.spot;
+    this.walker.setPosition(s.x, s.z);
+    this.walker.motion.vel.x = 0;
+    this.walker.motion.vel.z = 0;
+    this.walker.motion.facing = Math.atan2(s.outX, s.outZ);
+    this.walker.setRod(true);
+    // 投げるたびに乱数を進める(同じ港で同じ魚が続かないように)
+    this.fishSeed = (this.fishSeed * 1103515245 + 12345) >>> 0;
+    this.fishing = new Fishing(this.fishSeed, s.type);
+    this.fishT = 0;
+    this.fishing.cast();
+    this.ffx.cast(s.x, s.z, s.outX, s.outZ);
+    this.camYaw = this.walker.facing;
+    return true;
+  }
+
+  // 竿を上げてしまう(結果を見終わったあと、または途中でやめたとき)
+  stopFishing() {
+    if (!this.fishing) return;
+    this.fishing = null;
+    this.walker.setRod(false);
+    this.ffx.hide();
+  }
+
+  // アタリで押す(合わせ)。勝負中は「巻く」の押し始めとしては使わない。
+  hookFish() {
+    return this.fishing ? this.fishing.hook() : false;
+  }
+
+  setReeling(on) {
+    this.fishing?.setReeling(on);
+  }
+
+  // 逃した/釣り上げたあと、その場でもう一度投げる
+  recast() {
+    if (!this.fishing || this.fishing.active || !this.spot) return false;
+    this.fishSeed = (this.fishSeed * 1103515245 + 12345) >>> 0;
+    this.fishing = new Fishing(this.fishSeed, this.spot.type);
+    this.fishT = 0;
+    this.fishing.cast();
+    this.ffx.cast(this.spot.x, this.spot.z, this.spot.outX, this.spot.outZ);
+    return true;
+  }
 
   // カメラを回す(画面の右半分のドラッグ / マウスドラッグ)
   orbit(dx, dy) {
@@ -160,10 +237,22 @@ export class WalkMode {
     const dt = this.last ? Math.min(MAX_DT, (t - this.last) / 1000) : 0.016;
     this.last = t;
 
+    if (this.fishing) {
+      this._fishFrame(dt);
+      return;
+    }
+
     const kb = this._keyInput();
     const inp = (kb.x || kb.y) ? kb : this.input;
     const w = this.walker.pos;
     const r = this.walker.update(dt, inp, this.camYaw);
+
+    // 港のそばに来たら知らせる(入った/出たときだけ)
+    const spot = r.grounded ? spotNear(this.spots, w.x, w.z) : null;
+    if (spot !== this.spot) {
+      this.spot = spot;
+      this.onSpot?.(spot);
+    }
     if (r?.jumped) this.onJump?.();
     if (r?.splashed) {
       this.fx.splash(w.x, w.z);
@@ -195,13 +284,63 @@ export class WalkMode {
     );
   }
 
-  _placeCamera(dt, snap) {
+  // 釣っている間のフレーム。歩きの計算はしない(その場に立ったまま)。
+  _fishFrame(dt) {
+    this.fishT += dt;
+    const f = this.fishing;
+    for (const e of f.update(dt)) this.onFishEvent?.(e);
+
+    const v = f.view();
+    // 投げているあいだの進み具合(浮きが飛んでいく)
+    const castK = v.phase === 'cast' ? Math.min(1, this.fishT / CAST_TIME) : 1;
+    this.walker.fish(this.fishT, {
+      phase: v.phase, tension: v.tension, reeling: f.reeling,
+      burst: v.burst, cast: castK,
+    });
+    this.walker.rodTip(this._tip ??= new THREE.Vector3());
+    this.ffx.update(dt, v, this._tip, castK);
+    this.onFishStep?.(v);
+
+    this._placeFishCamera(dt, v);
+  }
+
+  // 釣っている間のカメラ。
+  // 真後ろから撮ると、竿も糸も浮きも本人の陰に入って何も見えない。
+  // 斜め後ろに回り込み、本人と浮きの中間を見る(横顔で竿の角度が分かる)。
+  _placeFishCamera(dt, v) {
+    const cam = this.b.camera;
+    const w = this.walker.pos;
+    const s = this.spot;
+    const groundY = this.ground(w.x, w.z).y;
+    const yaw = this.walker.facing + FISH_YAW * (s?.side || 1);
+    // 引かれるほど寄って、手応えを見せる
+    const dist = FISH_DIST * (1 - (v.phase === 'fight' ? v.tension * 0.18 : 0));
+    const flat = Math.cos(FISH_PITCH) * dist;
+
+    const want = new THREE.Vector3(
+      w.x - Math.sin(yaw) * flat,
+      groundY + 0.42 + Math.sin(FISH_PITCH) * dist,
+      w.z - Math.cos(yaw) * flat,
+    );
+    cam.position.lerp(want, smooth(4.5, dt));
+    // 見るのは本人と浮きのあいだ。竿の先と水面が同時に入る
+    const aim = FISH_AIM * (v.phase === 'cast' ? 0.4 : 1);
+    cam.lookAt(
+      w.x + (s ? s.outX : 0) * aim,
+      groundY + 0.18,
+      w.z + (s ? s.outZ : 0) * aim,
+    );
+  }
+
+  _placeCamera(dt, snap, closer = 0) {
     const cam = this.b.camera;
     // 追うのは「足元の位置」。描画上のモデル位置を追うと、
     // アニメーションの上下がそのまま画面の揺れになる。
     const w = this.walker.pos;
-    const h = Math.sin(this.camPitch) * this.camDist;
-    const flat = Math.cos(this.camPitch) * this.camDist;
+    // 釣っている間は少し寄る(closer > 0)。手応えが伝わるように
+    const dist = this.camDist * (1 - closer * 0.35);
+    const h = Math.sin(this.camPitch) * dist;
+    const flat = Math.cos(this.camPitch) * dist;
     const groundY = this.ground(w.x, w.z).y;
     // ジャンプには半分だけ付いていく。1:1 で追うと画面全体が跳ねて酔うし、
     // 全く追わないと跳んだ本人が画面から出ていく。
@@ -242,6 +381,7 @@ export class WalkMode {
     this.b.onFrame = null;
     this.walker.dispose();
     this.fx.dispose();
+    this.ffx.dispose();
     if (this.b.seaMesh) this.b.seaMesh.material.side = THREE.FrontSide;
     const cam = this.b.camera;
     cam.position.copy(this.saved.pos);

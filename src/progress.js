@@ -15,7 +15,7 @@ export const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 
 export function emptyProgress() {
-  return { v: PROGRESS_VERSION, games: [], achievements: {}, title: null };
+  return { v: PROGRESS_VERSION, games: [], achievements: {}, title: null, fish: {} };
 }
 
 // 対戦1回ぶんの記録。state をそのまま持つと重いので、要点だけ取り出す。
@@ -97,6 +97,37 @@ export function addResult(progress, result, ctx) {
   return { progress: next, unlocked };
 }
 
+// ---- 釣り図鑑 ----
+//
+// ミニゲームの記録。対戦の戦績とは別枠だが、保存先は同じ(端末のローカル1か所)。
+// 魚そのものの定義は minigame/fish.js にあり、ここは「何を何匹・自己最大」だけを持つ。
+
+// 1匹ぶんを足す。progress は書き換えず、新しいものと「初めて/自己記録」を返す。
+export function addCatch(progress, fishId, cm, now = Date.now()) {
+  const prev = progress.fish?.[fishId] ?? null;
+  const isNew = !prev;
+  const isRecord = !prev || cm > prev.best;
+  const next = {
+    ...progress,
+    fish: {
+      ...(progress.fish ?? {}),
+      [fishId]: {
+        n: (prev?.n ?? 0) + 1,
+        best: isRecord ? cm : prev.best,
+        at: isRecord ? now : prev.at,
+      },
+    },
+  };
+  return { progress: next, isNew, isRecord };
+}
+
+// 図鑑の埋まり具合。total は魚の総数(呼ぶ側が fish.js から渡す)。
+export function fishbookCount(progress, total) {
+  const book = progress.fish ?? {};
+  const got = Object.keys(book).length;
+  return { got, total, caught: Object.values(book).reduce((s, e) => s + (e.n ?? 0), 0) };
+}
+
 // 名乗る称号を選ぶ。持っていない実績の称号は名乗れない(null で「称号なし」)。
 export function setTitle(progress, id) {
   if (id != null && !progress.achievements[id]) return progress;
@@ -130,6 +161,8 @@ export function parseProgress(raw) {
       games: Array.isArray(p.games) ? p.games.filter((g) => g && typeof g === 'object') : [],
       achievements: p.achievements && typeof p.achievements === 'object' ? p.achievements : {},
       title: typeof p.title === 'string' ? p.title : null,
+      // 釣り図鑑は後から足した。古い保存には無いので、無ければ空で始める
+      fish: p.fish && typeof p.fish === 'object' ? p.fish : {},
     };
   } catch {
     return emptyProgress();

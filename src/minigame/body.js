@@ -41,6 +41,9 @@ export const CUTE = {
   hipX: 0.050,         // 脚の間隔。近すぎると2本が1本に見える
   legR: 0.036, thigh: 0.038, shin: 0.035,
   shoe: { r: 0.038, len: 0.042, lift: -0.004, ahead: 0.022 },
+  // 釣り竿。手のさきから腕の延長方向(-Y)へ伸ばす。
+  // 腕を前上がりに構えると、そのまま竿も前上がりになる。
+  rod: { len: 0.42, r: 0.0055, grip: 0.05 },
 };
 
 // 手足1本。上下2節で、付け根から吊り下げる。
@@ -81,6 +84,37 @@ function makeMouth(mat, m) {
   for (const o of [smile, open]) o.position.set(0, m.y, m.z);
   open.visible = false;
   return { smile, open };
+}
+
+// 釣り竿。手のさきから腕の延長(-Y)へ伸ばすので、腕の角度がそのまま竿の角度になる。
+// 先端に空の目印を置いてある ── 糸はそこから垂らす(fishing-fx.js)。
+function makeRod(r) {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.8 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2b3550, roughness: 0.6 });
+
+  // 竿。先へ行くほど細くする(円錐台)
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(r.r * 0.35, r.r, r.len, 6), wood);
+  rod.position.y = -r.len / 2;
+  rod.castShadow = true;
+  g.add(rod);
+
+  // 握り。手のところだけ太くすると「持っている」ように見える
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(r.r * 2, r.r * 2, r.grip, 6), dark);
+  grip.position.y = -r.grip / 2;
+  g.add(grip);
+
+  // リール
+  const reel = new THREE.Mesh(new THREE.CylinderGeometry(r.r * 3, r.r * 3, r.r * 3, 8), dark);
+  reel.rotation.z = Math.PI / 2;
+  reel.position.set(r.r * 3, -r.grip - r.r * 3, 0);
+  g.add(reel);
+
+  const tip = new THREE.Object3D();
+  tip.position.y = -r.len;
+  g.add(tip);
+
+  return { group: g, tip };
 }
 
 // ミトンの手。指は作らない ── 小さく映るので、丸いほうが可愛く見える。
@@ -153,6 +187,12 @@ export function makeWalker(color = CLOTH, p = CUTE) {
     return limb;
   });
 
+  // 竿は右手(arms[1])に握らせる。ふだんは隠しておく
+  const rod = makeRod(p.rod);
+  rod.group.position.y = -(p.upperArm + p.foreArm);
+  rod.group.visible = false;
+  arms[1].knee.add(rod.group);
+
   const legs = [-1, 1].map((sx) => {
     const limb = makeLimb(cloth, p.thigh, p.shin, p.legR, makeShoe(shoe, p.shoe));
     limb.root.position.set(sx * p.hipX, 0, 0);
@@ -160,7 +200,7 @@ export function makeWalker(color = CLOTH, p = CUTE) {
     return limb;
   });
 
-  return { group: g, hips, chest, head, mouth, arms, legs };
+  return { group: g, hips, chest, head, mouth, arms, legs, rod };
 }
 
 // 足元から頭のてっぺんまで。カメラの寄りや当たり判定の目安に使う。
