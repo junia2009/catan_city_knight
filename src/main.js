@@ -344,7 +344,13 @@ const bgm = new Bgm();
 settings.bgm = bgm.enabled;
 function syncBgmButtons() {
   for (const b of document.querySelectorAll('[data-act="bgm-toggle"]')) {
-    b.textContent = bgm.enabled ? '🔊 BGM オン' : '🔇 BGM オフ';
+    // アイコン+ラベルの形(タイトルのドック)と、文字だけの形がある。
+    // 文字だけの方を textContent で書き換えると中の要素が消えるので分ける。
+    const icon = b.querySelector('.di');
+    if (icon) icon.textContent = bgm.enabled ? '🔊' : '🔇';
+    else b.textContent = bgm.enabled ? '🔊 BGM オン' : '🔇 BGM オフ';
+    b.classList.toggle('off', !bgm.enabled);
+    b.setAttribute('aria-label', bgm.enabled ? 'BGM オン' : 'BGM オフ');
   }
 }
 // 効果音。BGM と AudioContext を共有する(audio/ctx.js)

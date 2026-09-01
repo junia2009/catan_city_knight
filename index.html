@@ -751,10 +751,25 @@
   body:not([data-screen="game"]) #bottom,
   body:not([data-screen="game"]) #view-reset { display: none !important; }
 
+  /* タイトルだけは背景の島を見せたいので、全面を覆う暗幕をやめて
+     上下だけ落とす。文字とボタンは上下に寄せてあるので読める。 */
+  #screen-title {
+    align-items: stretch; justify-content: stretch;
+    background: linear-gradient(180deg,
+      rgba(6, 18, 32, 0.85) 0%, rgba(6, 18, 32, 0.34) 27%,
+      rgba(6, 18, 32, 0.10) 48%, rgba(6, 18, 32, 0.52) 78%,
+      rgba(6, 18, 32, 0.88) 100%);
+  }
   .title-inner {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: space-between; text-align: center;
+    padding: max(4vh, 20px) 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  /* 上のかたまり(ロゴと「遊ぶ」入口)と下のかたまり(それ以外) */
+  .title-head, .title-foot {
     display: flex; flex-direction: column; align-items: center; gap: 10px;
-    padding: 24px; text-align: center;
-    transform: translateY(-4vh);
+    width: min(320px, 100%);
   }
   .title-logo {
     font-size: 40px; font-weight: 800; letter-spacing: 0.06em;
@@ -764,14 +779,54 @@
   }
   .title-sub {
     font-size: 11px; letter-spacing: 0.28em; color: var(--dim);
-    margin: -2px 0 22px 0.28em;
+    margin: -2px 0 18px 0.28em;
     white-space: nowrap;
   }
   button.big { font-size: 17px; padding: 15px 52px; border-radius: 12px; }
-  #load-note { min-height: 18px; margin-top: 14px; font-size: 12px; color: var(--dim); }
+  .title-head button.big { width: 100%; padding-left: 0; padding-right: 0; }
+  /* オンライン対戦は「はじめる」より一段控えめに */
+  .title-head button.big.sub {
+    font-size: 15px; padding-top: 12px; padding-bottom: 12px;
+    background: rgba(21, 44, 68, 0.72); backdrop-filter: blur(4px);
+  }
+
+  /* 遊ぶ以外の入口。アイコン+小ラベルを1行に並べる */
+  .title-dock {
+    display: flex; width: 100%; gap: 4px;
+    padding: 5px; border-radius: 15px;
+    background: rgba(9, 24, 40, 0.55);
+    border: 1px solid rgba(130, 180, 230, 0.22);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  }
+  .title-dock button {
+    flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 8px 1px; border: none; border-radius: 11px;
+    background: none; box-shadow: none;
+    font-size: 9.5px; font-weight: 600; color: var(--dim); line-height: 1.1;
+  }
+  .title-dock button .di { font-size: 19px; line-height: 1; }
+  .title-dock button:active:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1); transform: none;
+  }
+  .title-dock button.off .di { filter: grayscale(1); opacity: 0.55; }
+  /* 横持ちなど背の低い画面。上下を詰めて、島の見える帯を残す */
+  @media (max-height: 560px) {
+    .title-inner { padding: 12px 16px 8px; }
+    .title-head, .title-foot { gap: 6px; }
+    .title-logo { font-size: 28px; }
+    .title-sub { font-size: 10px; margin-bottom: 8px; }
+    .title-head button.big { font-size: 15px; padding-top: 10px; padding-bottom: 10px; }
+    .title-head button.big.sub { font-size: 14px; padding-top: 8px; padding-bottom: 8px; }
+    .title-dock button { padding: 5px 1px; }
+    .title-dock button .di { font-size: 16px; }
+    #load-note { min-height: 0; }
+  }
+  #load-note { min-height: 18px; font-size: 12px; color: var(--dim); }
   #load-note.pulse { animation: notePulse 1.2s ease-in-out infinite; }
   #build-tag {
-    margin-top: 10px; font-size: 10.5px; letter-spacing: 0.4px;
+    font-size: 10.5px; letter-spacing: 0.4px;
     color: rgba(160, 185, 210, 0.45);
   }
   #build-tag.update {
@@ -1131,21 +1186,30 @@
     </div>
   </div>
   <!-- 画面フロー: タイトル → ルール選択 → ゲーム -->
+  <!-- タイトルは「上=遊び始める / 下=それ以外」の2かたまり。
+       あいだを空けて、背景の島が見えるようにしている。 -->
   <div id="screen-title" class="screen">
     <div class="title-inner">
-      <h2 class="title-logo">Hexfrontier</h2>
-      <div class="title-sub">HEX ISLAND STRATEGY</div>
-      <button class="primary big" data-act="goto-select">はじめる</button>
-      <button class="big" data-act="goto-online">🌐 オンライン対戦</button>
-      <button class="big" data-act="demo:setup">▶ あそびかた(動画)</button>
-      <button class="big" data-act="goto-rules">📖 あそびかた(文章)</button>
-      <button class="big" data-act="goto-records">📊 戦績と実績</button>
-      <button class="big" data-act="goto-walk">🚶 島を歩く</button>
-      <button data-act="bgm-toggle">🔊 BGM オン</button>
-      <div id="load-note"></div>
-      <!-- 版の表示。デプロイ時に BUILD_ID がコミットの短縮SHAへ置換される。
-           「手元の端末が最新版か」を目視で確認できるようにするため。 -->
-      <div id="build-tag">ver. BUILD_ID</div>
+      <div class="title-head">
+        <h2 class="title-logo">Hexfrontier</h2>
+        <div class="title-sub">HEX ISLAND STRATEGY</div>
+        <button class="primary big" data-act="goto-select">はじめる</button>
+        <button class="big sub" data-act="goto-online">🌐 オンライン対戦</button>
+      </div>
+      <div class="title-foot">
+        <div id="load-note"></div>
+        <!-- 遊ぶ以外の入口。アイコン+小さなラベルの一列にまとめる -->
+        <div class="title-dock">
+          <button data-act="demo:setup"><i class="di">▶</i><span>あそびかた</span></button>
+          <button data-act="goto-rules"><i class="di">📖</i><span>ルール</span></button>
+          <button data-act="goto-records"><i class="di">📊</i><span>戦績</span></button>
+          <button data-act="goto-walk"><i class="di">🚶</i><span>島を歩く</span></button>
+          <button data-act="bgm-toggle" aria-label="BGM"><i class="di">🔊</i><span>BGM</span></button>
+        </div>
+        <!-- 版の表示。デプロイ時に BUILD_ID がコミットの短縮SHAへ置換される。
+             「手元の端末が最新版か」を目視で確認できるようにするため。 -->
+        <div id="build-tag">ver. BUILD_ID</div>
+      </div>
     </div>
   </div>
   <div id="screen-select" class="screen">
