@@ -676,12 +676,17 @@
   }
   .walk-top button { pointer-events: auto; }
   #walk-where { flex: 1; font-size: 13px; color: var(--accent2); font-weight: 700; }
+  /* 操作の案内。右下はボタンが縦に2つ並ぶので、そこへは伸ばさない。
+     中央寄せの1行にすると、幅の狭い端末で画面からはみ出して読めなくなる。 */
   .walk-hint {
-    position: absolute; left: 50%; transform: translateX(-50%);
+    position: absolute;
+    left: calc(14px + env(safe-area-inset-left));
+    right: calc(112px + env(safe-area-inset-right));
     bottom: calc(10px + env(safe-area-inset-bottom));
-    padding: 5px 12px; border-radius: 999px;
+    max-width: 330px;
+    padding: 5px 12px; border-radius: 12px;
     background: rgba(8, 22, 38, 0.72);
-    font-size: 11px; color: #cfdcea; white-space: nowrap;
+    font-size: 11px; color: #cfdcea; line-height: 1.45;
     transition: opacity 0.6s ease-out;
   }
   /* 一度でも動かしたら引っ込める(遊びの邪魔をしない)。
@@ -728,23 +733,25 @@
   #walk-jump.on { transform: scale(0.92); background: rgba(255, 217, 125, 0.4); }
 
   /* ---------- 釣り ---------- */
-  /* ジャンプの上に重ねる。釣っている間はジャンプを引っ込める(main.js) */
+  /* ジャンプの「上」に別の枠として置く。同じ場所に重ねると、港のそばでは
+     2つのボタンが重なって文字が混ざる。釣っている間はジャンプだけ消えるが、
+     釣るボタンは動かさない ── 押している指の下でボタンが動くのは最悪なので。 */
   #walk-fish {
     position: absolute; pointer-events: auto; display: none;
-    right: calc(18px + env(safe-area-inset-right));
-    bottom: calc(28px + env(safe-area-inset-bottom));
-    width: 82px; height: 82px; border-radius: 50%;
+    right: calc(22px + env(safe-area-inset-right));
+    bottom: calc(122px + env(safe-area-inset-bottom));
+    width: 74px; height: 74px; border-radius: 50%;
     flex-direction: column; align-items: center; justify-content: center;
     gap: 1px; padding: 0;
     border: 2px solid rgba(255, 217, 125, 0.55);
     background: rgba(8, 22, 38, 0.52);
-    color: #fff; font-size: 26px; line-height: 1;
+    color: #fff; font-size: 23px; line-height: 1;
     text-shadow: 0 1px 4px rgba(0,0,0,0.6);
     -webkit-tap-highlight-color: transparent;
     transition: transform 90ms ease, background 90ms ease, border-color 150ms ease;
   }
   #walk-fish.on { display: flex; }
-  #walk-fish span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; }
+  #walk-fish span { font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
   #walk-fish.press { transform: scale(0.92); background: rgba(255, 217, 125, 0.42); }
   /* アタリ。見落とすと逃げられるので、いちばん目立たせる */
   #walk-fish.hit {
@@ -755,11 +762,14 @@
   @media (prefers-reduced-motion: reduce) { #walk-fish.hit { animation: none; } }
 
   /* 張りと取り込みの2本。ボタンの左に縦置きだと親指で隠れるので、下に横置き */
-  /* ボタンの上に置く。画面のいちばん下は「もどる」の案内と親指で埋まっている */
+  /* 右下はボタンが2つ縦に並ぶので、バーは左下に寄せる。
+     釣っている間は移動しないので、左半分(移動スティック)は空いている。 */
   #fish-bars {
-    position: absolute; left: 50%; transform: translateX(-50%);
-    bottom: calc(126px + env(safe-area-inset-bottom));
-    width: min(230px, 56vw); display: none; flex-direction: column; gap: 5px;
+    position: absolute;
+    left: calc(16px + env(safe-area-inset-left));
+    right: calc(112px + env(safe-area-inset-right));
+    bottom: calc(36px + env(safe-area-inset-bottom));
+    max-width: 260px; display: none; flex-direction: column; gap: 5px;
   }
   #fish-bars.on { display: flex; }
   .fbar {
@@ -1375,7 +1385,7 @@
     </div>
     <div id="fish-note"></div>
     <div id="fish-result"></div>
-    <div class="walk-hint">左半分をなぞって移動 / 右半分をなぞって視点 / ⤒ でジャンプ / 港で🎣</div>
+    <div class="walk-hint">左半分をなぞって移動 ・ 右半分をなぞって視点 ・ ⤒ でジャンプ ・ 港のそばで 🎣</div>
   </div>
   <div id="netbadge"><span class="dot"></span><span class="txt"></span></div>
   <div id="dialog-root"></div>

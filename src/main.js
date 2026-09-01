@@ -566,6 +566,7 @@ let fishResultTimer = null;
 
 function resetFishHud() {
   document.getElementById('walk-hud')?.classList.remove('fishing');
+  setWalkExitLabel(false);
   const j = jumpEl();
   if (j) j.style.display = '';
   fishEl()?.classList.remove('on', 'hit', 'press');
@@ -583,11 +584,20 @@ function onFishSpot(spot) {
   walkNote('🎣 ここで釣れる');
 }
 
+// 上のボタンは、釣っている間は「釣りをやめる」になる。
+// 押すと竿をしまうだけで島には残るので、「もどる」のままだと
+// 島から出てしまうように見えて押せない。
+function setWalkExitLabel(fishing) {
+  const el = document.querySelector('[data-act="walk-exit"]');
+  if (el) el.textContent = fishing ? '✕ 釣りをやめる' : '✕ もどる';
+}
+
 function setFishButton(kind) {
   const el = fishEl();
   if (!el) return;
   // 釣っている間は移動の案内を引っ込める(バーと重なる)
   document.getElementById('walk-hud')?.classList.toggle('fishing', kind !== 'ready');
+  setWalkExitLabel(kind !== 'ready');
   const [icon, label, hit] = FISH_BTN[kind] ?? FISH_BTN.ready;
   el.innerHTML = `${icon}<span>${label}</span>`;
   el.classList.add('on');
