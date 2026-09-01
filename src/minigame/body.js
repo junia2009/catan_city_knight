@@ -35,22 +35,12 @@ export const CUTE = {
   mouth: { r: 0.024, tube: 0.006, y: -0.030, z: 0.096 },
   // 肩は胴の外へ出す(bodyR + armR より内側だと腕が胴に埋まる)
   shoulder: { x: 0.093, y: 0.015 },
-  armR: 0.031, upperArm: 0.065, foreArm: 0.055, handR: 0.037,
+  // 腕は脚(thigh + shin)と同じくらいの長さに揃える。
+  // 脚だけ詰めると腕が長く見えて、手が靴のそばまで垂れる。
+  armR: 0.031, upperArm: 0.043, foreArm: 0.035, handR: 0.037,
   hipX: 0.050,         // 脚の間隔。近すぎると2本が1本に見える
   legR: 0.036, thigh: 0.038, shin: 0.035,
   shoe: { r: 0.038, len: 0.042, lift: -0.004, ahead: 0.022 },
-};
-
-// もう少し背が高め(頭の比率を下げた案)
-export const SLIM = {
-  ...CUTE,
-  hipY: 0.245,
-  bodyR: 0.068, bodyLen: 0.055, bodyY: 0.070, chestY: 0.130,
-  headR: 0.092, headY: 0.100,
-  eye: { r: 0.017, x: 0.035, y: 0.010, z: 0.081 },
-  shoulder: { x: 0.088, y: 0.018 },
-  upperArm: 0.075, foreArm: 0.062,
-  thigh: 0.102, shin: 0.092,
 };
 
 // 手足1本。上下2節で、付け根から吊り下げる。
