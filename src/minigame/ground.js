@@ -67,14 +67,28 @@ export function makeGround(state) {
   };
 }
 
-// 島のどこから歩き始めるか(陸のヘックスの中心で、いちばん中央寄り)
-export function spawnPoint(state) {
+// 席ごとに散らす輪の半径。タイル1枚(内接円 ≈ 0.87)に収まる大きさ。
+const SPAWN_RING = 0.5;
+// 散策部屋の席数。輪を何等分するか。
+const SPAWN_SEATS = 8;
+
+// 島のどこから歩き始めるか(陸のヘックスの中心で、いちばん中央寄り)。
+//
+// seat を渡すと、その席のぶんだけ輪の上にずらす。散策部屋では全員が
+// 同じ一点に立つと、名札だけが重なって「誰も居ないのに名前がある」ように
+// 見えるので、入った時点で少し離しておく。
+// ずらした先が海なら中心のまま(小さい島で輪がはみ出すことがある)。
+export function spawnPoint(state, seat = null) {
   let best = null;
   for (const { c } of landHexes(state)) {
     const d = Math.hypot(c.x, c.y);
     if (!best || d < best.d) best = { d, c };
   }
-  return best ? best.c : { x: 0, y: 0 };
+  const c = best ? best.c : { x: 0, y: 0 };
+  if (seat == null) return c;
+  const a = (seat % SPAWN_SEATS) * ((Math.PI * 2) / SPAWN_SEATS);
+  const p = { x: c.x + Math.cos(a) * SPAWN_RING, y: c.y + Math.sin(a) * SPAWN_RING };
+  return makeGround(state)(p.x, p.y).ok ? p : c;
 }
 
 // ---- 釣り場(港)----

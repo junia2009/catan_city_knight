@@ -99,7 +99,8 @@ export class WalkMode {
       makeBlocker(this.obstacles),
     );
 
-    const s = spawnPoint(state);
+    // 散策部屋では席ごとに立ち位置をずらす(全員が重なって見えないように)
+    const s = spawnPoint(state, seat);
     this.walker.setPosition(s.x, s.y);
 
     // 釣り。港のそばに立つと竿を出せる

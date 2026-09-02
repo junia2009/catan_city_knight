@@ -21,7 +21,11 @@ export const WALK_COLORS = [
 ];
 
 const HEIGHT = walkerHeight(CUTE);
-const NAME_Y = HEIGHT + 0.16;   // 名札は頭の少し上
+const NAME_Y = HEIGHT + 0.13;   // 名札は頭の少し上
+// 名札の高さ(ワールド座標)。棒人間の身長の 2 割ほど。
+// 一度これを 0.26 にしたら、近づいたとき画面の半分を名札が占めて
+// 肝心の相手が見えなくなった ── 名前は添えるもので、主役ではない。
+const NAME_H = 0.17;
 
 // 名札。名前は変わらないので、席ごとに1枚だけ作って使い回す。
 function makeNameTag(text) {
@@ -50,8 +54,7 @@ function makeNameTag(text) {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: tex, transparent: true, depthTest: false,
   }));
-  // 画面上でだいたい一定の大きさに見えるくらい
-  sprite.scale.set((canvas.width / 64) * 0.26, 0.26, 1);
+  sprite.scale.set((canvas.width / canvas.height) * NAME_H, NAME_H, 1);
   sprite.position.y = NAME_Y;
   sprite.renderOrder = 10;   // 木や山に隠れず、誰がどこにいるか分かるように
   return sprite;
