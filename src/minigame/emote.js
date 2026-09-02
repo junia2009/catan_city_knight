@@ -15,7 +15,7 @@ export const EMOTES = [
   { id: 2, key: 'cheer', icon: '🙌', label: 'バンザイ', ms: 1800 },
   { id: 3, key: 'bow', icon: '🙇', label: 'おじぎ', ms: 1600 },
   { id: 4, key: 'point', icon: '👉', label: 'あっち', ms: 2000 },
-  { id: 5, key: 'sad', icon: '😢', label: 'しょんぼり', ms: 2200 },
+  { id: 5, key: 'sad', icon: '😢', label: 'しょんぼり', ms: 2600 },
 ];
 
 const BY_ID = new Map(EMOTES.map((e) => [e.id, e]));

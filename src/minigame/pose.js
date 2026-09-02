@@ -307,17 +307,26 @@ function rawEmotePose(key, t, facing) {
         ],
       };
     }
-    // しょんぼり。うなだれて、腕を力なく垂らす
+    // しょんぼり。うつむいてから、ゆっくり首を左右に振る。
+    //
+    // 腰から折ると「おじぎ」と見分けがつかなくなる ── 実際、最初は
+    // どちらも腰を曲げていて「同じに見える」と言われた。
+    // なので折るのは背中(chest)だけにして、腰はほとんど曲げない。
+    // 項垂れている感じは、深くうつむいた頭を左右に振ることで出す。
     case 'sad': {
-      const sway = Math.sin(t * 1.5);
+      const down = Math.min(1, t / 0.5);        // まずうつむく
+      const shake = Math.sin((t - 0.5) * 4.0) * Math.min(1, Math.max(0, t - 0.5));
       return {
         ...base,
-        hips: JOINT(0.34, 0, sway * 0.03),
-        chest: JOINT(0.24, 0, sway * 0.05),
-        head: JOINT(0.52, sway * 0.12, 0),
-        legs: [0, 1].map((i) => LIMB(0, (i === 0 ? 1 : -1) * 0.06, 0.06)),
+        hips: JOINT(0.1, 0, 0),                 // 腰はほぼまっすぐ(おじぎとの差)
+        chest: JOINT(down * 0.38, 0, 0),        // 丸めた背中
+        head: JOINT(down * 0.55, shake * 0.34, shake * 0.06),
+        legs: [0, 1].map((i) => LIMB(0, (i === 0 ? 1 : -1) * 0.05, down * 0.16)),
+        // 腕は力なく前へ垂れ、首の動きに少し遅れてついてくる
         arms: [0, 1].map((i) => LIMB(
-          0.2 + sway * 0.04, (i === 0 ? -1 : 1) * 0.08, 0.2,
+          down * 0.3 + shake * 0.05,
+          (i === 0 ? -1 : 1) * 0.07,
+          down * 0.24,
         )),
       };
     }
