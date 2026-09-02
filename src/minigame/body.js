@@ -163,22 +163,28 @@ export function makeWalker(color = CLOTH, p = CUTE) {
 
   const head = new THREE.Mesh(new THREE.SphereGeometry(p.headR, 18, 14), skin);
   head.position.y = p.headY;
-  head.scale.set(1, 0.96, 0.96);
+  head.scale.set(1, 0.96, 0.96);   // 顔の付け位置はこの潰しを割り戻す(下)
   head.castShadow = true;
   chest.add(head);
 
-  // 目。向いている方向が分かるようにする(+Z が前)
+  // 目と口は「頭に付ける」。胴に付けると、首を振っても顔だけ正面を向いたまま
+  // ── 頭は丸いので、顔が付いてこないと首の動きが画面上まったく見えない
+  // (実際、しょんぼりで首を振らせても「振っているように見えない」となった)。
+  // 位置は頭の中心からの相対にする(頭は chest の headY にいる)。
+  // 頭は少し潰してある(scale)。子はその潰しを受けるので、割り戻して
+  // 付ける ── そうしないと顔の位置だけ前より内側へ寄る。
+  const hs = { y: 0.96, z: 0.96 };
   const eyeGeo = new THREE.SphereGeometry(p.eye.r, 8, 8);
   const eyeMat = new THREE.MeshBasicMaterial({ color: EYE });
   for (const sx of [-1, 1]) {
     const eye = new THREE.Mesh(eyeGeo, eyeMat);
-    eye.position.set(sx * p.eye.x, p.headY + p.eye.y, p.eye.z);
-    eye.scale.set(0.85, 1, 0.7);
-    chest.add(eye);
+    eye.position.set(sx * p.eye.x, p.eye.y / hs.y, p.eye.z / hs.z);
+    eye.scale.set(0.85, 1 / hs.y, 0.7 / hs.z);
+    head.add(eye);
   }
 
-  const mouth = makeMouth(eyeMat, { ...p.mouth, y: p.headY + p.mouth.y });
-  chest.add(mouth.smile, mouth.open);
+  const mouth = makeMouth(eyeMat, { ...p.mouth, y: p.mouth.y / hs.y, z: p.mouth.z / hs.z });
+  head.add(mouth.smile, mouth.open);
 
   const arms = [-1, 1].map((sx) => {
     const limb = makeLimb(skin, p.upperArm, p.foreArm, p.armR, makeHand(skin, p.handR));
