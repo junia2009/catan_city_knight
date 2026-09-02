@@ -97,6 +97,7 @@ export class WalkMode {
     this.onFishStep = null;  // 毎フレームの状態(HUD 用)
     this.onFishEvent = null; // 'bite' / 'burst' / 'landed' / 'lost'
 
+    this.paused = false;     // 図鑑を開いている間は時間を止める
     this.input = { x: 0, y: 0 };
     this.keys = new Set();
     this.camYaw = 0;
@@ -156,8 +157,19 @@ export class WalkMode {
   }
 
   jump() {
-    if (this.fishing) return;   // 釣っている間は跳ばない
+    if (this.paused || this.fishing) return;   // 釣っている間は跳ばない
     this.walker.motion.jump();
+  }
+
+  // 図鑑などを開いている間は時間を止める。
+  // 止めないと、パネルの裏でアタリが来て、見えないまま逃げられる。
+  setPaused(on) {
+    this.paused = !!on;
+    if (this.paused) {
+      this.setStick(0, 0);
+      this.keys.clear();
+      this.setReeling(false);
+    }
   }
 
   // ---- 釣り ----
@@ -235,7 +247,8 @@ export class WalkMode {
     // (片方だけ刻むと、低フレームで「本人はゆっくり・カメラだけ瞬間移動」
     //  になってガタつく)。長い dt は motion 側が細かく刻んで消化する。
     const dt = this.last ? Math.min(MAX_DT, (t - this.last) / 1000) : 0.016;
-    this.last = t;
+    this.last = t;   // 止まっている間も進めておく(再開時に一気に飛ばさない)
+    if (this.paused) return;
 
     if (this.fishing) {
       this._fishFrame(dt);

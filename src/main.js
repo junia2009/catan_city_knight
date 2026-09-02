@@ -13,7 +13,7 @@ import {
   addCatch, addResult, clearProgress, currentTitle, loadProgress, resultOf,
   saveProgress, setTitle,
 } from './progress.js';
-import { recordsHtml } from './render/records.js';
+import { fishbookHtml, recordsHtml } from './render/records.js';
 import {
   legalCityVertices,
   legalRoadEdges,
@@ -543,6 +543,7 @@ async function startWalk() {
 }
 
 function exitWalk() {
+  setWalkBook(false);
   walk?.dispose();
   walk = null;
   setDiveVeil(0);
@@ -699,7 +700,7 @@ function showFishResult(html, miss) {
 
 // ボタンの押し始め/離し。段階によって意味が変わる
 function fishPress() {
-  if (!walk) return;
+  if (!walk || walkBookOpen) return;
   const f = walk.fishing;
   if (!f) { if (walk.startFishing()) sfx.play('cast'); return; }
   if (f.phase === 'fight') { walk.setReeling(true); return; }
@@ -719,6 +720,23 @@ function showFishResultClear() {
 
 function fishRelease() {
   walk?.setReeling(false);
+}
+
+// 釣り図鑑。島を出ずに見られるようにする。
+// 開いている間は時間を止める ── 止めないと、パネルの裏でアタリが来て
+// 見えないまま逃げられるし、歩いている途中なら海へ落ちる。
+let walkBookOpen = false;
+function setWalkBook(on) {
+  if (!walk) return;
+  walkBookOpen = !!on;
+  const el = document.getElementById('walk-book');
+  if (walkBookOpen) {
+    document.getElementById('walk-book-body').innerHTML = fishbookHtml(progress, { walk: true });
+  }
+  el?.classList.toggle('on', walkBookOpen);
+  walk.setPaused(walkBookOpen);
+  // 移動スティックが出たままにならないように
+  if (walkBookOpen) walkStickHide();
 }
 
 // 釣りをやめて歩きに戻る(「もどる」ではなく、竿だけしまう)
@@ -1854,7 +1872,7 @@ function walkStickHide() {
 }
 
 function walkPointerDown(e) {
-  if (!walk) return;
+  if (!walk || walkBookOpen) return;
   // ボタンの上で始まったなぞりは、移動にも視点にも使わない
   // (ジャンプや「もどる」を押しただけで視点が回ってしまう)
   if (e.target.closest('button')) return;
@@ -1901,7 +1919,7 @@ window.addEventListener('pointercancel', walkPointerUp);
 const jumpEl = () => document.getElementById('walk-jump');
 jumpEl()?.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  if (!walk) return;
+  if (!walk || walkBookOpen) return;
   walk.jump();
   jumpEl()?.classList.add('on');
 });
@@ -1926,8 +1944,13 @@ for (const ev of ['pointerup', 'pointercancel']) {
 
 window.addEventListener('keydown', (e) => {
   if (!walk) return;
-  // 釣っている間の Escape は、竿をしまうだけ(いきなりタイトルへ戻さない)
-  if (e.code === 'Escape') { if (!fishQuit()) exitWalk(); return; }
+  // Escape は手前のものから閉じる: 図鑑 → 竿 → 島
+  if (e.code === 'Escape') {
+    if (walkBookOpen) setWalkBook(false);
+    else if (!fishQuit()) exitWalk();
+    return;
+  }
+  if (walkBookOpen) return;
   // スペースでページが送られないように(歩いている間だけ)
   if (e.code === 'Space') e.preventDefault();
   // 釣り場ではスペース/F が釣りの操作になる(押しっぱなしで巻く)
@@ -1974,9 +1997,13 @@ document.addEventListener('click', (e) => {
       enterWalk();
       return;
     case 'walk-exit':
+      // 図鑑を開いていたら、まずそれを閉じる
+      if (walkBookOpen) { setWalkBook(false); return; }
       // 釣っている途中なら、まず竿をしまう(押し間違いで島から出さない)
       if (!fishQuit()) exitWalk();
       return;
+    case 'walk-book': setWalkBook(true); return;
+    case 'walk-book-close': setWalkBook(false); return;
     case 'goto-records':
       ui.dialog = null; // 勝敗ダイアログから来ることがある
       // 実績を解除した直後なら、その実績を開いた状態で見せる

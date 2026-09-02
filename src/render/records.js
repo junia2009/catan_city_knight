@@ -22,7 +22,9 @@ const TIER_LABEL = {
   junk: 'ガラクタ', common: 'よくいる', rare: '大物', legend: '港のぬし', myth: 'まぼろし',
 };
 
-function fishbook(progress) {
+// 島を歩くモードからも同じものを出すので、外へ出しておく。
+// walk: 歩いている最中に開いたか(「島を歩くモードで…」の案内は要らない)
+export function fishbookHtml(progress, { walk = false } = {}) {
   const book = progress.fish ?? {};
   const c = fishbookCount(progress, FISH.length);
   const rows = FISH.map((f) => {
@@ -35,8 +37,10 @@ function fishbook(progress) {
   }).join('');
   return `<p class="fbook-head">図鑑 <b>${c.got}/${c.total}</b> 種類 ・ ぜんぶで <b>${c.caught}</b> 匹</p>
     <div class="fbook">${rows}</div>
-    <p><small>島を歩くモードで、港のそばに立つと釣れます。
-    「港のぬし」はその港でしか釣れません。</small></p>`;
+    <p><small>${walk
+      ? '「港のぬし」はその港でしか釣れません。ほかの港もまわってみましょう。'
+      : '島を歩くモードで、港のそばに立つと釣れます。「港のぬし」はその港でしか釣れません。'}
+    </small></p>`;
 }
 
 const dash = '<span class="zero">—</span>';
@@ -154,7 +158,7 @@ export function recordsHtml(progress, { tab = 'stats', selected = null, confirmi
   </div>`;
 
   const body = tab === 'fish'
-    ? fishbook(progress)
+    ? fishbookHtml(progress)
     : tab === 'ach'
     ? `<div class="tiers">${tierSummary(progress)}</div>
        ${badgeGrid(progress, stats, selected)}
