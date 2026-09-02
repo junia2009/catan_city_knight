@@ -6,7 +6,9 @@
 // (WebGL コンテキストを2つ持つとモバイルで重すぎるため)。
 
 import * as THREE from 'three';
-import { makeGround, spawnPoint, fishingSpots, spotNear } from './ground.js';
+import {
+  makeGround, spawnPoint, fishingSpots, spotNear, hexCenter,
+} from './ground.js';
 import { makeBlocker } from './obstacles.js';
 import { MAX_DT, SINK_DEPTH, WATER_Y } from './motion.js';
 import { Walker, WALK_SPEED } from './walker.js';
@@ -108,6 +110,10 @@ export class WalkMode {
     this.onJump = null;
     this.onSplash = null;
     this.onSink = null;    // 沈み具合(0〜1)。画面を暗くするのに使う
+    // 足音: (地形, 'walk'|'jump'|'land', 揺らぎ -1〜1, 歩く速さ 0〜1)
+    this.onStep = null;
+    // 足元の地形。state をずっと抱えずに、見るところだけ切り出しておく
+    this.terrainAt = (hid) => state.board.hexes[hid]?.terrain ?? null;
     this.fx = new WaterFx(board3d.scene);
 
     // カメラと操作を借りるので、元の状態を覚えておいて出るときに戻す
@@ -266,7 +272,11 @@ export class WalkMode {
       this.spot = spot;
       this.onSpot?.(spot);
     }
-    if (r?.jumped) this.onJump?.();
+    // 足音。「地面 × 動き」で音が変わるので、どこを踏んだかも渡す。
+    // 踏み切りと着地は歩数と別に鳴らす(同じ足でも重さが違う)。
+    if (r?.jumped) { this._step('jump'); this.onJump?.(); }
+    else if (r?.landed && !r.respawned) this._step('land');
+    else if (r?.stepped) this._step('walk', r.gait);
     if (r?.splashed) {
       this.fx.splash(w.x, w.z);
       this.onSplash?.();
@@ -386,6 +396,23 @@ export class WalkMode {
   }
 
   // いま立っているヘックスの地形(HUD に出す)
+  // 足音を1つ鳴らす。地面の種類はここで見て、音そのものは外に任せる。
+  // gait は歩く速さ(0〜1)。ゆっくり歩けば小さい音になる。
+  _step(motion, gait = 1) {
+    if (!this.onStep) return;
+    const g = this.ground(this.walker.pos.x, this.walker.pos.z);
+    const terrain = g.hexId ? this.terrainAt?.(g.hexId) : null;
+    // 同じ音が続くと機械的に聞こえるので、1歩ごとに少し振る。
+    // 演出だけの乱数なので Math.random でよい(対戦の乱数には触れない)。
+    this.onStep(terrain, motion, Math.random() * 2 - 1, gait);
+  }
+
+  // ヘックスの中心(E2E で「このタイルの上に立たせる」のに使う)
+  hexCenter(hid) {
+    const c = hexCenter(hid);
+    return c ? { x: c.x, z: c.y } : null;
+  }
+
   standingOn(state) {
     const g = this.ground(this.walker.pos.x, this.walker.pos.z);
     if (!g.hexId) return null;
