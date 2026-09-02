@@ -674,8 +674,22 @@
     padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
     background: linear-gradient(180deg, rgba(8,22,38,0.75), transparent);
   }
-  .walk-top button { pointer-events: auto; }
-  #walk-where { flex: 1; font-size: 13px; color: var(--accent2); font-weight: 700; }
+  .walk-top button { pointer-events: auto; flex: none; }
+  /* 場所名は詰められるようにする。ボタンが増えても押し出さない */
+  #walk-where {
+    flex: 1; min-width: 0; font-size: 13px; color: var(--accent2); font-weight: 700;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* 釣り図鑑(島を歩く中から開く)。HUD より上に出す */
+  #walk-book {
+    position: absolute; inset: 0; z-index: 3; pointer-events: auto;
+    display: none; align-items: center; justify-content: center;
+    padding: 12px;
+    background: rgba(6, 18, 32, 0.72);
+  }
+  #walk-book.on { display: flex; }
+  #walk-book .select-panel { max-height: 88dvh; }
   /* 操作の案内。右下はボタンが縦に2つ並ぶので、そこへは伸ばさない。
      中央寄せの1行にすると、幅の狭い端末で画面からはみ出して読めなくなる。 */
   .walk-hint {
@@ -1372,6 +1386,7 @@
   <div id="walk-hud">
     <div class="walk-top">
       <span id="walk-where"></span>
+      <button data-act="walk-book" aria-label="釣り図鑑">📖</button>
       <button data-act="walk-exit">✕ もどる</button>
     </div>
     <div id="walk-dive"></div>
@@ -1386,6 +1401,16 @@
     <div id="fish-note"></div>
     <div id="fish-result"></div>
     <div class="walk-hint">左半分をなぞって移動 ・ 右半分をなぞって視点 ・ ⤒ でジャンプ ・ 港のそばで 🎣</div>
+    <!-- 釣り図鑑。島を出ずに見られるようにする(開いている間は時間を止める) -->
+    <div id="walk-book">
+      <div class="select-panel rules-panel">
+        <h3>🎣 釣り図鑑</h3>
+        <div id="walk-book-body"></div>
+        <div class="row end rules-close">
+          <button class="primary" data-act="walk-book-close">とじる</button>
+        </div>
+      </div>
+    </div>
   </div>
   <div id="netbadge"><span class="dot"></span><span class="txt"></span></div>
   <div id="dialog-root"></div>
