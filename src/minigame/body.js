@@ -177,9 +177,12 @@ function makeEars(furMat, accMat, kind, p) {
 // しっぽ。腰の後ろから。ねこは立てて、きつねは太く、ドラゴンは太く長く垂らす
 function makeTail(furMat, accMat, kind, p) {
   const g = new THREE.Group();
-  const len = kind === 'fox' ? 0.13 : kind === 'dragon' ? 0.15 : 0.11;
+  const len = kind === 'fox' ? 0.13 : kind === 'dragon' ? 0.14 : 0.11;
   const thick = kind === 'fox' ? 0.030 : kind === 'dragon' ? 0.026 : 0.017;
-  const m = new THREE.Mesh(new THREE.CapsuleGeometry(thick, len, 4, 8), furMat);
+  // ドラゴンだけ先細り。同じ太さのカプセルだと、横から見て青い棒になる
+  const m = kind === 'dragon'
+    ? new THREE.Mesh(new THREE.ConeGeometry(thick, len, 7), furMat)
+    : new THREE.Mesh(new THREE.CapsuleGeometry(thick, len, 4, 8), furMat);
   m.position.y = len / 2;
   m.castShadow = true;
   g.add(m);
@@ -189,11 +192,26 @@ function makeTail(furMat, accMat, kind, p) {
     tip.position.y = len;
     g.add(tip);
   }
+  if (kind === 'dragon') {
+    // しっぽにも背びれを続ける。胴で終わると尻切れに見える
+    for (let i = 0; i < 3; i += 1) {
+      const k = 0.9 - i * 0.2;
+      const fin = new THREE.Mesh(new THREE.ConeGeometry(thick * 0.75 * k, thick * 2 * k, 5), accMat);
+      fin.position.set(0, len * (0.28 + i * 0.2), -thick * (0.62 - i * 0.14));
+      fin.rotation.x = -0.7;
+      g.add(fin);
+    }
+    // 先の矢じり
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(thick * 1.4, thick * 2.6, 4), accMat);
+    tip.position.y = len * 0.98;
+    tip.scale.set(1, 1, 0.4);
+    g.add(tip);
+  }
   // 付け根は胴の外へ出す。中に置くと丸ごと埋まって、後ろから見えない。
   g.position.set(0, p.bodyY * 0.55, -(p.bodyR + thick * 0.5));
   // rotation.x が正だと前(+Z)へ倒れて体に刺さる。後ろへ倒すので負。
   // ねこはほぼ立て、きつねは斜め、ドラゴンは水平に近く伸ばす。
-  g.rotation.x = kind === 'dragon' ? -1.45 : kind === 'fox' ? -0.8 : -0.5;
+  g.rotation.x = kind === 'dragon' ? -1.05 : kind === 'fox' ? -0.8 : -0.5;
   return g;
 }
 
@@ -241,27 +259,82 @@ function makeFluff(mat, p) {
   return g;
 }
 
-// 角(ドラゴン)
+// 角(ドラゴン)。後ろへ長く反らせる。
+// 短い円錐を2本立てただけだと、後ろから見て「ねこの耳」と見分けが
+// つかなかった ── 角は「長さと後ろへの反り」で角に見える。
 function makeHorns(mat, p) {
   const g = new THREE.Group();
   for (const sx of [-1, 1]) {
-    const m = new THREE.Mesh(new THREE.ConeGeometry(p.headR * 0.16, p.headR * 0.55, 6), mat);
-    m.position.set(sx * p.headR * 0.46, p.headR * 0.85, -p.headR * 0.15);
-    m.rotation.z = sx * 0.3;
-    m.rotation.x = -0.25;
-    m.castShadow = true;
-    g.add(m);
+    // 大きい角。根元から後ろ上へ伸ばし、途中で少し曲げる(2節に分ける)
+    const horn = new THREE.Group();
+    const lower = new THREE.Mesh(new THREE.ConeGeometry(p.headR * 0.19, p.headR * 0.6, 6), mat);
+    lower.position.y = p.headR * 0.3;
+    const upper = new THREE.Group();
+    upper.position.y = p.headR * 0.55;
+    upper.rotation.x = -0.55;                 // 先を後ろへ反らせる
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(p.headR * 0.12, p.headR * 0.5, 6), mat);
+    tip.position.y = p.headR * 0.25;
+    upper.add(tip);
+    horn.add(lower, upper);
+    horn.position.set(sx * p.headR * 0.5, p.headR * 0.66, -p.headR * 0.2);
+    horn.rotation.z = sx * 0.34;
+    horn.rotation.x = -0.3;
+    g.add(horn);
+
+    // 小さい角(頬の横)。2対にすると一気に「竜」らしくなる
+    const small = new THREE.Mesh(new THREE.ConeGeometry(p.headR * 0.1, p.headR * 0.3, 5), mat);
+    small.position.set(sx * p.headR * 0.72, p.headR * 0.1, -p.headR * 0.3);
+    small.rotation.z = sx * 1.0;
+    small.rotation.x = -0.4;
+    g.add(small);
   }
+  g.traverse((o) => { o.castShadow = true; });
   return g;
 }
 
-// 背びれ(ドラゴン)。胴の背中側に小さい三角を並べる
+// 翼(ドラゴン)。背中に畳んだ翼を張る。
+// 遊ぶときのカメラは背中側なので、いちばん目に入るのがここ。
+function makeWings(furMat, accMat, p) {
+  const g = new THREE.Group();
+  // 小さいと「肩に付いた飾り」にしか見えない。胴の3倍ほどまで伸ばす。
+  const span = p.bodyR * 2.7;
+  for (const sx of [-1, 1]) {
+    const wing = new THREE.Group();
+    // 骨。付け根から斜め後ろ上へ、翼の前ぶちとして伸ばす
+    const bone = new THREE.Mesh(
+      new THREE.CapsuleGeometry(p.bodyR * 0.08, span * 0.85, 3, 6), furMat,
+    );
+    bone.position.y = span * 0.42;
+    wing.add(bone);
+    // 膜。平たい三角を3枚、扇のようにずらして重ねる
+    for (let i = 0; i < 3; i += 1) {
+      const k = 1 - i * 0.14;
+      const m = new THREE.Mesh(new THREE.ConeGeometry(span * 0.34 * k, span * 0.8 * k, 3), accMat);
+      m.position.set(sx * span * 0.17, span * 0.44 - i * span * 0.2, 0);
+      m.rotation.z = sx * (0.35 + i * 0.28);
+      m.scale.set(1, 1, 0.14);   // ぺたんこにして膜にする
+      wing.add(m);
+    }
+    // 背中の上のほう(肩甲骨のあたり)。低いと腰の飾りに見える
+    // 膜は平たいので、面が後ろを向くように付ける。横へ捻ると、横から見た
+    // ときだけ板が突き出て「旗」に見える(遊ぶカメラは背中側)。
+    wing.position.set(sx * p.bodyR * 0.45, 0.014, -p.bodyR * 0.82);
+    wing.rotation.set(-0.12, sx * 0.22, sx * 0.4);
+    g.add(wing);
+  }
+  g.traverse((o) => { o.castShadow = true; });
+  return g;
+}
+
+// 背びれ(ドラゴン)。胴の背中側に三角を並べる
 function makeSpikes(mat, p) {
   const g = new THREE.Group();
-  for (let i = 0; i < 3; i += 1) {
-    const m = new THREE.Mesh(new THREE.ConeGeometry(p.bodyR * 0.18, p.bodyR * 0.42, 5), mat);
-    m.position.set(0, p.bodyY + (i - 1) * p.bodyR * 0.42, -p.bodyR * 0.78);
-    m.rotation.x = -0.5;
+  for (let i = 0; i < 4; i += 1) {
+    // 上ほど大きく。同じ大きさで並べると板を貼ったように見える
+    const k = 1 - i * 0.16;
+    const m = new THREE.Mesh(new THREE.ConeGeometry(p.bodyR * 0.2 * k, p.bodyR * 0.55 * k, 5), mat);
+    m.position.set(0, p.bodyY + (1.1 - i) * p.bodyR * 0.4, -p.bodyR * 0.76);
+    m.rotation.x = -0.6;
     m.castShadow = true;
     g.add(m);
   }
@@ -375,6 +448,8 @@ export function makeWalker(color = CLOTH, species = speciesById(DEFAULT_SPECIES)
   if (parts.beak) head.add(makeBeak(accent, p));
   if (parts.horns) head.add(makeHorns(accent, p));
   if (parts.fluff) head.add(makeFluff(skin, p));
+  // 翼は胴(chest)に付ける。上体をひねると一緒に動く
+  if (parts.wings) chest.add(makeWings(skin, accent, p));
   // 腰(体のひねりに付いてくる)
   if (parts.tail) hips.add(makeTail(skin, accent, parts.tail, p));
   if (parts.spikes) hips.add(makeSpikes(accent, p));
