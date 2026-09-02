@@ -25,7 +25,7 @@ import {
 } from './ai/legal-moves.js';
 import { LAYOUT, boardVertexIds } from './rules/board.js';
 import { isSeaHex, movableShips, pirateTargets } from './rules/sea.js';
-import { lsSet, lsRemove } from './storage.js';
+import { lsGet, lsSet, lsRemove } from './storage.js';
 import { razableCities } from './rules/cak/barbarians.js';
 import {
   PROGRESS_CARDS, diplomatMovable, diplomatDestinations,
@@ -40,6 +40,7 @@ import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
 import { EMOTES } from './minigame/emote.js';
 import { WALK_SEATS } from './minigame/remote-st.js';
+import { SPECIES, speciesById, cleanSpecies, DEFAULT_SPECIES } from './minigame/species.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 import {
   NetClient, createRoom, clientId, savedName, saveName, serverBase,
@@ -282,7 +283,7 @@ function renderWalkLobby(panel, lb, err) {
   const seats = here.map((s) => {
     const isMe = s.seat === net?.seat;
     return `<div class="seat-row" style="--pc:${walkColor(s.seat)}">
-      <span>${s.name}${isMe ? '(あなた)' : ''}</span>
+      <span>${speciesById(s.look).icon} ${s.name}${isMe ? '(あなた)' : ''}</span>
       ${lb.hostSeat === s.seat ? '<span class="tag host">ホスト</span>' : ''}
       ${s.online ? '' : '<span class="tag off">切断中</span>'}
     </div>`;
@@ -299,6 +300,8 @@ function renderWalkLobby(panel, lb, err) {
       <small>この合言葉を友達に伝えてください</small>
     </div>
     <div class="seat-list">${seats}</div>
+    <div class="srow"><span>すがた</span>${seg('net-look',
+      SPECIES.map((sp) => [String(sp.id), `${sp.icon} ${sp.label}`]), String(myLook), false)}</div>
     <div class="srow"><span>島</span>${seg('net-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師'], ['sea', '⛵航海者']], lb.settings.mode, !host)}</div>
     <div class="net-status ${online.status}"><span class="dot"></span>${STATUS_JP[online.status] ?? ''}</div>
     ${err}
@@ -310,6 +313,13 @@ function renderWalkLobby(panel, lb, err) {
       <button data-act="net-leave">← 退出</button>
       <button class="primary" data-act="walk-enter">🏝 島に入る</button>
     </div>`;
+}
+
+// 自分のすがた(species.js の番号)。選んだら次からも同じ姿で入る
+let myLook = cleanSpecies(lsGet('look') ?? DEFAULT_SPECIES);
+function setMyLook(id) {
+  myLook = cleanSpecies(id);
+  lsSet('look', myLook);
 }
 
 // 散策部屋の席の色。3D 側(remote-view.js)と揃える
@@ -380,6 +390,7 @@ function onWalkLobby(msg) {
 }
 
 function startNet(code, name, kind = 'game') {
+  // 散策部屋なら、自分のすがたも一緒に名乗る
   saveName(name);
   online.code = code;
   online.kind = kind;
@@ -410,7 +421,10 @@ function startNet(code, name, kind = 'game') {
       renderOnlinePanel();
     },
   });
-  net.connect(code, name, kind);
+  // すがたは種類によらず必ず名乗る。合言葉で入るときは、繋いでみるまで
+  // 散策部屋かどうか分からない ── ここで出し惜しむと、入った人だけ
+  // 既定の姿になる(実際そうなった)。対戦部屋では使われないだけ。
+  net.connect(code, name, kind, myLook);
   setScreen('online');
   renderOnlinePanel();
 }
@@ -630,7 +644,7 @@ async function startWalk() {
   r.setGame(state);
   r.update(state, freshUi());
   const mod = await import('./minigame/walk-mode.js');
-  walk = new mod.WalkMode(r, state, undefined, seat);
+  walk = new mod.WalkMode(r, state, undefined, seat, myLook);
   if (seat != null) {
     walk.onPos = (p) => net?.pos(p);
     walk.setWalkerNames(lobby.seats);
@@ -2134,6 +2148,11 @@ document.addEventListener('click', (e) => {
     case 'goto-walk':
       enterWalk();
       return;
+    case 'net-look':     // すがたを選んだ
+      setMyLook(arg);
+      net?.setLook(myLook);
+      renderOnlinePanel();
+      return;
     case 'walk-enter':   // 散策部屋から島へ
       enterWalk();
       return;
@@ -2656,6 +2675,9 @@ window.hexDebug = {
   walkStick: (x, y) => walk?.setStick(x, y),
   walkJump: () => walk?.jump(),
   walkEmote: (id) => walk?.playEmote(id) ?? false,
+  // すがた(E2E 用)。選び直すと次に島へ入ったときに反映される
+  setLook: (id) => { setMyLook(id); net?.setLook(myLook); return myLook; },
+  getLook: () => myLook,
   getWalkEmote: () => (walk?.emote ? { ...walk.emote } : null),
   // 島を歩く・釣り(E2E用)。港まで歩かせずに試せるようにする
   walkTo: (x, z) => walk?.walker.setPosition(x, z),

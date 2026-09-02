@@ -7,12 +7,13 @@
 // 項目を足したときに「相手だけ足が交差する」ようなずれが起きない。
 
 import * as THREE from 'three';
-import { makeWalker, walkerHeight, CUTE } from './body.js';
+import { makeWalker, walkerHeight } from './body.js';
 import { applyPose } from './walker.js';
 import { walkPose, airPose, tumblePose, fishPose, emotePose } from './pose.js';
 import { WALK_SPEED } from './motion.js';
 import { ST } from './remote-st.js';
 import { emoteById } from './emote.js';
+import { speciesById, DEFAULT_SPECIES } from './species.js';
 
 // 席ごとの色。対戦の4色に、散策部屋のぶんを足して8色。
 // 隣り合う席が似た色にならないように並べてある。
@@ -21,15 +22,16 @@ export const WALK_COLORS = [
   0x36c98d, 0xf25fa8, 0x7ad0e8, 0xd9c34a,
 ];
 
-const HEIGHT = walkerHeight(CUTE);
-const NAME_Y = HEIGHT + 0.13;   // 名札は頭の少し上
+// 名札は頭の少し上。背丈はすがたによって違う(角やもこもこで伸びる)ので、
+// 決め打ちにしない ── 固定値だと、背の高い子の名札が頭にめり込む。
+const nameY = (sp) => walkerHeight(sp) + 0.13;
 // 名札の高さ(ワールド座標)。棒人間の身長の 2 割ほど。
 // 一度これを 0.26 にしたら、近づいたとき画面の半分を名札が占めて
 // 肝心の相手が見えなくなった ── 名前は添えるもので、主役ではない。
 const NAME_H = 0.17;
 
 // 名札。名前は変わらないので、席ごとに1枚だけ作って使い回す。
-function makeNameTag(text) {
+function makeNameTag(text, y) {
   const pad = 12;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -56,7 +58,7 @@ function makeNameTag(text) {
     map: tex, transparent: true, depthTest: false,
   }));
   sprite.scale.set((canvas.width / canvas.height) * NAME_H, NAME_H, 1);
-  sprite.position.y = NAME_Y;
+  sprite.position.y = y;
   sprite.renderOrder = 10;   // 木や山に隠れず、誰がどこにいるか分かるように
   return sprite;
 }
@@ -66,9 +68,8 @@ function makeNameTag(text) {
 // 名札(0.17)より気持ち大きいくらい。同じ理由で大きくしすぎない ──
 // 絵文字は目立つので、名札より一回り大きいだけで十分に読める。
 const BUBBLE_H = 0.2;
-const BUBBLE_Y = NAME_Y + 0.19;
 
-function makeBubble(icon) {
+function makeBubble(icon, y) {
   const canvas = document.createElement('canvas');
   canvas.width = 96;
   canvas.height = 96;
@@ -88,7 +89,7 @@ function makeBubble(icon) {
     map: tex, transparent: true, depthTest: false,
   }));
   sprite.scale.set(BUBBLE_H, BUBBLE_H, 1);
-  sprite.position.y = BUBBLE_Y;
+  sprite.position.y = y;
   sprite.renderOrder = 11;
   return sprite;
 }
@@ -98,16 +99,18 @@ export class RemoteView {
   constructor(scene, groundAt) {
     this.scene = scene;
     this.groundAt = groundAt;
-    this.people = new Map();   // seat -> { parts, tag, name, phase, spin, t, y }
+    this.people = new Map();   // seat -> { parts, tag, name, sp, phase, spin, t, y }
   }
 
-  _make(seat, name) {
-    const parts = makeWalker(WALK_COLORS[seat % WALK_COLORS.length]);
+  _make(seat, name, look) {
+    const sp = speciesById(look ?? DEFAULT_SPECIES);
+    const parts = makeWalker(WALK_COLORS[seat % WALK_COLORS.length], sp);
     this.scene.add(parts.group);
-    const tag = name ? makeNameTag(name) : null;
+    const tag = name ? makeNameTag(name, nameY(sp)) : null;
     if (tag) parts.group.add(tag);
     const e = {
-      parts, tag, name: name ?? null, phase: 0, spin: 0, t: 0, y: 0,
+      parts, tag, name: name ?? null, sp, look: sp.id,
+      phase: 0, spin: 0, t: 0, y: 0,
       emote: 0, emoteT: 0, bubble: null,
     };
     this.people.set(seat, e);
@@ -120,12 +123,18 @@ export class RemoteView {
     for (const p of people) {
       seen.add(p.seat);
       let e = this.people.get(p.seat);
-      if (!e) e = this._make(p.seat, p.name);
+      if (!e) e = this._make(p.seat, p.name, p.look);
+      // すがたを変えた/名簿が後から届いた。体ごと作り直す
+      // (耳やしっぽは組み立て時に足しているので、後から差し替えられない)
+      if (p.look && p.look !== e.look) {
+        this._remove(p.seat, e);
+        e = this._make(p.seat, p.name ?? e.name, p.look);
+      }
       // 名前は後から名簿が届くことがある
       if (p.name && p.name !== e.name) {
         if (e.tag) { e.tag.removeFromParent(); disposeSprite(e.tag); }
         e.name = p.name;
-        e.tag = makeNameTag(p.name);
+        e.tag = makeNameTag(p.name, nameY(e.sp));
         e.parts.group.add(e.tag);
       }
 
@@ -184,7 +193,7 @@ export class RemoteView {
     }
     const em = id ? emoteById(id) : null;
     if (!em) return;
-    e.bubble = makeBubble(em.icon);
+    e.bubble = makeBubble(em.icon, nameY(e.sp) + 0.19);
     e.parts.group.add(e.bubble);
   }
 

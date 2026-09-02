@@ -10,6 +10,7 @@ import { dispatch, validateAction } from '../src/actions.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 import { totalCards } from '../src/rules/build.js';
 import { WALK_SEATS } from '../src/minigame/remote-st.js';
+import { cleanSpecies, DEFAULT_SPECIES } from '../src/minigame/species.js';
 
 export const MAX_SEATS = 4;
 // 散策部屋(同じ島をみんなで歩く)は対戦の席数に縛られないので多めに取る。
@@ -123,13 +124,16 @@ export class RoomCore {
   }
 
   // 参加(再接続なら元の席に戻る)
-  join({ clientId, name }) {
+  // look: 散策部屋での「すがた」(species.js の番号)。名前と同じく
+  // 変わらない値なので、位置とは別に名簿へ乗せる(毎フレーム送らない)。
+  join({ clientId, name, look }) {
     if (!clientId) return { error: '不正な参加者です' };
     this.touch();
     const existing = this.seatOf(clientId);
     if (existing >= 0) {
       this.seats[existing].online = true;
       if (name) this.seats[existing].name = sanitizeName(name, this.seats[existing].name);
+      if (look != null) this.seats[existing].look = cleanSpecies(look);
       if (this.hostId == null) this.hostId = clientId;
       return { seat: existing, rejoined: true };
     }
@@ -139,10 +143,20 @@ export class RoomCore {
     this.seats[seat] = {
       clientId,
       name: sanitizeName(name, `プレイヤー${seat + 1}`),
+      look: look == null ? DEFAULT_SPECIES : cleanSpecies(look),
       online: true,
     };
     if (this.hostId == null) this.hostId = clientId;
     return { seat, rejoined: false };
+  }
+
+  // すがたを変える。島に入ったあとでも変えてよい(相手の画面で作り直される)
+  setLook(clientId, look) {
+    const seat = this.seatOf(clientId);
+    if (seat < 0) return { error: '席がありません' };
+    this.seats[seat].look = cleanSpecies(look);
+    this.touch();
+    return { seat, look: this.seats[seat].look };
   }
 
   // 切断。対戦中は席を残し(再接続で復帰)、ロビーなら席を空ける。
@@ -311,6 +325,7 @@ export class RoomCore {
       seats: this.seats.map((s, i) => ({
         seat: i,
         name: s ? s.name : null,
+        look: s ? (s.look ?? DEFAULT_SPECIES) : DEFAULT_SPECIES,
         online: s ? s.online : false,
         occupied: !!s,
       })),

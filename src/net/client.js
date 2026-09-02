@@ -62,9 +62,11 @@ export class NetClient {
   }
 
   // kind: 'game'(対戦)/ 'walk'(散策)。まだ無い部屋を作るときにだけ効く
-  connect(code, name, kind = 'game') {
+  // look: 散策部屋での「すがた」。名前と同じく、繋いだときに一度だけ送る
+  connect(code, name, kind = 'game', look = null) {
     this.code = code;
     this.name = name;
+    this.look = look;
     this.kind = kind === 'walk' ? 'walk' : 'game';
     this.closedByUs = false;
     this._open();
@@ -83,7 +85,9 @@ export class NetClient {
 
     ws.addEventListener('open', () => {
       this.retry = 0;
-      ws.send(JSON.stringify({ t: 'hello', clientId: clientId(), name: this.name }));
+      ws.send(JSON.stringify({
+        t: 'hello', clientId: clientId(), name: this.name, look: this.look ?? undefined,
+      }));
       clearInterval(this.pingTimer);
       this.pingTimer = setInterval(() => this.send({ t: 'ping' }), PING_MS);
     });
@@ -173,6 +177,12 @@ export class NetClient {
 
   // 散策部屋: 自分の位置。届かなくても次が来るので、送れなければ黙って捨てる
   // (取りこぼしを再送すると、古い位置で上書きしてしまう)。
+  // すがたを変える。再接続したときも同じ姿で戻れるよう覚えておく
+  setLook(look) {
+    this.look = look;
+    return this.send({ t: 'look', look });
+  }
+
   pos(p) {
     if (this.ws?.readyState !== WebSocket.OPEN) return false;
     try {
