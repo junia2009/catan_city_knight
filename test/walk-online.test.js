@@ -338,3 +338,19 @@ test('散策部屋: 保存して読み直しても種類と島が変わらない
   assert.equal(back.maxSeats, WALK_MAX_SEATS);
   assert.equal(back.seats.length, WALK_MAX_SEATS);
 });
+
+// 席数は「サーバーの席」「画面の案内文と名簿」「席の色」の3か所で使う。
+// 別々に書くと、席を増やしたときに静かにずれる(色が足りない・案内が嘘になる)。
+test('散策部屋: 席数は1か所で決まっている', async () => {
+  const { WALK_SEATS } = await import('../src/minigame/remote-st.js');
+  assert.equal(WALK_MAX_SEATS, WALK_SEATS, 'サーバーの席数がずれている');
+  const room = new RoomCore({ kind: 'walk' });
+  assert.equal(room.seats.length, WALK_SEATS);
+  // 実際にその人数まで座れること
+  for (let i = 0; i < WALK_SEATS; i += 1) {
+    const r = room.join({ clientId: `c${i}`, name: `p${i}` });
+    assert.equal(r.seat, i, `${i + 1} 人目が座れない(${r.error ?? ''})`);
+  }
+  assert.ok(room.join({ clientId: 'over', name: 'あふれ' }).error,
+    '席数を超えて入れてしまう');
+});

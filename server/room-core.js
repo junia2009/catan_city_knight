@@ -9,11 +9,14 @@ import { createGame } from '../src/state.js';
 import { dispatch, validateAction } from '../src/actions.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 import { totalCards } from '../src/rules/build.js';
+import { WALK_SEATS } from '../src/minigame/remote-st.js';
 
 export const MAX_SEATS = 4;
 // 散策部屋(同じ島をみんなで歩く)は対戦の席数に縛られないので多めに取る。
 // 増やすほど毎 tick に配る中身が大きくなるので、際限なくは広げないこと。
-export const WALK_MAX_SEATS = 8;
+// 実際の数は画面(案内文・名簿・色)と揃える必要があるので、共有の
+// remote-st.js に置いてある。
+export const WALK_MAX_SEATS = WALK_SEATS;
 export const MIN_PLAYERS = 2;
 // 部屋の種類。対戦は権威をサーバーが持つが、散策は「島の種と名簿」だけを配る
 export const KINDS = ['game', 'walk'];
