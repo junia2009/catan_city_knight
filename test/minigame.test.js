@@ -349,6 +349,8 @@ test('walk: どの姿勢も同じ項目を全部返す(前の姿勢が残らな�
     '釣り(投げ)': fishPose(0.2, 0.3, { phase: 'cast', cast: 0.5 }),
     '釣り(アタリ)': fishPose(0.4, 0.3, { phase: 'bite' }),
     '釣り(勝負)': fishPose(2.2, 0.3, { phase: 'fight', tension: 0.6, reeling: true, burst: true }),
+    '釣り(釣れた)': fishPose(0.7, 0.3, { phase: 'landed' }),
+    '釣り(逃げられた)': fishPose(0.7, 0.3, { phase: 'lost' }),
     '釣り(既定)': fishPose(1, 0.3),
   };
   const base = poseKeys(poses['歩き']);
