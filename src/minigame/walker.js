@@ -43,6 +43,9 @@ export class Walker {
   setPosition(x, z) {
     this.motion.setPosition(x, z);
     this.phase = 0;
+    // メッシュもその場へ移す。位置を書くのは毎フレームの _apply だけなので、
+    // 一度も更新されないまま残ると原点(島の中心)に埋まったままになる。
+    this.parts.group.position.set(x, this.motion.groundAt(x, z).y, z);
   }
 
   // 竿を出す/しまう。出している間は歩かせない(walk-mode.js が入力を止める)

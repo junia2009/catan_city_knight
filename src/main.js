@@ -500,7 +500,23 @@ function renderRulesPanel() {
 let walk = null; // WalkMode | null
 
 // 盤がないと歩けないので、対戦中でなければ今の設定で島を1つ作る。
+// 二重起動よけ。この関数は 3D の準備とモジュールの読み込みで2回待つので、
+// そのあいだにもう一度押されると WalkMode が2つできる。先に作ったほうは
+// 描画の呼び出し先(onFrame)を後から来たほうに奪われ、一度も位置を
+// 書かれないまま原点 ── 島の真ん中 ── に埋まって残る(頭だけ地面から出る)。
+let walkStarting = false;
+
 async function enterWalk() {
+  if (walkStarting || walk) return;
+  walkStarting = true;
+  try {
+    await startWalk();
+  } finally {
+    walkStarting = false;
+  }
+}
+
+async function startWalk() {
   const r = await ensureRenderer3d();
   if (!r) {
     ui.toast = '3D が使えないため歩けません';
