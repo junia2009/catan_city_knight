@@ -681,6 +681,32 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
+  /* エモート。上のバーのボタンから、その下に並べて出す。
+     右下(ジャンプ・つる)には置かない ── あそこは2つ縦に並んでいて、
+     港のそばだと3つめの置き場が無い。 */
+  #walk-emotes {
+    position: absolute; z-index: 2; pointer-events: none;
+    top: calc(50px + env(safe-area-inset-top));
+    right: calc(12px + env(safe-area-inset-right));
+    display: none; flex-direction: column; gap: 6px;
+  }
+  #walk-emotes.on { display: flex; }
+  #walk-emotes button {
+    pointer-events: auto;
+    display: flex; align-items: center; gap: 8px;
+    min-width: 132px; padding: 8px 12px;
+    border-radius: 12px; border: 1px solid rgba(255,255,255,0.22);
+    background: rgba(8, 22, 38, 0.82);
+    color: #fff; font-size: 13px; font-weight: 700;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 90ms ease, background 90ms ease;
+  }
+  #walk-emotes button b { font-size: 19px; font-weight: 400; line-height: 1; }
+  #walk-emotes button:active { transform: scale(0.95); background: rgba(255, 217, 125, 0.34); }
+  /* 出している間はボタンを光らせる(もう一度押すと出し直せると分かるように) */
+  [data-act="walk-emote"].on { background: rgba(255, 217, 125, 0.34); }
+
   /* 釣り図鑑(島を歩く中から開く)。HUD より上に出す */
   #walk-book {
     position: absolute; inset: 0; z-index: 3; pointer-events: auto;
@@ -1386,9 +1412,11 @@
   <div id="walk-hud">
     <div class="walk-top">
       <span id="walk-where"></span>
+      <button data-act="walk-emote" aria-label="エモート">😀</button>
       <button data-act="walk-book" aria-label="釣り図鑑">📖</button>
       <button data-act="walk-exit">✕ もどる</button>
     </div>
+    <div id="walk-emotes"></div>
     <div id="walk-dive"></div>
     <div id="walk-stick"><i></i></div>
     <button id="walk-jump" type="button" aria-label="ジャンプ">⤒<span>ジャンプ</span></button>

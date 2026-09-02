@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 import { WalkRelay, TICK_MS, STALE_MS } from '../server/walk-relay.js';
 import { RemoteWalkers, lerpAngle } from '../src/minigame/remote.js';
-import { ST } from '../src/minigame/remote-st.js';
+import { ST, EMOTE_MAX } from '../src/minigame/remote-st.js';
 import { RoomCore, MAX_SEATS, WALK_MAX_SEATS } from '../server/room-core.js';
 import { createGame } from '../src/state.js';
 
@@ -17,9 +17,9 @@ test('リレー: 受け取った位置を全員ぶん1通にまとめる', () =>
   r.set('b', 2, [-3, 4, 0.2, -1, ST.air], 1000);
   const snap = r.snapshot(1000);
   assert.equal(snap.length, 2);
-  // [席, x, z, y, 向き, 状態]
-  assert.deepEqual(snap[0], [0, 1, 2, 0, 0.5, ST.walk]);
-  assert.deepEqual(snap[1], [2, -3, 4, 0.2, -1, ST.air]);
+  // [席, x, z, y, 向き, 状態, エモート]
+  assert.deepEqual(snap[0], [0, 1, 2, 0, 0.5, ST.walk, 0]);
+  assert.deepEqual(snap[1], [2, -3, 4, 0.2, -1, ST.air, 0]);
 });
 
 test('リレー: 席の順に並ぶ(受け取る側が毎回同じ順で読める)', () => {
@@ -225,6 +225,44 @@ test('リレー → 補間: サーバーが配った形をそのまま食える'
   assert.equal(got.length, 1);
   assert.equal(got[0].seat, 1);
   assert.equal(got[0].st, ST.fish);
+});
+
+// ---- エモート ----
+
+test('リレー: エモートの番号も配る', () => {
+  const r = new WalkRelay();
+  r.set('a', 0, [1, 2, 0, 0, ST.walk, 3], 0);
+  assert.deepEqual(r.snapshot(0)[0], [0, 1, 2, 0, 0, ST.walk, 3]);
+});
+
+test('リレー: エモートを送ってこない相手も通る(出していない扱い)', () => {
+  const r = new WalkRelay();
+  // 6つめが無い = エモートを知らない古い版
+  assert.equal(r.set('a', 0, [1, 2, 0, 0, ST.walk], 0), true);
+  assert.equal(r.snapshot(0)[0][6], 0);
+});
+
+test('リレー: 知らないエモートの番号は範囲に収める', () => {
+  const r = new WalkRelay();
+  for (const [sent, want] of [[999, EMOTE_MAX], [-5, 0], [NaN, 0], ['3', 3], [2.4, 2]]) {
+    r.set('a', 0, [0, 0, 0, 0, ST.walk, sent], 0);
+    assert.equal(r.snapshot(0)[0][6], want, `${sent} を送ったとき`);
+  }
+});
+
+test('補間: エモートは混ぜずに近いほうを採る', () => {
+  const w = new RemoteWalkers({ delay: 100 });
+  w.push([[0, 0, 0, 0, 0, ST.walk, 0]], 1000);
+  w.push([[0, 1, 0, 0, 0, ST.walk, 1]], 1100);
+  // 前寄りの時刻ではまだ 0、後ろ寄りでは 1(中間の 0.5 のような値は作らない)
+  assert.equal(w.sample(1120)[0].emote, 0);
+  assert.equal(w.sample(1180)[0].emote, 1);
+});
+
+test('補間: 次が来ていない間もエモートは保つ', () => {
+  const w = new RemoteWalkers({ delay: 100 });
+  w.push([[0, 0, 0, 0, 0, ST.walk, 2]], 1000);
+  assert.equal(w.sample(1050)[0].emote, 2);
 });
 
 // ---- 部屋(散策) ----

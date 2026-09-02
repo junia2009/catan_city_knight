@@ -200,6 +200,139 @@ export function fishPose(t, facing, k = {}) {
   };
 }
 
+// ---- エモート ----
+
+// 何もしていない立ち姿。エモートの出入りはここへ戻る。
+function standPose(facing) {
+  return {
+    group: JOINT(0, facing, 0),
+    mouth: MOUTH(0),
+    hips: JOINT(0, 0, 0),
+    chest: JOINT(0, 0, 0),
+    head: JOINT(0, 0, 0),
+    legs: [0, 1].map((i) => LIMB(0, (i === 0 ? 1 : -1) * 0.1, 0)),
+    arms: [0, 1].map((i) => LIMB(0, (i === 0 ? -1 : 1) * 0.16, 0.12)),
+  };
+}
+
+// 2つの姿勢を混ぜる。k=0 で a、k=1 で b。
+// エモートの出入りをこれで滑らかにする ── 立ち姿からいきなり万歳の角度に
+// 飛ぶと、1フレームで腕がワープして「バグ」に見える。
+// 項目を全部たどるので、pose に項目を足しても直さなくてよい。
+export function blendPose(a, b, k) {
+  const t = Math.max(0, Math.min(1, k));
+  const mix = (x, y) => x + (y - x) * t;
+  const joint = (x, y) => JOINT(mix(x.x, y.x), mix(x.y, y.y), mix(x.z, y.z));
+  return {
+    // 向きは混ぜない(同じ値が入っている。回り込みで暴れるのを避ける)
+    group: JOINT(mix(a.group.x, b.group.x), b.group.y, mix(a.group.z, b.group.z)),
+    // 口は開いているか閉じているかの2択。混ぜられないので近いほうを採る
+    mouth: MOUTH(t < 0.5 ? a.mouth.open : b.mouth.open),
+    hips: joint(a.hips, b.hips),
+    chest: joint(a.chest, b.chest),
+    head: joint(a.head, b.head),
+    legs: [0, 1].map((i) => LIMB(
+      mix(a.legs[i].rootX, b.legs[i].rootX),
+      mix(a.legs[i].rootZ, b.legs[i].rootZ),
+      mix(a.legs[i].knee, b.legs[i].knee),
+    )),
+    arms: [0, 1].map((i) => LIMB(
+      mix(a.arms[i].rootX, b.arms[i].rootX),
+      mix(a.arms[i].rootZ, b.arms[i].rootZ),
+      mix(a.arms[i].knee, b.arms[i].knee),
+    )),
+  };
+}
+
+// 出入りの重み。始めと終わりの RAMP のあいだだけ、立ち姿と混ぜる。
+const RAMP = 0.14;
+function rampWeight(k) {
+  if (k <= 0 || k >= 1) return 0;
+  return Math.min(1, Math.min(k, 1 - k) / RAMP);
+}
+
+// 腕の rootX は 0 で真下、-π/2 で前、-π で真上(pose.js 全体の約束)。
+function rawEmotePose(key, t, facing) {
+  const base = standPose(facing);
+  switch (key) {
+    // 手をふる。右手(arms[1])を挙げて左右に振る
+    case 'wave': {
+      const swing = Math.sin(t * 7.5);
+      return {
+        ...base,
+        head: JOINT(-0.06, 0, swing * 0.07),
+        chest: JOINT(0, 0, swing * 0.05),
+        arms: [
+          LIMB(0.05, -0.18, 0.1),
+          LIMB(-2.55, 0.5 + swing * 0.45, 0.25),
+        ],
+      };
+    }
+    // バンザイ。両手を挙げて、膝でその場を弾む
+    case 'cheer': {
+      const bounce = Math.max(0, Math.sin(t * 6.5));
+      return {
+        ...base,
+        mouth: MOUTH(1),
+        hips: JOINT(-0.1 - bounce * 0.05, 0, 0),
+        head: JOINT(-0.22, 0, 0),
+        legs: [0, 1].map((i) => LIMB(bounce * 0.12, (i === 0 ? 1 : -1) * 0.12, bounce * 0.3)),
+        arms: [0, 1].map((i) => LIMB(-2.95, (i === 0 ? -1 : 1) * (0.34 + bounce * 0.1), 0.15)),
+      };
+    }
+    // おじぎ。腰から折って、いったん止めてから戻す
+    case 'bow': {
+      // t は秒。0.45 秒かけて下げ、0.35 秒止め、残りで戻す
+      const down = Math.min(1, t / 0.45);
+      const up = Math.max(0, (t - 0.8) / 0.5);
+      const bend = Math.max(0, down - up);
+      return {
+        ...base,
+        hips: JOINT(bend * 1.0, 0, 0),
+        chest: JOINT(bend * 0.18, 0, 0),
+        head: JOINT(bend * 0.3, 0, 0),
+        arms: [0, 1].map((i) => LIMB(bend * 0.3, (i === 0 ? -1 : 1) * 0.1, 0.08)),
+      };
+    }
+    // 指さす。右手を前へ伸ばして、2度ほど押し出す
+    case 'point': {
+      const push = Math.max(0, Math.sin(t * 4.6)) * 0.14;
+      return {
+        ...base,
+        chest: JOINT(0, 0.12, 0),
+        head: JOINT(-0.04, 0.16, 0),
+        arms: [
+          LIMB(0.08, -0.18, 0.1),
+          LIMB(-1.62 - push, 0.1, Math.max(0, 0.18 - push * 2)),
+        ],
+      };
+    }
+    // しょんぼり。うなだれて、腕を力なく垂らす
+    case 'sad': {
+      const sway = Math.sin(t * 1.5);
+      return {
+        ...base,
+        hips: JOINT(0.34, 0, sway * 0.03),
+        chest: JOINT(0.24, 0, sway * 0.05),
+        head: JOINT(0.52, sway * 0.12, 0),
+        legs: [0, 1].map((i) => LIMB(0, (i === 0 ? 1 : -1) * 0.06, 0.06)),
+        arms: [0, 1].map((i) => LIMB(
+          0.2 + sway * 0.04, (i === 0 ? -1 : 1) * 0.08, 0.2,
+        )),
+      };
+    }
+    default:
+      return base;
+  }
+}
+
+// エモートの姿勢。t は始めてからの秒数、k は 0〜1 の進み具合。
+// 知らない key なら立ち姿(古い版の相手が新しい番号を送ってきたとき)。
+export function emotePose(key, t, facing, k = 0.5) {
+  const base = standPose(facing);
+  return blendPose(base, rawEmotePose(key, t, facing), rampWeight(k));
+}
+
 // テストから使う: 姿勢が持つ項目の一覧(順序を揃えて比較できるように)。
 // 中身を決め打ちせず、そのまま辿る ── 項目を増やしたときに
 // ここを直し忘れて検査から漏れる、を防ぐため。

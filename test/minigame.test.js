@@ -12,8 +12,9 @@ import { makeGround, spawnPoint } from '../src/minigame/ground.js';
 import { WalkerMotion, WALK_SPEED, JUMP_HEIGHT, WATER_Y } from '../src/minigame/motion.js';
 import { makeBlocker, WALKER_RADIUS } from '../src/minigame/obstacles.js';
 import {
-  walkPose, airPose, tumblePose, sinkPose, fishPose, poseKeys,
+  walkPose, airPose, tumblePose, sinkPose, fishPose, emotePose, blendPose, poseKeys,
 } from '../src/minigame/pose.js';
+import { EMOTES, EMOTE_MAX, emoteById, emotesOk } from '../src/minigame/emote.js';
 
 const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 
@@ -378,6 +379,10 @@ test('walk: どの姿勢も同じ項目を全部返す(前の姿勢が残らな�
     '釣り(釣れた)': fishPose(0.7, 0.3, { phase: 'landed' }),
     '釣り(逃げられた)': fishPose(0.7, 0.3, { phase: 'lost' }),
     '釣り(既定)': fishPose(1, 0.3),
+    // エモートは出入りで立ち姿と混ぜるので、途中と両端の3点を見る
+    ...Object.fromEntries(EMOTES.flatMap((e) => [0.05, 0.5, 0.95].map((k) =>
+      [`エモート(${e.label} ${k})`, emotePose(e.key, k * (e.ms / 1000), 0.3, k)]))),
+    'エモート(知らない番号)': emotePose('???', 1, 0.3, 0.5),
   };
   const base = poseKeys(poses['歩き']);
   assert.ok(base.length > 20, `項目が少なすぎる(${base.length})`);
@@ -520,5 +525,71 @@ test('walk: スティックの向きと移動の向きが一致する(左右が�
 
     const back = run({ x: 0, y: -1 }, camYaw);
     assert.ok(back.screenDepth < -0.05, `${label}: 後に倒したのに手前へ来ない (${back.screenDepth.toFixed(3)})`);
+  }
+});
+
+// ---- エモート ----
+
+// 番号は通信に乗る。並べ替えたり間に挿したりすると、相手が古い版を開いている
+// あいだ「手をふったつもりがしょんぼりする」。番号と中身の対応を固定する。
+test('emote: 番号と中身の対応が変わっていない', () => {
+  assert.ok(emotesOk(), '一覧と EMOTE_MAX がずれている');
+  assert.deepEqual(
+    EMOTES.map((e) => `${e.id}:${e.key}`),
+    ['1:wave', '2:cheer', '3:bow', '4:point', '5:sad'],
+  );
+  assert.equal(EMOTES.length, EMOTE_MAX);
+  for (const e of EMOTES) assert.equal(emoteById(e.id), e);
+  // 範囲外・でたらめは null(壊れた値が届いても姿勢を作らない)
+  for (const bad of [0, -1, EMOTE_MAX + 1, null, undefined, '1']) {
+    assert.equal(emoteById(bad), null, `${bad} で中身が返ってきた`);
+  }
+});
+
+test('emote: blendPose は端で元の姿勢そのもの', () => {
+  // 向きを変えて呼ぶ。同じ向き同士だと group.y の扱いを見落とす
+  const a = walkPose(1.2, 0.8, 0.3);
+  const b = fishPose(1.1, -2.0, { phase: 'fight', tension: 0.6 });
+  // 向き(group.y)だけは混ぜない約束なので、比較から外して見る
+  const noFacing = (p) => ({ ...p, group: { ...p.group, y: null } });
+  assert.deepEqual(noFacing(blendPose(a, b, 0)), noFacing(a), 'k=0 で a に戻らない');
+  assert.deepEqual(noFacing(blendPose(a, b, 1)), noFacing(b), 'k=1 で b にならない');
+  // 範囲外は端で止める(NaN や行き過ぎた角度を作らない)
+  assert.deepEqual(noFacing(blendPose(a, b, -5)), noFacing(a));
+  assert.deepEqual(noFacing(blendPose(a, b, 9)), noFacing(b));
+  // 向きは常に b のものを通す(-π..π をまたぐ回り込みで暴れさせない)
+  for (const k of [0, 0.5, 1]) assert.equal(blendPose(a, b, k).group.y, b.group.y);
+  // 途中はどちらとも違い、あいだにある
+  const mid = blendPose(a, b, 0.5);
+  const x = (p) => p.arms[1].rootX;
+  assert.ok(x(mid) > Math.min(x(a), x(b)) && x(mid) < Math.max(x(a), x(b)),
+    'あいだの値になっていない');
+});
+
+// 立ち姿から急に万歳の角度へ飛ぶと、1フレームで腕がワープして見える。
+test('emote: 始めと終わりは立ち姿に近く、途中はしっかり動いている', () => {
+  // 立ち姿は「進み具合 0」で得られる(混ぜる重みが 0 になる)
+  const stand = emotePose('wave', 0, 0.3, 0);
+  for (const e of EMOTES) {
+    const at = (k) => emotePose(e.key, k * (e.ms / 1000), 0.3, k);
+    const far = (p) => Math.max(...[0, 1].flatMap((i) => [
+      Math.abs(p.arms[i].rootX - stand.arms[i].rootX),
+      Math.abs(p.legs[i].rootX - stand.legs[i].rootX),
+    ]).concat([Math.abs(p.hips.x - stand.hips.x), Math.abs(p.head.x - stand.head.x)]));
+
+    assert.ok(far(at(0.01)) < 0.25, `${e.label}: 出はじめで飛んでいる(${far(at(0.01)).toFixed(2)})`);
+    assert.ok(far(at(0.99)) < 0.25, `${e.label}: 終わりで飛んでいる(${far(at(0.99)).toFixed(2)})`);
+    // 途中のどこかで、はっきり分かるだけ動いていること
+    const peak = Math.max(...[0.3, 0.45, 0.6].map((k) => far(at(k))));
+    assert.ok(peak > 0.45, `${e.label}: 途中でも動いていない(${peak.toFixed(2)})`);
+  }
+});
+
+test('emote: 向きはそのまま通る(混ぜて回り込まない)', () => {
+  for (const facing of [0, 2.5, -2.5, Math.PI]) {
+    for (const k of [0, 0.05, 0.5, 1]) {
+      assert.equal(emotePose('cheer', 1, facing, k).group.y, facing,
+        `k=${k} で向きが変わった`);
+    }
   }
 });

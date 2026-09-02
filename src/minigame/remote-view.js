@@ -9,9 +9,10 @@
 import * as THREE from 'three';
 import { makeWalker, walkerHeight, CUTE } from './body.js';
 import { applyPose } from './walker.js';
-import { walkPose, airPose, tumblePose, fishPose } from './pose.js';
+import { walkPose, airPose, tumblePose, fishPose, emotePose } from './pose.js';
 import { WALK_SPEED } from './motion.js';
 import { ST } from './remote-st.js';
+import { emoteById } from './emote.js';
 
 // 席ごとの色。対戦の4色に、散策部屋のぶんを足して8色。
 // 隣り合う席が似た色にならないように並べてある。
@@ -60,6 +61,38 @@ function makeNameTag(text) {
   return sprite;
 }
 
+// エモートの吹き出し。遠くにいる相手は体が小さくて身ぶりが読めないので、
+// 名札の上に絵文字を1つ浮かべる。
+// 名札(0.17)より気持ち大きいくらい。同じ理由で大きくしすぎない ──
+// 絵文字は目立つので、名札より一回り大きいだけで十分に読める。
+const BUBBLE_H = 0.2;
+const BUBBLE_Y = NAME_Y + 0.19;
+
+function makeBubble(icon) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 96;
+  const c = canvas.getContext('2d');
+  c.fillStyle = 'rgba(255, 255, 255, 0.94)';
+  c.beginPath();
+  c.arc(48, 48, 44, 0, Math.PI * 2);
+  c.fill();
+  c.font = '52px system-ui, "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.fillText(icon, 48, 52);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthTest: false,
+  }));
+  sprite.scale.set(BUBBLE_H, BUBBLE_H, 1);
+  sprite.position.y = BUBBLE_Y;
+  sprite.renderOrder = 11;
+  return sprite;
+}
+
 export class RemoteView {
   // groundAt(x, z) → { y }。相手の足を地面に合わせるのに使う
   constructor(scene, groundAt) {
@@ -73,7 +106,10 @@ export class RemoteView {
     this.scene.add(parts.group);
     const tag = name ? makeNameTag(name) : null;
     if (tag) parts.group.add(tag);
-    const e = { parts, tag, name: name ?? null, phase: 0, spin: 0, t: 0, y: 0 };
+    const e = {
+      parts, tag, name: name ?? null, phase: 0, spin: 0, t: 0, y: 0,
+      emote: 0, emoteT: 0, bubble: null,
+    };
     this.people.set(seat, e);
     return e;
   }
@@ -87,7 +123,7 @@ export class RemoteView {
       if (!e) e = this._make(p.seat, p.name);
       // 名前は後から名簿が届くことがある
       if (p.name && p.name !== e.name) {
-        if (e.tag) { e.tag.removeFromParent(); disposeTag(e.tag); }
+        if (e.tag) { e.tag.removeFromParent(); disposeSprite(e.tag); }
         e.name = p.name;
         e.tag = makeNameTag(p.name);
         e.parts.group.add(e.tag);
@@ -100,9 +136,25 @@ export class RemoteView {
       const vy = dt > 0 ? (y - e.y) / dt : 0;
       e.y = y;
 
+      // エモート。番号が変わったら最初から流し直す(同じ身ぶりの2回目も含む)
+      const em = p.emote ?? 0;
+      if (em !== e.emote) {
+        e.emote = em;
+        e.emoteT = 0;
+        this._setBubble(e, em);
+      } else if (em) {
+        e.emoteT += dt;
+      }
+      const emote = em ? emoteById(em) : null;
+      // 送り手が終わりを伝える前に自分の時計で終わってしまったら、立ち姿へ戻す
+      const emoteK = emote ? e.emoteT / (emote.ms / 1000) : 1;
+      if (e.bubble) e.bubble.visible = emoteK < 1;
+
       e.parts.rod.group.visible = p.st === ST.fish;
       let pose;
-      if (p.st === ST.fish) {
+      if (emote && emoteK < 1 && p.st === ST.walk) {
+        pose = emotePose(emote.key, e.emoteT, p.facing, emoteK);
+      } else if (p.st === ST.fish) {
         pose = fishPose(e.t, p.facing, { phase: 'wait' });
       } else if (p.st === ST.fall) {
         e.spin += dt * 3.4;
@@ -123,6 +175,19 @@ export class RemoteView {
     }
   }
 
+  // 吹き出しを掛け替える。0 なら外す。
+  _setBubble(e, id) {
+    if (e.bubble) {
+      e.bubble.removeFromParent();
+      disposeSprite(e.bubble);
+      e.bubble = null;
+    }
+    const em = id ? emoteById(id) : null;
+    if (!em) return;
+    e.bubble = makeBubble(em.icon);
+    e.parts.group.add(e.bubble);
+  }
+
   _remove(seat, e) {
     e.parts.group.removeFromParent();
     e.parts.group.traverse((o) => {
@@ -139,7 +204,7 @@ export class RemoteView {
   }
 }
 
-function disposeTag(tag) {
-  tag.material.map?.dispose();
-  tag.material.dispose();
+function disposeSprite(sprite) {
+  sprite.material.map?.dispose();
+  sprite.material.dispose();
 }

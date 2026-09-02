@@ -14,13 +14,15 @@
 //     溜めておいて一定間隔(TICK_MS)で「全員ぶん1通」にして配る。
 //   - 中身は数値の配列にする。名前や席は変わらないので毎回送らない。
 
-import { ST_MAX } from '../src/minigame/remote-st.js';
+import { ST_MAX, EMOTE_MAX } from '../src/minigame/remote-st.js';
 
 // 配る間隔。短くすると滑らかになるが、そのぶん通信が増える。
 export const TICK_MS = 100;
 // これだけ音沙汰が無い人は居ないものとして落とす(切断の取りこぼし対策)
 export const STALE_MS = 4000;
-// 1人ぶんの位置。[x, z, y, 向き, 状態]
+// 1人ぶんの位置。[x, z, y, 向き, 状態, エモート]。
+// エモートは後から足したので、無ければ 0(出していない)として受ける
+// ── 古い版のクライアントが繋いでいても、位置だけは通る。
 export const POS_LENGTH = 5;
 
 // 島の外の値が来ても壊れないように、常識的な範囲に丸める。
@@ -40,7 +42,8 @@ function clean(p) {
   const f = n(p[3], Math.PI * 2);
   if (x == null || z == null || y == null || f == null) return null;
   const st = Math.max(0, Math.min(ST_MAX, Math.round(Number(p[4]) || 0)));
-  return [x, z, y, f, st];
+  const em = Math.max(0, Math.min(EMOTE_MAX, Math.round(Number(p[5]) || 0)));
+  return [x, z, y, f, st, em];
 }
 
 export class WalkRelay {

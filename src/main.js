@@ -38,6 +38,7 @@ import { rulesHtml } from './render/rules-content.js';
 import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
+import { EMOTES } from './minigame/emote.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 import {
   NetClient, createRoom, clientId, savedName, saveName, serverBase,
@@ -656,6 +657,7 @@ async function startWalk() {
 
 function exitWalk() {
   setWalkBook(false);
+  setWalkEmotes(false);
   walk?.dispose();
   walk = null;
   setDiveVeil(0);
@@ -816,7 +818,7 @@ function showFishResult(html, miss) {
 function fishPress() {
   if (!walk || walkBookOpen) return;
   const f = walk.fishing;
-  if (!f) { if (walk.startFishing()) sfx.play('cast'); return; }
+  if (!f) { setWalkEmotes(false); if (walk.startFishing()) sfx.play('cast'); return; }
   if (f.phase === 'fight') { walk.setReeling(true); return; }
   if (f.phase === 'bite' || f.phase === 'wait' || f.phase === 'cast') {
     // アタリなら合わせ成功、早ければ逃げられる(どちらも hookFish が判定する)
@@ -848,9 +850,26 @@ function setWalkBook(on) {
     document.getElementById('walk-book-body').innerHTML = fishbookHtml(progress, { walk: true });
   }
   el?.classList.toggle('on', walkBookOpen);
+  if (walkBookOpen) setWalkEmotes(false);
   walk.setPaused(walkBookOpen);
   // 移動スティックが出たままにならないように
   if (walkBookOpen) walkStickHide();
+}
+
+// エモート。上のバーのボタンで開いて、選ぶと1つ出して閉じる。
+let walkEmoteOpen = false;
+function setWalkEmotes(on) {
+  const el = document.getElementById('walk-emotes');
+  if (!el) return;
+  walkEmoteOpen = !!on && !!walk && !walk.isFishing;
+  if (walkEmoteOpen && !el.childElementCount) {
+    // 中身は一覧から作る。ここに文言を書くと emote.js とずれる
+    el.innerHTML = EMOTES.map((e) =>
+      `<button type="button" data-act="walk-emote-do:${e.id}">`
+      + `<b>${e.icon}</b>${e.label}</button>`).join('');
+  }
+  el.classList.toggle('on', walkEmoteOpen);
+  document.querySelector('[data-act="walk-emote"]')?.classList.toggle('on', walkEmoteOpen);
 }
 
 // 釣りをやめて歩きに戻る(「もどる」ではなく、竿だけしまう)
@@ -1992,6 +2011,8 @@ function walkPointerDown(e) {
   // ボタンの上で始まったなぞりは、移動にも視点にも使わない
   // (ジャンプや「もどる」を押しただけで視点が回ってしまう)
   if (e.target.closest('button')) return;
+  // 画面に触れたら一覧は引っ込める(選ばずに動き出したとき、出しっぱなしにしない)
+  if (walkEmoteOpen) setWalkEmotes(false);
   const left = e.clientX < window.innerWidth / 2;
   // 釣っている間は動けない。視点だけは回せる
   if (left && walk.isFishing) return;
@@ -2115,9 +2136,16 @@ document.addEventListener('click', (e) => {
     case 'walk-enter':   // 散策部屋から島へ
       enterWalk();
       return;
+    case 'walk-emote': setWalkEmotes(!walkEmoteOpen); return;
+    case 'walk-emote-do':
+      walk?.playEmote(Number(arg));
+      setWalkEmotes(false);
+      return;
     case 'walk-exit':
       // 図鑑を開いていたら、まずそれを閉じる
       if (walkBookOpen) { setWalkBook(false); return; }
+      // エモートを開いていたら、まずそれを閉じる
+      if (walkEmoteOpen) { setWalkEmotes(false); return; }
       // 釣っている途中なら、まず竿をしまう(押し間違いで島から出さない)
       if (!fishQuit()) exitWalk();
       return;
@@ -2626,6 +2654,8 @@ window.hexDebug = {
   } : null),
   walkStick: (x, y) => walk?.setStick(x, y),
   walkJump: () => walk?.jump(),
+  walkEmote: (id) => walk?.playEmote(id) ?? false,
+  getWalkEmote: () => (walk?.emote ? { ...walk.emote } : null),
   // 島を歩く・釣り(E2E用)。港まで歩かせずに試せるようにする
   walkTo: (x, z) => walk?.walker.setPosition(x, z),
   fishSpots: () => walk?.spots ?? [],
