@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { WalkRelay, TICK_MS, STALE_MS } from '../server/walk-relay.js';
 import { RemoteWalkers, lerpAngle } from '../src/minigame/remote.js';
 import { ST } from '../src/minigame/remote-st.js';
+import { RoomCore, MAX_SEATS, WALK_MAX_SEATS } from '../server/room-core.js';
+import { createGame } from '../src/state.js';
 
 // ---- サーバー側: 位置のリレー ----
 
@@ -223,4 +225,78 @@ test('リレー → 補間: サーバーが配った形をそのまま食える'
   assert.equal(got.length, 1);
   assert.equal(got[0].seat, 1);
   assert.equal(got[0].st, ST.fish);
+});
+
+// ---- 部屋(散策) ----
+
+test('散策部屋: 対戦より多く入れる', () => {
+  const game = new RoomCore({ code: 'AAAA' });
+  const walk = new RoomCore({ code: 'BBBB', kind: 'walk' });
+  assert.equal(game.maxSeats, MAX_SEATS);
+  assert.equal(walk.maxSeats, WALK_MAX_SEATS);
+  assert.ok(WALK_MAX_SEATS > MAX_SEATS);
+  for (let i = 0; i < WALK_MAX_SEATS; i++) {
+    assert.equal(walk.join({ clientId: `c${i}`, name: `p${i}` }).seat, i, `${i}人目`);
+  }
+  assert.ok(walk.join({ clientId: 'over', name: 'あふれ' }).error, '上限を超えて入れた');
+});
+
+test('散策部屋: 島は「種と種類」だけで配る(盤面も状態も持たない)', () => {
+  const walk = new RoomCore({ code: 'BBBB', kind: 'walk', seed: 12345 });
+  walk.join({ clientId: 'a', name: 'あ' });
+  const info = walk.lobbyInfo();
+  assert.equal(info.kind, 'walk');
+  assert.equal(info.seed, 12345);
+  assert.equal(info.settings.mode, 'base');
+  assert.equal(walk.state, null, '状態を持ってしまっている');
+  // 同じ種と種類なら、各自が作る島は完全に一致する
+  const a = createGame({ seed: info.seed, playerCount: 4, humanIndex: -1, mode: info.settings.mode });
+  const b = createGame({ seed: info.seed, playerCount: 4, humanIndex: -1, mode: info.settings.mode });
+  assert.deepEqual(a.board, b.board);
+});
+
+test('散策部屋: 対戦の部屋は種を配らない(先の出目を読ませない)', () => {
+  const game = new RoomCore({ code: 'AAAA', seed: 999 });
+  game.join({ clientId: 'a', name: 'あ' });
+  assert.equal(game.lobbyInfo().seed, undefined);
+  assert.equal(game.lobbyInfo().kind, 'game');
+});
+
+test('散策部屋: 開始も手番も無い', () => {
+  const walk = new RoomCore({ code: 'BBBB', kind: 'walk' });
+  walk.join({ clientId: 'a', name: 'あ' });
+  assert.ok(walk.start('a').error, '開始できてしまう');
+  assert.ok(walk.submitAction('a', { type: 'END_TURN', player: 0 }).error);
+  assert.equal(walk.phase, 'lobby');
+});
+
+test('散策部屋: 島の種類を変えると島も別物になる', () => {
+  const walk = new RoomCore({ code: 'BBBB', kind: 'walk', seed: 1 });
+  walk.join({ clientId: 'a', name: 'あ' });
+  const before = walk.seed;
+  assert.ok(walk.setSettings('a', { mode: 'sea' }).ok);
+  assert.equal(walk.settings.mode, 'sea');
+  assert.notEqual(walk.seed, before, '種が変わっていない');
+  // ホスト以外は変えられない
+  walk.join({ clientId: 'b', name: 'い' });
+  assert.ok(walk.setSettings('b', { mode: 'cak' }).error);
+});
+
+test('散策部屋: 抜けたら席が空く(次の人が入れる)', () => {
+  const walk = new RoomCore({ code: 'BBBB', kind: 'walk' });
+  walk.join({ clientId: 'a', name: 'あ' });
+  walk.join({ clientId: 'b', name: 'い' });
+  walk.disconnect('a');
+  assert.equal(walk.seats[0], null);
+  assert.equal(walk.join({ clientId: 'c', name: 'う' }).seat, 0);
+});
+
+test('散策部屋: 保存して読み直しても種類と島が変わらない', () => {
+  const walk = new RoomCore({ code: 'BBBB', kind: 'walk', seed: 4242 });
+  walk.join({ clientId: 'a', name: 'あ' });
+  const back = RoomCore.fromJSON(JSON.parse(JSON.stringify(walk.toJSON())));
+  assert.equal(back.kind, 'walk');
+  assert.equal(back.seed, 4242);
+  assert.equal(back.maxSeats, WALK_MAX_SEATS);
+  assert.equal(back.seats.length, WALK_MAX_SEATS);
 });

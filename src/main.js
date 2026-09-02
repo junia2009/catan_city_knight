@@ -81,6 +81,17 @@ async function checkForUpdate() {
 
 // タイトル画面の背景に飾る盤面(全員CPUで、進行はしない)。
 // state は常に非 null に保つ ── null にすると入力処理が丸ごと止まる。
+// 散策部屋の島。合言葉の部屋から届いた「種 + 島の種類」で作る。
+// 盤面そのものは配らない ── 同じ種なら誰の端末でも同じ島になる。
+let walkIsland = null;   // { seed, mode }
+
+function makeWalkIsland(seed, mode) {
+  clearTimeout(cpuTimer);
+  state = createGame({ seed, playerCount: 4, humanIndex: -1, mode });
+  ui = freshUi();
+  walkIsland = { seed, mode };
+}
+
 function showTitleBoard() {
   clearTimeout(cpuTimer);
   state = createGame({
@@ -111,6 +122,7 @@ let screen = 'title';
 let net = null;
 const online = {
   code: null,
+  kind: 'game', // 'game'(対戦)/ 'walk'(みんなで島を歩く)
   lobby: null, // サーバーから届く席・ホスト・設定
   status: 'idle', // 'connecting' | 'online' | 'reconnecting' | 'closed'
   error: null,
@@ -194,7 +206,12 @@ function renderOnlinePanel() {
       <div class="srow"><span>名前</span>
         <input id="net-name" maxlength="12" placeholder="あなたの名前" value="${savedName()}"></div>
       <div class="row end">
-        <button class="primary" data-act="net-create" ${online.busy ? 'disabled' : ''}>部屋を作る</button>
+        <button class="primary" data-act="net-create" ${online.busy ? 'disabled' : ''}>対戦の部屋を作る</button>
+      </div>
+      <div class="net-note">合言葉で集まって、同じ島をみんなで歩くこともできます
+        (対戦はしません)。</div>
+      <div class="row end">
+        <button data-act="net-create-walk" ${online.busy ? 'disabled' : ''}>🚶 散策の部屋を作る</button>
       </div>
       <div class="srow"><span>合言葉</span>
         <input id="net-code" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"></div>
@@ -212,8 +229,10 @@ function renderOnlinePanel() {
     return;
   }
 
-  // ロビー: 参加者を待ってホストが開始する
   const lb = online.lobby;
+  if (online.kind === 'walk') { renderWalkLobby(panel, lb, err); return; }
+
+  // ロビー: 参加者を待ってホストが開始する
   const seg = (act, options, current, disabled) =>
     `<div class="seg ${options.length >= 4 ? 'seg-grid' : ''}">${options
       .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}" ${disabled ? 'disabled' : ''}>${label}</button>`)
@@ -253,6 +272,53 @@ function renderOnlinePanel() {
     </div>`;
 }
 
+// 散策部屋のロビー。対戦と違って「開始」は無く、各自が好きなときに島へ入る。
+// 島は「種 + 島の種類」だけ配られていて、盤面はそれぞれの端末で作る。
+function renderWalkLobby(panel, lb, err) {
+  const host = isHost();
+  const here = lb.seats.filter((s) => s.occupied);
+  const seats = here.map((s) => {
+    const isMe = s.seat === net?.seat;
+    return `<div class="seat-row" style="--pc:${walkColor(s.seat)}">
+      <span>${s.name}${isMe ? '(あなた)' : ''}</span>
+      ${lb.hostSeat === s.seat ? '<span class="tag host">ホスト</span>' : ''}
+      ${s.online ? '' : '<span class="tag off">切断中</span>'}
+    </div>`;
+  }).join('');
+  const seg = (act, options, current, disabled) =>
+    `<div class="seg seg-grid">${options
+      .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}" ${disabled ? 'disabled' : ''}>${label}</button>`)
+      .join('')}</div>`;
+
+  panel.innerHTML = `
+    <h3>🚶 みんなで島を歩く</h3>
+    <div class="code-box">
+      <div class="code">${lb.code}</div>
+      <small>この合言葉を友達に伝えてください</small>
+    </div>
+    <div class="seat-list">${seats}</div>
+    <div class="srow"><span>島</span>${seg('net-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師'], ['sea', '⛵航海者']], lb.settings.mode, !host)}</div>
+    <div class="net-status ${online.status}"><span class="dot"></span>${STATUS_JP[online.status] ?? ''}</div>
+    ${err}
+    <div class="net-note">${host
+      ? '島を選んだら入ってください。あとから来た人も同じ島に出ます。'
+      : 'いつでも島に入れます。島の種類はホストが決めます。'}
+      ${here.length < 2 ? '<br>まだあなただけです。合言葉を伝えて待ちましょう。' : ''}</div>
+    <div class="row end">
+      <button data-act="net-leave">← 退出</button>
+      <button class="primary" data-act="walk-enter">🏝 島に入る</button>
+    </div>`;
+}
+
+// 散策部屋の席の色。3D 側(remote-view.js)と揃える
+const WALK_SEAT_COLORS = [
+  '#f04343', '#3f8ef7', '#ffa02e', '#b06ef0',
+  '#36c98d', '#f25fa8', '#7ad0e8', '#d9c34a',
+];
+function walkColor(seat) {
+  return WALK_SEAT_COLORS[seat % WALK_SEAT_COLORS.length];
+}
+
 function updateNetBadge() {
   const el = document.getElementById('netbadge');
   if (!el) return;
@@ -286,14 +352,35 @@ function onNetState(msg) {
 function onNetLobby(msg) {
   online.lobby = msg;
   online.code = msg.code;
+  online.kind = msg.kind ?? 'game';
+  if (online.kind === 'walk') {
+    onWalkLobby(msg);
+    renderOnlinePanel();
+    updateNetBadge();
+    return;
+  }
   if (msg.phase === 'lobby' && screen === 'game') setScreen('online');
   renderOnlinePanel();
   updateNetBadge();
 }
 
-function startNet(code, name) {
+// 散策部屋の名簿が届いた。
+// ホストが島を変えると種も変わるので、歩いている最中なら一度戻して作り直す
+// (放っておくと、めいめい違う島の上で相手の位置だけが動くことになる)。
+function onWalkLobby(msg) {
+  walk?.setWalkerNames(msg.seats);
+  if (!walk || !walkIsland) return;
+  const mode = msg.settings?.mode ?? 'base';
+  if (msg.seed === walkIsland.seed && mode === walkIsland.mode) return;
+  exitWalk();
+  online.error = '島が変わりました。入り直してください';
+  setScreen('online');
+}
+
+function startNet(code, name, kind = 'game') {
   saveName(name);
   online.code = code;
+  online.kind = kind;
   online.error = null;
   net = new NetClient({
     onStatus: (s) => {
@@ -303,6 +390,8 @@ function startNet(code, name) {
     },
     onLobby: onNetLobby,
     onState: onNetState,
+    // 散策部屋: 全員ぶんの位置が 10 回/秒で届く
+    onWalkers: (people) => walk?.putWalkers(people),
     onError: (msg, fatal) => {
       online.error = msg;
       if (fatal) {
@@ -319,16 +408,19 @@ function startNet(code, name) {
       renderOnlinePanel();
     },
   });
-  net.connect(code, name);
+  net.connect(code, name, kind);
   setScreen('online');
   renderOnlinePanel();
 }
 
 function leaveNet(toTitle = true) {
+  if (walk) exitWalk();
   net?.close();
   net = null;
   online.lobby = null;
   online.code = null;
+  online.kind = 'game';
+  walkIsland = null;
   online.status = 'idle';
   setSeat(0);
   updateNetBadge();
@@ -524,12 +616,23 @@ async function startWalk() {
     refresh();
     return;
   }
-  if (!state) newGame(); // 島がなければ作る(手は進めない)
+  // 散策部屋にいるなら、みんなと同じ島を「種 + 島の種類」から作る
+  const lobby = online.kind === 'walk' ? online.lobby : null;
+  const seat = lobby ? net?.seat ?? null : null;
+  if (lobby) {
+    makeWalkIsland(lobby.seed, lobby.settings?.mode ?? 'base');
+  } else if (!state) {
+    newGame(); // 島がなければ作る(手は進めない)
+  }
   clearTimeout(cpuTimer); // 歩いている間に CPU が指し進めないように止める
   r.setGame(state);
   r.update(state, freshUi());
   const mod = await import('./minigame/walk-mode.js');
-  walk = new mod.WalkMode(r, state);
+  walk = new mod.WalkMode(r, state, undefined, seat);
+  if (seat != null) {
+    walk.onPos = (p) => net?.pos(p);
+    walk.setWalkerNames(lobby.seats);
+  }
   // 落ちた合図は着水の瞬間に出す(戻ってきたときではもう遅い)
   walk.onSplash = () => { sfx.play('splash'); walkNote('🌊 海に落ちた!'); };
   // 足音。地面と動きで音が変わる(audio/footsteps.js)
@@ -557,7 +660,9 @@ function exitWalk() {
   walk = null;
   setDiveVeil(0);
   resetFishHud();
-  setScreen('title');
+  // 散策部屋から入った島なら、タイトルではなく部屋へ戻る
+  setScreen(online.kind === 'walk' && online.lobby ? 'online' : 'title');
+  if (online.kind === 'walk' && online.lobby) renderOnlinePanel();
 }
 
 // ---- ミニゲーム: 釣り ----
@@ -2007,6 +2112,9 @@ document.addEventListener('click', (e) => {
     case 'goto-walk':
       enterWalk();
       return;
+    case 'walk-enter':   // 散策部屋から島へ
+      enterWalk();
+      return;
     case 'walk-exit':
       // 図鑑を開いていたら、まずそれを閉じる
       if (walkBookOpen) { setWalkBook(false); return; }
@@ -2066,15 +2174,17 @@ document.addEventListener('click', (e) => {
       setScreen('online');
       renderOnlinePanel();
       return;
-    case 'net-create': {
+    case 'net-create':
+    case 'net-create-walk': {
+      const kind = act === 'net-create-walk' ? 'walk' : 'game';
       const name = document.getElementById('net-name')?.value.trim() || 'プレイヤー';
       online.busy = true;
       online.error = null;
       renderOnlinePanel();
-      createRoom()
+      createRoom(kind)
         .then((code) => {
           online.busy = false;
-          startNet(code, name);
+          startNet(code, name, kind);
         })
         .catch((e) => {
           online.busy = false;
@@ -2523,6 +2633,8 @@ window.hexDebug = {
   fishReel: (on) => walk?.setReeling(on),
   fishBook: () => progress.fish ?? {},
   hexCenter: (hid) => walk?.hexCenter(hid) ?? null,
+  // 散策部屋(E2E 用): いま見えている他の人
+  getWalkPeers: () => walk?.remote.sample() ?? [],
   // 足音(E2E 用)。音は聞けないので、鳴らした記録を見られるようにする
   recordSteps: (on = true) => { stepLog = on ? [] : null; },
   getSteps: () => stepLog ?? [],

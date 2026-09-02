@@ -40,14 +40,16 @@ export default {
       return json(request, { ok: true });
     }
 
-    // 新しい部屋を作る: 空いている合言葉を見つけて返す
+    // 新しい部屋を作る: 空いている合言葉を見つけて返す。
+    // kind=walk なら散策部屋(同じ島をみんなで歩く)になる。
     if (url.pathname === '/new') {
+      const kind = url.searchParams.get('kind') === 'walk' ? 'walk' : 'game';
       for (let attempt = 0; attempt < 6; attempt++) {
         const code = makeRoomCode();
         const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
-        const res = await stub.fetch(`https://room/claim?code=${code}`);
+        const res = await stub.fetch(`https://room/claim?code=${code}&kind=${kind}`);
         const { free } = await res.json();
-        if (free) return json(request, { code });
+        if (free) return json(request, { code, kind });
       }
       return json(request, { error: '部屋を作れませんでした。もう一度お試しください' }, 503);
     }
@@ -59,7 +61,9 @@ export default {
         return json(request, { error: '合言葉は英字4文字です' }, 400);
       }
       const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
-      return stub.fetch(`https://room/ws?code=${code}`, request);
+      // kind は「まだ無い部屋を作るとき」にだけ効く。既にある部屋の種類は変わらない
+      const kind = url.searchParams.get('kind') === 'walk' ? 'walk' : 'game';
+      return stub.fetch(`https://room/ws?code=${code}&kind=${kind}`, request);
     }
 
     return json(request, { error: 'not found' }, 404);

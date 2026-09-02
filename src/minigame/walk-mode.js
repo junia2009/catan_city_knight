@@ -15,6 +15,9 @@ import { Walker, WALK_SPEED } from './walker.js';
 import { WaterFx } from './water-fx.js';
 import { Fishing, CAST_TIME } from './fishing.js';
 import { FishingFx } from './fishing-fx.js';
+import { RemoteWalkers } from './remote.js';
+import { RemoteView, WALK_COLORS } from './remote-view.js';
+import { ST } from './remote-st.js';
 
 // フレームレートに依らない追従係数。
 // dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
@@ -39,6 +42,12 @@ const FISH_YAW = -0.75;     // 本人の向きからどれだけ横へ回り込�
 const FISH_PITCH = 0.30;    // 見下ろす角度
 const FISH_DIST = 1.9;
 const FISH_AIM = 0.42;      // 本人から浮きのほうへ、どれだけ先を見るか
+
+// 散策部屋: 自分の位置を送る間隔(サーバーの配る間隔と揃える)
+const SEND_MS = 100;
+// 動きがこれ以下なら送らない。立ち止まっている人は通信ゼロになる
+const SEND_MOVE = 0.01;
+const SEND_TURN = 0.02;
 const BLOCK_MIN_HEIGHT = 0.15; // これより低い物はまたげる(草・花・畝・砂丘)
 const BLOCK_MAX_RADIUS = 0.5;  // これより大きい物は地形そのもの(タイル・海・桟橋)
 
@@ -77,12 +86,17 @@ function collectObstacles(b) {
 export class WalkMode {
   // fishSeed: 釣りの乱数。対戦の state.rng は絶対に使わない
   // (回すとオンライン対戦で全員の乱数列がずれる)。
-  constructor(board3d, state, fishSeed = Date.now() >>> 0) {
+  // seat: 散策部屋での自分の席(1人で歩くときは null)。色分けに使う
+  constructor(board3d, state, fishSeed = Date.now() >>> 0, seat = null) {
     this.b = board3d;
     this.ground = makeGround(state);
     this.obstacles = collectObstacles(board3d);
+    this.seat = seat;
     this.walker = new Walker(
-      board3d.scene, this.ground, 0x2f6fd0, makeBlocker(this.obstacles),
+      board3d.scene,
+      this.ground,
+      seat == null ? 0x2f6fd0 : WALK_COLORS[seat % WALK_COLORS.length],
+      makeBlocker(this.obstacles),
     );
 
     const s = spawnPoint(state);
@@ -115,6 +129,13 @@ export class WalkMode {
     // 足元の地形。state をずっと抱えずに、見るところだけ切り出しておく
     this.terrainAt = (hid) => state.board.hexes[hid]?.terrain ?? null;
     this.fx = new WaterFx(board3d.scene);
+
+    // 散策部屋。1人で歩くときは何も動かない(送らない・描かない)
+    this.remote = new RemoteWalkers();
+    this.remoteView = new RemoteView(board3d.scene, this.ground);
+    this.onPos = null;       // 自分の位置を送る口(main.js が繋ぐ)
+    this._sendAt = 0;
+    this._sent = null;
 
     // カメラと操作を借りるので、元の状態を覚えておいて出るときに戻す
     this.saved = {
@@ -255,6 +276,8 @@ export class WalkMode {
     const dt = this.last ? Math.min(MAX_DT, (t - this.last) / 1000) : 0.016;
     this.last = t;   // 止まっている間も進めておく(再開時に一気に飛ばさない)
     if (this.paused) return;
+    // 散策部屋。釣っていても止まっていても、相手は動くし自分も知らせる
+    this._netFrame(dt, t);
 
     if (this.fishing) {
       this._fishFrame(dt);
@@ -420,9 +443,55 @@ export class WalkMode {
     return hex ? { hexId: g.hexId, terrain: hex.terrain, token: hex.token ?? null } : null;
   }
 
+  // 相手を動かし、自分の位置を送る。1人で歩いているときは何もしない。
+  _netFrame(dt, t) {
+    if (this.seat != null) {
+      const p = this._posPacket(t);
+      if (p) this.onPos(p);
+    }
+    // 誰も居なければ sample は空を返すので、そのまま呼んでよい
+    this.remoteView.update(dt, this.remote.sample());
+  }
+
+  // ---- 散策部屋 ----
+
+  // サーバーから届いた「全員ぶん」。自分の席は描かない
+  putWalkers(people) {
+    this.remote.push(people);
+    if (this.seat != null) this.remote.forget(this.seat);
+  }
+
+  setWalkerNames(seats) {
+    this.remote.setNames(seats);
+  }
+
+  // いまの自分を送る中身。変わっていなければ null(立ち止まりは送らない)
+  _posPacket(now) {
+    if (!this.onPos || this.seat == null) return null;
+    if (now - this._sendAt < SEND_MS) return null;
+    const w = this.walker;
+    const m = w.motion;
+    const st = this.fishing ? ST.fish
+      : m.falling ? ST.fall
+        : m.grounded ? ST.walk : ST.air;
+    const p = [w.pos.x, w.pos.z, m.y, w.facing, st];
+    const last = this._sent;
+    const still = last
+      && Math.abs(p[0] - last[0]) < SEND_MOVE
+      && Math.abs(p[1] - last[1]) < SEND_MOVE
+      && Math.abs(p[2] - last[2]) < SEND_MOVE
+      && Math.abs(p[3] - last[3]) < SEND_TURN
+      && p[4] === last[4];
+    this._sendAt = now;
+    if (still) return null;
+    this._sent = p;
+    return p;
+  }
+
   dispose() {
     this.b.onFrame = null;
     this.walker.dispose();
+    this.remoteView.dispose();
     this.fx.dispose();
     this.ffx.dispose();
     if (this.b.seaMesh) this.b.seaMesh.material.side = THREE.FrontSide;

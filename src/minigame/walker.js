@@ -24,6 +24,28 @@ export { makeWalker };
 // 足元から頭のてっぺんまで(タイル1枚が約1.0)
 export const WALKER_HEIGHT = walkerHeight(CUTE);
 
+// 姿勢をメッシュへ流し込む。pose.js が返す項目を「毎回全部」書くので、
+// 前の姿勢の値が残らない(海から上がって足が交差したまま、が起きない)。
+//
+// 自分の体(Walker)と、散策部屋で描く他の人(remote-view.js)の両方が通る。
+// 2か所に書くと、片方だけ項目を足したときに静かにずれる。
+export function applyPose(parts, pose, x, y, z) {
+  parts.group.position.set(x, y, z);
+  for (const part of ['group', 'hips', 'chest', 'head']) {
+    const a = pose[part];
+    parts[part].rotation.set(a.x, a.y, a.z);
+  }
+  parts.mouth.smile.visible = pose.mouth.open < 0.5;
+  parts.mouth.open.visible = pose.mouth.open >= 0.5;
+  for (const part of ['legs', 'arms']) {
+    pose[part].forEach((limb, i) => {
+      parts[part][i].root.rotation.x = limb.rootX;
+      parts[part][i].root.rotation.z = limb.rootZ;
+      parts[part][i].knee.rotation.x = limb.knee;
+    });
+  }
+}
+
 export class Walker {
   // groundAt(x, z) → { y, ok }。ok が false なら「そこは地面でない」
   // blockAt: 盤の上の物にめり込ませないための関数(obstacles.js)
@@ -94,24 +116,8 @@ export class Walker {
     return stepped ? { ...r, stepped: true, gait } : r;
   }
 
-  // 姿勢をメッシュへ流し込む。pose.js が返す項目を「毎回全部」書くので、
-  // 前の姿勢の値が残らない(海から上がって足が交差したまま、が起きない)。
   _apply(pose, y) {
-    const p = this.parts;
-    p.group.position.set(this.pos.x, y, this.pos.z);
-    for (const part of ['group', 'hips', 'chest', 'head']) {
-      const a = pose[part];
-      p[part].rotation.set(a.x, a.y, a.z);
-    }
-    p.mouth.smile.visible = pose.mouth.open < 0.5;
-    p.mouth.open.visible = pose.mouth.open >= 0.5;
-    for (const part of ['legs', 'arms']) {
-      pose[part].forEach((limb, i) => {
-        p[part][i].root.rotation.x = limb.rootX;
-        p[part][i].root.rotation.z = limb.rootZ;
-        p[part][i].knee.rotation.x = limb.knee;
-      });
-    }
+    applyPose(this.parts, pose, this.pos.x, y, this.pos.z);
   }
 
   dispose() {

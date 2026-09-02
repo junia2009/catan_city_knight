@@ -11,7 +11,12 @@ import { chooseAction } from '../src/ai/cpu-player.js';
 import { totalCards } from '../src/rules/build.js';
 
 export const MAX_SEATS = 4;
+// 散策部屋(同じ島をみんなで歩く)は対戦の席数に縛られないので多めに取る。
+// 増やすほど毎 tick に配る中身が大きくなるので、際限なくは広げないこと。
+export const WALK_MAX_SEATS = 8;
 export const MIN_PLAYERS = 2;
+// 部屋の種類。対戦は権威をサーバーが持つが、散策は「島の種と名簿」だけを配る
+export const KINDS = ['game', 'walk'];
 // 無操作が続いた部屋を切断するまで。開いたままの部屋は
 // サーバーが常駐し続けて無料枠を食うため、放置を自動で畳む。
 export const IDLE_DISCONNECT_MS = 60 * 60 * 1000;
@@ -69,12 +74,18 @@ function sanitizeName(name, fallback) {
 }
 
 export class RoomCore {
-  constructor({ code = 'ROOM', seed = null, rand = Math.random } = {}) {
+  // kind: 'game'(対戦)/ 'walk'(散策)。
+  // 散策部屋は対戦を始めないので phase はずっと 'lobby' のまま。島は
+  // 「種(seed)+ 島の種類(settings.mode)」から各自が同じものを生成するので、
+  // サーバーは盤面も状態も一切持たない(配るのは名簿と位置だけ)。
+  constructor({ code = 'ROOM', kind = 'game', seed = null, rand = Math.random } = {}) {
     this.code = code;
+    this.kind = KINDS.includes(kind) ? kind : 'game';
     this.rand = rand;
     this.seed = seed ?? Math.floor(rand() * 1e9);
+    this.maxSeats = this.kind === 'walk' ? WALK_MAX_SEATS : MAX_SEATS;
     this.phase = 'lobby'; // 'lobby' | 'playing'
-    this.seats = Array(MAX_SEATS).fill(null); // { clientId, name, online } | null(=CPU席)
+    this.seats = Array(this.maxSeats).fill(null); // { clientId, name, online } | null(=CPU席)
     this.hostId = null;
     this.settings = { mode: 'base', difficulty: 'normal', cpuFill: true, diceMode: 'random' };
     this.state = null;
@@ -164,6 +175,16 @@ export class RoomCore {
     this.touch();
     if (this.phase !== 'lobby') return { error: '対戦中は変更できません' };
     const next = { ...this.settings };
+    // 散策部屋で変えられるのは島の種類だけ。難度も CPU も関係がない
+    if (this.kind === 'walk') {
+      if (['base', 'cak', 'dragon', 'fish', 'sea'].includes(patch?.mode)) {
+        next.mode = patch.mode;
+        // 島の種類を変えたら島も別物にする(同じ種のまま形だけ変わると紛らわしい)
+        this.seed = Math.floor(this.rand() * 1e9);
+      }
+      this.settings = next;
+      return { ok: true };
+    }
     if (['base', 'cak', 'dragon', 'fish', 'sea'].includes(patch?.mode)) next.mode = patch.mode;
     if (['easy', 'normal', 'hard'].includes(patch?.difficulty)) next.difficulty = patch.difficulty;
     if (typeof patch?.cpuFill === 'boolean') next.cpuFill = patch.cpuFill;
@@ -173,6 +194,7 @@ export class RoomCore {
   }
 
   start(clientId) {
+    if (this.kind === 'walk') return { error: '散策部屋に開始はありません' };
     if (!this.isHost(clientId)) return { error: 'ホストのみ開始できます' };
     this.touch();
     if (this.phase !== 'lobby') return { error: 'すでに始まっています' };
@@ -212,13 +234,14 @@ export class RoomCore {
 
   _compactSeats() {
     const filled = this.seats.filter(Boolean);
-    for (let i = 0; i < MAX_SEATS; i++) this.seats[i] = filled[i] ?? null;
+    for (let i = 0; i < this.maxSeats; i++) this.seats[i] = filled[i] ?? null;
   }
 
   // ---- アクション ----
 
   // クライアントからの手。自分の席の手しか出せない。
   submitAction(clientId, action) {
+    if (this.kind === 'walk') return { error: '散策部屋では手を出せません' };
     if (this.phase !== 'playing') return { error: '対戦が始まっていません' };
     const seat = this.seatOf(clientId);
     if (seat < 0) return { error: '観戦者は操作できません' };
@@ -274,6 +297,10 @@ export class RoomCore {
   lobbyInfo() {
     return {
       code: this.code,
+      kind: this.kind,
+      // 散策部屋は、この種と島の種類から各自が同じ島を作る。
+      // 盤面そのものを配るより、はるかに軽い。
+      seed: this.kind === 'walk' ? this.seed : undefined,
       phase: this.phase,
       host: this.hostId,
       hostSeat: this.seats.findIndex((s) => s && s.clientId === this.hostId),
@@ -322,6 +349,7 @@ export class RoomCore {
   toJSON() {
     return {
       code: this.code,
+      kind: this.kind,
       seed: this.seed,
       phase: this.phase,
       seats: this.seats,
@@ -334,7 +362,7 @@ export class RoomCore {
   }
 
   static fromJSON(data) {
-    const room = new RoomCore({ code: data.code, seed: data.seed });
+    const room = new RoomCore({ code: data.code, kind: data.kind, seed: data.seed });
     room.phase = data.phase;
     room.seats = data.seats;
     room.hostId = data.hostId;

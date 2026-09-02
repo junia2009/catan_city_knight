@@ -36,8 +36,9 @@ export function saveName(name) {
 }
 
 // 新しい部屋を作って合言葉をもらう
-export async function createRoom() {
-  const res = await fetch(`${serverBase()}/new`, { method: 'POST' });
+// kind: 'game'(対戦)/ 'walk'(散策)
+export async function createRoom(kind = 'game') {
+  const res = await fetch(`${serverBase()}/new?kind=${kind}`, { method: 'POST' });
   const data = await res.json();
   if (!res.ok || data.error) throw new Error(data.error ?? '部屋を作れませんでした');
   return data.code;
@@ -47,11 +48,12 @@ const PING_MS = 25000;
 const RETRY_MS = [500, 1000, 2000, 4000, 8000];
 
 export class NetClient {
-  // handlers: { onStatus, onLobby, onState, onError }
+  // handlers: { onStatus, onLobby, onState, onWalkers, onError }
   constructor(handlers = {}) {
     this.h = handlers;
     this.ws = null;
     this.code = null;
+    this.kind = 'game';
     this.name = '';
     this.seat = null;
     this.closedByUs = false;
@@ -59,9 +61,11 @@ export class NetClient {
     this.pingTimer = null;
   }
 
-  connect(code, name) {
+  // kind: 'game'(対戦)/ 'walk'(散策)。まだ無い部屋を作るときにだけ効く
+  connect(code, name, kind = 'game') {
     this.code = code;
     this.name = name;
+    this.kind = kind === 'walk' ? 'walk' : 'game';
     this.closedByUs = false;
     this._open();
   }
@@ -71,7 +75,7 @@ export class NetClient {
     const base = serverBase().replace(/^http/, 'ws');
     let ws;
     try {
-      ws = new WebSocket(`${base}/room?code=${this.code}`);
+      ws = new WebSocket(`${base}/room?code=${this.code}&kind=${this.kind}`);
     } catch (e) {
       return this._scheduleRetry();
     }
@@ -113,6 +117,9 @@ export class NetClient {
         break;
       case 'lobby':
         this.h.onLobby?.(msg);
+        break;
+      case 'walkers':
+        this.h.onWalkers?.(msg.people);
         break;
       case 'state':
         if (msg.seat != null) this.seat = msg.seat;
@@ -162,6 +169,18 @@ export class NetClient {
 
   action(action) {
     return this.send({ t: 'action', action });
+  }
+
+  // 散策部屋: 自分の位置。届かなくても次が来るので、送れなければ黙って捨てる
+  // (取りこぼしを再送すると、古い位置で上書きしてしまう)。
+  pos(p) {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    try {
+      this.ws.send(JSON.stringify({ t: 'pos', p }));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   close() {
