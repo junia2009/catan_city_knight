@@ -51,11 +51,13 @@ export class RemoteWalkers {
     for (const [seat, e] of this.seats) e.name = this.names.get(seat) ?? e.name;
   }
 
-  // サーバーから届いたひとかたまり。people は [[seat, x, z, y, facing, st], ...]
+  // サーバーから届いたひとかたまり。
+  // people は [[seat, x, z, y, facing, st, emote], ...](emote は無ければ 0)
   push(people, now = Date.now()) {
     for (const row of people ?? []) {
       if (!Array.isArray(row) || row.length < 6) continue;
       const [seat, x, z, y, f, st] = row;
+      const em = row[6] ?? 0;
       if (!(seat >= 0)) continue;
       let e = this.seats.get(seat);
       if (!e) {
@@ -65,7 +67,7 @@ export class RemoteWalkers {
       // 同じ時刻の重複や、順序が入れ替わった古い値は捨てる
       const last = e.buf[e.buf.length - 1];
       if (last && now <= last.t) continue;
-      e.buf.push({ t: now, x, z, y, f, st });
+      e.buf.push({ t: now, x, z, y, f, st, em });
       if (e.buf.length > KEEP) e.buf.shift();
     }
   }
@@ -80,7 +82,7 @@ export class RemoteWalkers {
   }
 
   // いま描くべき姿。遅らせた時刻を挟む2点を補間する。
-  // 戻り値: [{ seat, name, x, z, y, facing, st, speed }]
+  // 戻り値: [{ seat, name, x, z, y, facing, st, emote, speed }]
   sample(now = Date.now()) {
     const at = now - this.delay;
     const out = [];
@@ -99,7 +101,8 @@ export class RemoteWalkers {
       if (!c) {
         // まだ次が来ていない。最後の姿で止める(勝手に進めると行き過ぎる)
         out.push({
-          seat, name: e.name, x: a.x, z: a.z, y: a.y, facing: a.f, st: a.st, speed: 0,
+          seat, name: e.name, x: a.x, z: a.z, y: a.y, facing: a.f, st: a.st,
+          emote: a.em, speed: 0,
         });
         continue;
       }
@@ -118,6 +121,7 @@ export class RemoteWalkers {
         facing: lerpAngle(a.f, c.f, k),
         // 状態は混ぜられないので、近いほうを採る
         st: k < 0.5 ? a.st : c.st,
+        emote: k < 0.5 ? a.em : c.em,
         speed,
       });
     }

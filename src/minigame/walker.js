@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 import { WalkerMotion, WALK_SPEED, MAX_DT } from './motion.js';
-import { walkPose, airPose, tumblePose, sinkPose, fishPose } from './pose.js';
+import { walkPose, airPose, tumblePose, sinkPose, fishPose, emotePose } from './pose.js';
 import { makeWalker, walkerHeight, CUTE } from './body.js';
 
 export { WALK_SPEED };
@@ -81,6 +81,14 @@ export class Walker {
     this.phase = 0;
     const g = this.motion.groundAt(this.pos.x, this.pos.z);
     this._apply(fishPose(t, this.motion.facing, k), g.y);
+  }
+
+  // エモートの姿勢を当てる。歩きの update を回したあとに上書きして使う
+  // ── 重力や地面の追従は update に任せ、見た目だけ差し替える。
+  emote(key, t, k) {
+    this.phase = 0;
+    const g = this.motion.groundAt(this.pos.x, this.pos.z);
+    this._apply(emotePose(key, t, this.motion.facing, k), g.y + this.motion.y);
   }
 
   // 竿先の世界座標(糸をここから垂らす)

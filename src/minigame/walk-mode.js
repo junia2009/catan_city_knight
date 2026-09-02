@@ -18,6 +18,7 @@ import { FishingFx } from './fishing-fx.js';
 import { RemoteWalkers } from './remote.js';
 import { RemoteView, WALK_COLORS } from './remote-view.js';
 import { ST } from './remote-st.js';
+import { emoteById } from './emote.js';
 
 // フレームレートに依らない追従係数。
 // dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
@@ -137,6 +138,9 @@ export class WalkMode {
     this.onPos = null;       // 自分の位置を送る口(main.js が繋ぐ)
     this._sendAt = 0;
     this._sent = null;
+    // エモート。出している間だけ { id, key, ms, t } が入る
+    this.emote = null;
+    this.onEmote = null;     // 出し始め・終わりの知らせ(HUD 用)
 
     // カメラと操作を借りるので、元の状態を覚えておいて出るときに戻す
     this.saved = {
@@ -174,6 +178,37 @@ export class WalkMode {
     this.input.y = y;
   }
 
+  // ---- エモート ----
+
+  // その場でする短い身ぶり。動かすと途中でやめる(歩きながらは出さない)。
+  // 釣っている間は出せない ── 竿を持ったまま万歳すると腕が竿ごと回る。
+  playEmote(id) {
+    if (this.fishing || this.walker.falling) return false;
+    const e = emoteById(id);
+    if (!e) return false;
+    this.emote = { id: e.id, key: e.key, ms: e.ms, t: 0 };
+    this.onEmote?.(e);
+    return true;
+  }
+
+  stopEmote() {
+    if (!this.emote) return;
+    this.emote = null;
+    this.onEmote?.(null);
+  }
+
+  // エモートを1フレーム進める。まだ続いているなら true。
+  // 動いた・跳んだ・落ちたら取り消す ── 歩きながら固まった姿勢で滑ると怖い。
+  _emoteFrame(dt, moving, r) {
+    if (!this.emote) return false;
+    if (moving || !r?.grounded || r?.falling) { this.stopEmote(); return false; }
+    this.emote.t += dt;
+    const k = this.emote.t / (this.emote.ms / 1000);
+    if (k >= 1) { this.stopEmote(); return false; }
+    this.walker.emote(this.emote.key, this.emote.t, k);
+    return true;
+  }
+
   setKey(code, down) {
     if (down) {
       // 押しっぱなしで跳び続けないよう、押した瞬間だけ拾う
@@ -207,6 +242,7 @@ export class WalkMode {
   // 港のそばでだけ始められる。足場に立たせ、沖を向かせてから投げる。
   startFishing() {
     if (this.fishing || !this.spot) return false;
+    this.stopEmote();   // 竿を出すので、身ぶりは切り上げる
     const s = this.spot;
     this.walker.setPosition(s.x, s.z);
     this.walker.motion.vel.x = 0;
@@ -288,7 +324,13 @@ export class WalkMode {
     const kb = this._keyInput();
     const inp = (kb.x || kb.y) ? kb : this.input;
     const w = this.walker.pos;
-    const r = this.walker.update(dt, inp, this.camYaw);
+    // エモート中は入力を捨てる ── 歩き出したらエモートを取り消して、
+    // その次のフレームから動く(同じフレームで両方やると1歩ぶん滑る)。
+    const moving = !!(inp.x || inp.y);
+    const still = this.emote ? { x: 0, y: 0 } : inp;
+    const r = this.walker.update(dt, still, this.camYaw);
+    // 姿勢だけ上書きする(位置・地面・カメラは update の結果をそのまま使う)
+    this._emoteFrame(dt, moving, r);
 
     // 港のそばに来たら知らせる(入った/出たときだけ)
     const spot = r.grounded ? spotNear(this.spots, w.x, w.z) : null;
@@ -475,14 +517,16 @@ export class WalkMode {
     const st = this.fishing ? ST.fish
       : m.falling ? ST.fall
         : m.grounded ? ST.walk : ST.air;
-    const p = [w.pos.x, w.pos.z, m.y, w.facing, st];
+    const p = [w.pos.x, w.pos.z, m.y, w.facing, st, this.emote ? this.emote.id : 0];
     const last = this._sent;
     const still = last
       && Math.abs(p[0] - last[0]) < SEND_MOVE
       && Math.abs(p[1] - last[1]) < SEND_MOVE
       && Math.abs(p[2] - last[2]) < SEND_MOVE
       && Math.abs(p[3] - last[3]) < SEND_TURN
-      && p[4] === last[4];
+      && p[4] === last[4]
+      // エモートの出し始め・終わりは、立ち止まっていても必ず送る
+      && p[5] === last[5];
     this._sendAt = now;
     if (still) return null;
     this._sent = p;

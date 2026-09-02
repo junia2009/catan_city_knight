@@ -15,3 +15,8 @@ export const ST = {
 };
 
 export const ST_MAX = 3;
+
+// エモートの番号の上限。0 は「出していない」。
+// 中身(絵柄・名前・長さ)はクライアントだけが知っていればよいので emote.js。
+// サーバーは範囲を丸めるためにこの数だけ知る。
+export const EMOTE_MAX = 5;
