@@ -19,6 +19,7 @@ import { RemoteWalkers } from './remote.js';
 import { RemoteView, WALK_COLORS } from './remote-view.js';
 import { ST } from './remote-st.js';
 import { emoteById } from './emote.js';
+import { speciesById, DEFAULT_SPECIES } from './species.js';
 
 // フレームレートに依らない追従係数。
 // dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
@@ -88,16 +89,19 @@ export class WalkMode {
   // fishSeed: 釣りの乱数。対戦の state.rng は絶対に使わない
   // (回すとオンライン対戦で全員の乱数列がずれる)。
   // seat: 散策部屋での自分の席(1人で歩くときは null)。色分けに使う
-  constructor(board3d, state, fishSeed = Date.now() >>> 0, seat = null) {
+  // look: すがた(species.js の番号)
+  constructor(board3d, state, fishSeed = Date.now() >>> 0, seat = null, look = DEFAULT_SPECIES) {
     this.b = board3d;
     this.ground = makeGround(state);
     this.obstacles = collectObstacles(board3d);
     this.seat = seat;
+    this.species = speciesById(look);
     this.walker = new Walker(
       board3d.scene,
       this.ground,
       seat == null ? 0x2f6fd0 : WALK_COLORS[seat % WALK_COLORS.length],
       makeBlocker(this.obstacles),
+      this.species,
     );
 
     // 散策部屋では席ごとに立ち位置をずらす(全員が重なって見えないように)

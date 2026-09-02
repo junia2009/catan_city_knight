@@ -15,14 +15,11 @@
 import * as THREE from 'three';
 import { WalkerMotion, WALK_SPEED, MAX_DT } from './motion.js';
 import { walkPose, airPose, tumblePose, sinkPose, fishPose, emotePose } from './pose.js';
-import { makeWalker, walkerHeight, CUTE } from './body.js';
+import { makeWalker } from './body.js';
 
 export { WALK_SPEED };
 
 export { makeWalker };
-
-// 足元から頭のてっぺんまで(タイル1枚が約1.0)
-export const WALKER_HEIGHT = walkerHeight(CUTE);
 
 // 姿勢をメッシュへ流し込む。pose.js が返す項目を「毎回全部」書くので、
 // 前の姿勢の値が残らない(海から上がって足が交差したまま、が起きない)。
@@ -49,8 +46,10 @@ export function applyPose(parts, pose, x, y, z) {
 export class Walker {
   // groundAt(x, z) → { y, ok }。ok が false なら「そこは地面でない」
   // blockAt: 盤の上の物にめり込ませないための関数(obstacles.js)
-  constructor(scene, groundAt, color, blockAt = null) {
-    this.parts = makeWalker(color);
+  // species: species.js の1つ(省略すると「ひと」)
+  constructor(scene, groundAt, color, blockAt = null, species = null) {
+    this.parts = makeWalker(color, species);
+    this.species = species;
     scene.add(this.parts.group);
     this.motion = new WalkerMotion(groundAt, blockAt);
     this.phase = 0;       // 歩行サイクル

@@ -39,16 +39,23 @@ export class RemoteWalkers {
   constructor({ delay = DELAY_MS, gone = GONE_MS } = {}) {
     this.delay = delay;
     this.goneMs = gone;
-    this.seats = new Map(); // seat -> { name, buf: [{t, x, z, y, f, st}] }
+    this.seats = new Map(); // seat -> { name, look, buf: [{t, x, z, y, f, st, em}] }
   }
 
-  // 名簿。席と名前の対応は位置と別に来る(毎回送るには重いので)
+  // 名簿(名前とすがた)。位置と違って変わらない値なので、
+  // 位置とは別に、届いたときだけ持つ(毎回送るには重い)
   setNames(seats) {
     this.names = new Map();
+    this.looks = new Map();
     for (const s of seats ?? []) {
-      if (s && s.name) this.names.set(s.seat, s.name);
+      if (!s) continue;
+      if (s.name) this.names.set(s.seat, s.name);
+      if (s.look) this.looks.set(s.seat, s.look);
     }
-    for (const [seat, e] of this.seats) e.name = this.names.get(seat) ?? e.name;
+    for (const [seat, e] of this.seats) {
+      e.name = this.names.get(seat) ?? e.name;
+      e.look = this.looks.get(seat) ?? e.look;
+    }
   }
 
   // サーバーから届いたひとかたまり。
@@ -61,7 +68,11 @@ export class RemoteWalkers {
       if (!(seat >= 0)) continue;
       let e = this.seats.get(seat);
       if (!e) {
-        e = { name: this.names?.get(seat) ?? null, buf: [] };
+        e = {
+          name: this.names?.get(seat) ?? null,
+          look: this.looks?.get(seat) ?? null,
+          buf: [],
+        };
         this.seats.set(seat, e);
       }
       // 同じ時刻の重複や、順序が入れ替わった古い値は捨てる
@@ -82,7 +93,7 @@ export class RemoteWalkers {
   }
 
   // いま描くべき姿。遅らせた時刻を挟む2点を補間する。
-  // 戻り値: [{ seat, name, x, z, y, facing, st, emote, speed }]
+  // 戻り値: [{ seat, name, look, x, z, y, facing, st, emote, speed }]
   sample(now = Date.now()) {
     const at = now - this.delay;
     const out = [];
@@ -101,8 +112,8 @@ export class RemoteWalkers {
       if (!c) {
         // まだ次が来ていない。最後の姿で止める(勝手に進めると行き過ぎる)
         out.push({
-          seat, name: e.name, x: a.x, z: a.z, y: a.y, facing: a.f, st: a.st,
-          emote: a.em, speed: 0,
+          seat, name: e.name, look: e.look, x: a.x, z: a.z, y: a.y, facing: a.f,
+          st: a.st, emote: a.em, speed: 0,
         });
         continue;
       }
@@ -115,6 +126,7 @@ export class RemoteWalkers {
       out.push({
         seat,
         name: e.name,
+        look: e.look,
         x,
         z,
         y: lerp(a.y, c.y, k),

@@ -104,7 +104,7 @@ export class RoomDO {
     const clientId = this.sockets.get(ws);
 
     if (msg.t === 'hello') {
-      const res = room.join({ clientId: msg.clientId, name: msg.name });
+      const res = room.join({ clientId: msg.clientId, name: msg.name, look: msg.look });
       if (res.error) return this.send(ws, { t: 'error', msg: res.error, fatal: true });
       // 同じ人の古い接続は切る(タブの開き直しなど)
       for (const [sock, id] of this.sockets) {
@@ -126,6 +126,14 @@ export class RoomDO {
     if (!clientId) return this.send(ws, { t: 'error', msg: 'まず参加してください' });
 
     if (msg.t === 'ping') return this.send(ws, { t: 'pong' });
+
+    // すがたを変えた。名簿を配り直せば、みんなの画面で体が作り直される
+    if (msg.t === 'look') {
+      const res = room.setLook(clientId, msg.look);
+      if (res.error) return this.send(ws, { t: 'error', msg: res.error });
+      this.broadcastLobby();
+      return this.save();
+    }
 
     if (msg.t === 'settings') {
       const res = room.setSettings(clientId, msg.settings);

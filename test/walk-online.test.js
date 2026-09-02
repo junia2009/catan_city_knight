@@ -7,6 +7,9 @@ import { WalkRelay, TICK_MS, STALE_MS } from '../server/walk-relay.js';
 import { RemoteWalkers, lerpAngle } from '../src/minigame/remote.js';
 import { ST, EMOTE_MAX } from '../src/minigame/remote-st.js';
 import { RoomCore, MAX_SEATS, WALK_MAX_SEATS } from '../server/room-core.js';
+import {
+  SPECIES, SPECIES_MAX, DEFAULT_SPECIES, speciesById, cleanSpecies, speciesOk,
+} from '../src/minigame/species.js';
 import { createGame } from '../src/state.js';
 
 // ---- サーバー側: 位置のリレー ----
@@ -353,4 +356,85 @@ test('散策部屋: 席数は1か所で決まっている', async () => {
   }
   assert.ok(room.join({ clientId: 'over', name: 'あふれ' }).error,
     '席数を超えて入れてしまう');
+});
+
+// ---- すがた ----
+
+// 番号は通信に乗る。並べ替えると、相手が古い版を開いているあいだ
+// 「ねこのつもりがドラゴンに見える」。番号と中身の対応を固定する。
+test('すがた: 番号と中身の対応が変わっていない', () => {
+  assert.ok(speciesOk(), 'すがたの一覧が壊れている');
+  assert.deepEqual(
+    SPECIES.map((s) => `${s.id}:${s.key}`),
+    ['1:human', '2:cat', '3:bear', '4:sheep', '5:penguin', '6:frog', '7:dragon', '8:fox'],
+  );
+  assert.equal(SPECIES.length, SPECIES_MAX);
+  assert.equal(DEFAULT_SPECIES, 1);
+});
+
+test('すがた: 知らない番号は「ひと」に落とす(姿が消えない)', () => {
+  for (const bad of [0, -1, SPECIES_MAX + 1, null, undefined, NaN, 'ねこ', {}]) {
+    assert.equal(cleanSpecies(bad), DEFAULT_SPECIES, `${String(bad)} が既定に落ちない`);
+    assert.equal(speciesById(bad).key, 'human', `${String(bad)} で人にならない`);
+  }
+  // ちゃんとした番号はそのまま
+  for (const s of SPECIES) {
+    assert.equal(cleanSpecies(s.id), s.id);
+    assert.equal(cleanSpecies(String(s.id)), s.id, '文字列で来ても通す');
+  }
+});
+
+test('散策部屋: すがたは名簿に乗る(位置とは別に1回だけ)', () => {
+  const room = new RoomCore({ kind: 'walk' });
+  room.join({ clientId: 'a', name: 'あきら', look: 2 });
+  room.join({ clientId: 'b', name: 'ばんり' });          // 指定なし
+  room.join({ clientId: 'c', name: 'ちひろ', look: 999 }); // でたらめ
+  const seats = room.lobbyInfo().seats;
+  assert.equal(seats[0].look, 2, 'ねこが名簿に乗らない');
+  assert.equal(seats[1].look, DEFAULT_SPECIES, '指定なしが既定にならない');
+  assert.equal(seats[2].look, DEFAULT_SPECIES, 'でたらめが既定に落ちない');
+  // 空席にも既定が入る(描く側が undefined を触らずに済む)
+  assert.equal(seats[3].look, DEFAULT_SPECIES);
+});
+
+test('散策部屋: 途中ですがたを変えられる', () => {
+  const room = new RoomCore({ kind: 'walk' });
+  room.join({ clientId: 'a', name: 'あきら', look: 2 });
+  assert.equal(room.setLook('a', 7).look, 7);
+  assert.equal(room.lobbyInfo().seats[0].look, 7);
+  // 席が無い人は変えられない
+  assert.ok(room.setLook('よそもの', 3).error);
+  // でたらめは既定に落ちる
+  room.setLook('a', -5);
+  assert.equal(room.lobbyInfo().seats[0].look, DEFAULT_SPECIES);
+});
+
+test('散策部屋: 入り直しても、すがたを覚えている', () => {
+  const room = new RoomCore({ kind: 'walk' });
+  room.join({ clientId: 'a', name: 'あきら', look: 4 });
+  // 再接続(look を送らない古い版でも、前のすがたのまま)
+  room.join({ clientId: 'a', name: 'あきら' });
+  assert.equal(room.lobbyInfo().seats[0].look, 4);
+  // 保存して読み直しても残る
+  const back = RoomCore.fromJSON(JSON.parse(JSON.stringify(room.toJSON())));
+  assert.equal(back.lobbyInfo().seats[0].look, 4);
+});
+
+test('補間: すがたは名簿から引く(位置と一緒に毎回送らない)', () => {
+  const w = new RemoteWalkers({ delay: 100 });
+  w.setNames([{ seat: 0, name: 'あきら', look: 6 }]);
+  w.push([[0, 1, 1, 0, 0, ST.walk, 0]], 1000);
+  // 次がまだ来ていないとき(最後の姿で止まっている)
+  assert.equal(w.sample(1050)[0].look, 6, '止まっている間にすがたが落ちる');
+  // 2点のあいだを補間しているとき ── こちらは別の道を通るので両方見る
+  w.push([[0, 2, 1, 0, 0, ST.walk, 0]], 1100);
+  const mid = w.sample(1150);
+  assert.ok(mid[0].x > 1 && mid[0].x < 2, '補間の途中になっていない');
+  assert.equal(mid[0].look, 6, '補間中にすがたが落ちる');
+  // 名簿が後から届いても反映される
+  const w2 = new RemoteWalkers({ delay: 100 });
+  w2.push([[0, 1, 1, 0, 0, ST.walk, 0]], 1000);
+  assert.equal(w2.sample(1050)[0].look, null, '名簿が来る前は未指定');
+  w2.setNames([{ seat: 0, name: 'あきら', look: 3 }]);
+  assert.equal(w2.sample(1050)[0].look, 3);
 });

@@ -8,6 +8,7 @@
 //   chest → (head, eyes, mouth, arms[].root → knee)
 
 import * as THREE from 'three';
+import { speciesById, DEFAULT_SPECIES } from './species.js';
 
 const SKIN = 0xffd9a8;
 const CLOTH = 0x2f6fd0;
@@ -137,12 +138,160 @@ function makeShoe(mat, s) {
   return g;
 }
 
-export function makeWalker(color = CLOTH, p = CUTE) {
+// ---- すがたごとの飾り(species.js の parts を読んで足す)----
+//
+// どれも「頭」か「腰」に付ける。頭に付けたものは首の動きに、腰に付けたものは
+// 体のひねりに付いてくる ── 胴に付けると、うつむいても耳だけ正面を向く。
+
+// 耳。三角(ねこ)・まる(くま)・とがって長い(きつね)・垂れ(ひつじ)
+function makeEars(furMat, accMat, kind, p) {
+  const g = new THREE.Group();
+  const r = p.headR;
+  for (const sx of [-1, 1]) {
+    const ear = new THREE.Group();
+    if (kind === 'round') {
+      const outer = new THREE.Mesh(new THREE.SphereGeometry(r * 0.38, 10, 8), furMat);
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(r * 0.22, 8, 6), accMat);
+      inner.position.z = r * 0.16;
+      ear.add(outer, inner);
+      ear.position.set(sx * r * 0.72, r * 0.72, 0);
+    } else {
+      // 円錐。きつねは細長く、ひつじは横へ垂らす
+      const len = kind === 'fox' ? r * 0.95 : r * 0.62;
+      const wide = kind === 'droop' ? r * 0.30 : r * 0.26;
+      const outer = new THREE.Mesh(new THREE.ConeGeometry(wide, len, 7), furMat);
+      outer.position.y = len / 2;
+      const inner = new THREE.Mesh(new THREE.ConeGeometry(wide * 0.55, len * 0.7, 7), accMat);
+      inner.position.set(0, len * 0.42, wide * 0.35);
+      ear.add(outer, inner);
+      ear.position.set(sx * r * 0.55, r * 0.62, 0);
+      ear.rotation.z = sx * (kind === 'droop' ? 1.25 : 0.28);
+      if (kind === 'droop') ear.position.y = r * 0.3;
+    }
+    ear.traverse((o) => { o.castShadow = true; });
+    g.add(ear);
+  }
+  return g;
+}
+
+// しっぽ。腰の後ろから。ねこは立てて、きつねは太く、ドラゴンは太く長く垂らす
+function makeTail(furMat, accMat, kind, p) {
+  const g = new THREE.Group();
+  const len = kind === 'fox' ? 0.13 : kind === 'dragon' ? 0.15 : 0.11;
+  const thick = kind === 'fox' ? 0.030 : kind === 'dragon' ? 0.026 : 0.017;
+  const m = new THREE.Mesh(new THREE.CapsuleGeometry(thick, len, 4, 8), furMat);
+  m.position.y = len / 2;
+  m.castShadow = true;
+  g.add(m);
+  if (kind === 'fox') {
+    // 先だけ白くする
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(thick * 1.05, 10, 8), accMat);
+    tip.position.y = len;
+    g.add(tip);
+  }
+  // 付け根は胴の外へ出す。中に置くと丸ごと埋まって、後ろから見えない。
+  g.position.set(0, p.bodyY * 0.55, -(p.bodyR + thick * 0.5));
+  // rotation.x が正だと前(+Z)へ倒れて体に刺さる。後ろへ倒すので負。
+  // ねこはほぼ立て、きつねは斜め、ドラゴンは水平に近く伸ばす。
+  g.rotation.x = kind === 'dragon' ? -1.45 : kind === 'fox' ? -0.8 : -0.5;
+  return g;
+}
+
+// くちばし(ペンギン)
+function makeBeak(mat, p) {
+  const m = new THREE.Mesh(new THREE.ConeGeometry(p.headR * 0.26, p.headR * 0.42, 8), mat);
+  m.rotation.x = Math.PI / 2;
+  m.position.set(0, -p.headR * 0.12, p.headR * 0.92);
+  m.castShadow = true;
+  return m;
+}
+
+// 鼻先。頭の前へ少しだけ出す(ねこ・くま・きつね・ドラゴン)
+// 鼻先。**明るい色で作る** ── 体と同じ色にすると、暗い目が暗い顔に埋もれて
+// 表情がまったく読めなかった。顔に明るい面を1つ作るだけで顔らしくなる。
+function makeSnout(furMat, accMat, noseMat, p) {
+  const g = new THREE.Group();
+  const m = new THREE.Mesh(new THREE.SphereGeometry(p.headR * 0.32, 10, 8), accMat);
+  m.scale.set(1, 0.8, 0.9);
+  m.position.set(0, -p.headR * 0.30, p.headR * 0.80);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(p.headR * 0.10, 8, 6), noseMat);
+  nose.position.set(0, -p.headR * 0.24, p.headR * 1.02);
+  g.add(m, nose);
+  g.traverse((o) => { o.castShadow = true; });
+  return g;
+}
+
+// もこもこ(ひつじ)。頭のまわりに球をいくつか散らす
+function makeFluff(mat, p) {
+  const g = new THREE.Group();
+  const r = p.headR;
+  // 位置は決め打ちの並び。乱数は使わない(対戦の乱数に触れないのはもちろん、
+  // 見るたび形が変わると「同じ人」に見えなくなる)
+  const spots = [
+    [0, 0.72, -0.1], [-0.6, 0.5, -0.1], [0.6, 0.5, -0.1],
+    [-0.45, 0.15, -0.6], [0.45, 0.15, -0.6], [0, 0.3, -0.8],
+    [-0.75, 0.0, 0.1], [0.75, 0.0, 0.1],
+  ];
+  for (const [x, y, z] of spots) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r * 0.42, 10, 8), mat);
+    m.position.set(x * r, y * r, z * r);
+    m.castShadow = true;
+    g.add(m);
+  }
+  return g;
+}
+
+// 角(ドラゴン)
+function makeHorns(mat, p) {
+  const g = new THREE.Group();
+  for (const sx of [-1, 1]) {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(p.headR * 0.16, p.headR * 0.55, 6), mat);
+    m.position.set(sx * p.headR * 0.46, p.headR * 0.85, -p.headR * 0.15);
+    m.rotation.z = sx * 0.3;
+    m.rotation.x = -0.25;
+    m.castShadow = true;
+    g.add(m);
+  }
+  return g;
+}
+
+// 背びれ(ドラゴン)。胴の背中側に小さい三角を並べる
+function makeSpikes(mat, p) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i += 1) {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(p.bodyR * 0.18, p.bodyR * 0.42, 5), mat);
+    m.position.set(0, p.bodyY + (i - 1) * p.bodyR * 0.42, -p.bodyR * 0.78);
+    m.rotation.x = -0.5;
+    m.castShadow = true;
+    g.add(m);
+  }
+  return g;
+}
+
+// お腹(ペンギン・かえる)。胴の前に平たい球を貼る
+function makeBelly(mat, p) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(p.bodyR * 0.82, 12, 10), mat);
+  m.scale.set(1, 1.15, 0.5);
+  m.position.set(0, p.bodyY - p.bodyR * 0.08, p.bodyR * 0.62);
+  return m;
+}
+
+// color はその人の色。species は species.js の1つ(省略すると「ひと」)。
+//
+// 動物(fur)は体ぜんぶがその人の色になり、ひとだけ服に色が付く。
+// こうすると「赤いねこ」「青いねこ」で誰が誰か分かりつつ、種類も分かる。
+export function makeWalker(color = CLOTH, species = speciesById(DEFAULT_SPECIES)) {
+  const sp = species ?? speciesById(DEFAULT_SPECIES);
+  const p = { ...CUTE, ...(sp.props ?? {}) };
+  const parts = sp.parts ?? {};
+
   const g = new THREE.Group();
   const mat = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.75, metalness: 0.02 });
-  const skin = mat(SKIN);
+  // 動物は顔も手足も体の色。ひとは肌色のまま
+  const skin = mat(sp.fur ? color : SKIN);
   const cloth = mat(color);
-  const shoe = mat(SHOE);
+  const shoe = mat(sp.fur ? color : SHOE);
+  const accent = mat(sp.accent ?? SKIN);
 
   // 腰。ここを動かすと全身が付いてくる
   const hips = new THREE.Group();
@@ -161,7 +310,9 @@ export function makeWalker(color = CLOTH, p = CUTE) {
   chest.position.y = p.chestY;
   hips.add(chest);
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(p.headR, 18, 14), skin);
+  // 顔だけ別の色にできる(ひつじの黒い顔など)。既定は体と同じ
+  const faceMat = sp.face != null ? mat(sp.face) : skin;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(p.headR, 18, 14), faceMat);
   head.position.y = p.headY;
   head.scale.set(1, 0.96, 0.96);   // 顔の付け位置はこの潰しを割り戻す(下)
   head.castShadow = true;
@@ -177,6 +328,17 @@ export function makeWalker(color = CLOTH, p = CUTE) {
   const eyeGeo = new THREE.SphereGeometry(p.eye.r, 8, 8);
   const eyeMat = new THREE.MeshBasicMaterial({ color: EYE });
   for (const sx of [-1, 1]) {
+    if (parts.eyesOnTop) {
+      // かえる。頭の上に大きな目を乗せる(白目ごと出っ張らせる)
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(p.headR * 0.34, 10, 8), skin);
+      ball.position.set(sx * p.headR * 0.44, p.headR * 0.72 / hs.y, p.headR * 0.12 / hs.z);
+      ball.castShadow = true;
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(p.eye.r * 1.15, 8, 8), eyeMat);
+      pupil.position.z = p.headR * 0.28;
+      ball.add(pupil);
+      head.add(ball);
+      continue;
+    }
     const eye = new THREE.Mesh(eyeGeo, eyeMat);
     eye.position.set(sx * p.eye.x, p.eye.y / hs.y, p.eye.z / hs.z);
     eye.scale.set(0.85, 1 / hs.y, 0.7 / hs.z);
@@ -206,10 +368,27 @@ export function makeWalker(color = CLOTH, p = CUTE) {
     return limb;
   });
 
+  // ---- すがたの飾り ----
+  // 頭に付けたものは首の動きに付いてくる(胴に付けると顔だけ正面を向く)
+  if (parts.ears) head.add(makeEars(skin, accent, parts.ears, p));
+  if (parts.snout) head.add(makeSnout(skin, accent, mat(EYE), p));
+  if (parts.beak) head.add(makeBeak(accent, p));
+  if (parts.horns) head.add(makeHorns(accent, p));
+  if (parts.fluff) head.add(makeFluff(skin, p));
+  // 腰(体のひねりに付いてくる)
+  if (parts.tail) hips.add(makeTail(skin, accent, parts.tail, p));
+  if (parts.spikes) hips.add(makeSpikes(accent, p));
+  if (parts.belly) hips.add(makeBelly(accent, p));
+
   return { group: g, hips, chest, head, mouth, arms, legs, rod };
 }
 
-// 足元から頭のてっぺんまで。カメラの寄りや当たり判定の目安に使う。
-export function walkerHeight(p = CUTE) {
-  return p.hipY + p.chestY + p.headY + p.headR;
+// 足元から頭のてっぺんまで。名札の高さとカメラの寄りに使う。
+//
+// すがたを渡すこと。角やもこもこで背が伸びるので、決め打ちの値を使うと
+// のっぽの名札が頭にめり込む。
+export function walkerHeight(species = speciesById(DEFAULT_SPECIES)) {
+  const sp = species ?? speciesById(DEFAULT_SPECIES);
+  const p = { ...CUTE, ...(sp.props ?? {}) };
+  return p.hipY + p.chestY + p.headY + p.headR + (sp.top ?? 0);
 }
