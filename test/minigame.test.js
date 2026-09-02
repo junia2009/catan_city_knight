@@ -593,3 +593,35 @@ test('emote: 向きはそのまま通る(混ぜて回り込まない)', () => {
     }
   }
 });
+
+// 「しょんぼり」と「おじぎ」が同じに見える、という指摘から。
+// どちらも腰から折っていたのが原因だった。
+test('emote: しょんぼりとおじぎは別物(腰の折りかたで見分く)', () => {
+  const bow = emoteById(3);
+  const sad = emoteById(5);
+  const deepest = (e, ch) => Math.max(...Array.from({ length: 21 }, (_, i) => {
+    const k = i / 20;
+    return emotePose(e.key, k * (e.ms / 1000), 0, k)[ch].x;
+  }));
+  // おじぎは腰から折る。しょんぼりは腰をほぼ曲げず、背中を丸める
+  assert.ok(deepest(bow, 'hips') > 0.7, `おじぎが浅い(${deepest(bow, 'hips').toFixed(2)})`);
+  assert.ok(deepest(sad, 'hips') < 0.2, `しょんぼりが腰から折れている(${deepest(sad, 'hips').toFixed(2)})`);
+  assert.ok(deepest(sad, 'chest') > deepest(bow, 'chest') * 1.5,
+    'しょんぼりのほうが背中を丸めていない');
+});
+
+test('emote: しょんぼりは首を左右に振る(おじぎは振らない)', () => {
+  const yOf = (e, n) => Array.from({ length: n }, (_, i) => {
+    const k = (i + 0.5) / n;
+    return emotePose(e.key, k * (e.ms / 1000), 0, k).head.y;
+  });
+  const sad = yOf(emoteById(5), 60);
+  assert.ok(Math.max(...sad) > 0.15 && Math.min(...sad) < -0.15,
+    `左右に振れていない(${Math.min(...sad).toFixed(2)}〜${Math.max(...sad).toFixed(2)})`);
+  // 向きが変わる回数。1往復はしていること(振っている、と分かる速さか)
+  const turns = sad.slice(1).filter((v, i) => Math.sign(v) !== Math.sign(sad[i])).length;
+  assert.ok(turns >= 2, `振りが遅すぎる(向きが変わった回数 ${turns})`);
+
+  const bow = yOf(emoteById(3), 40);
+  assert.ok(Math.max(...bow.map(Math.abs)) < 1e-9, 'おじぎで首が振れている');
+});
