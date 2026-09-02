@@ -145,6 +145,13 @@ export function fishPose(t, facing, k = {}) {
   const fighting = phase === 'fight';
   const sway = Math.sin(t * 1.3) * 0.02;   // 待っている間のわずかな揺れ
 
+  // 釣り終わり。糸はもう水にない ── 竿を水につけたままの構えで
+  // 「もう一度」を出すと、まだ釣っている最中に見える。
+  const landed = phase === 'landed';
+  const lost = phase === 'lost';
+  const done = landed || lost;
+  const bob = landed ? Math.sin(t * 6) * 0.05 : 0;   // 釣れた喜びの弾み
+
   // 投げる動作: いったん後ろへ振りかぶって、勢いよく前へ振り出す
   const back = Math.max(0, 1 - cast / 0.35);
   const fwd = Math.max(0, (cast - 0.35) / 0.65);
@@ -157,24 +164,36 @@ export function fishPose(t, facing, k = {}) {
   // 巻いている間は少し踏ん張る
   const hold = fighting ? tension * 0.55 + (k.reeling ? 0.1 : 0) : 0;
 
-  const rodX = -(Math.PI / 2 + 0.6) - swing - hold * 0.5 + bite + shake + sway;
+  // 竿の角度。釣れたら立てて掲げ、逃げられたら下ろす
+  const rodBase = landed ? -2.85 + bob
+    : lost ? -1.15
+      : -(Math.PI / 2 + 0.6);
+  const rodX = rodBase - swing - hold * 0.5 + bite + shake + sway;
 
   return {
     group: JOINT(0, facing, 0),
-    // 大物と格闘している間は口が開く
-    mouth: MOUTH(fighting && tension > 0.55 ? 1 : 0),
-    // 引かれるぶんだけ体を反らす
-    hips: JOINT(-hold * 0.5 - (phase === 'cast' ? swing * 0.2 : 0), 0, 0),
-    chest: JOINT(-hold * 0.25 + shake * 0.3, 0, sway * 2),
-    head: JOINT(0.14 + hold * 0.2, 0, 0),
-    // 足は少し前後に開いて踏ん張る。引かれるほど深く
+    // 大物と格闘している間と、釣れた瞬間は口が開く
+    mouth: MOUTH((fighting && tension > 0.55) || landed ? 1 : 0),
+    // 引かれるぶんだけ体を反らす。逃げられたら前へうなだれる
+    hips: JOINT(
+      -hold * 0.5 - (phase === 'cast' ? swing * 0.2 : 0) - bob * 0.6 + (lost ? 0.2 : 0),
+      0, 0,
+    ),
+    chest: JOINT(-hold * 0.25 + shake * 0.3 + (lost ? 0.18 : 0), 0, sway * 2),
+    head: JOINT(0.14 + hold * 0.2 + (lost ? 0.4 : 0) - (landed ? 0.3 : 0), 0, 0),
+    // 足は少し前後に開いて踏ん張る。引かれるほど深く。
+    // 終わったら揃えて立つ(踏ん張ったままだと、まだ格闘中に見える)
     legs: [0, 1].map((i) => {
       const s = i === 0 ? 1 : -1;
+      if (done) return LIMB(s * 0.1, s * 0.11, 0);
       return LIMB(s * (0.22 + hold * 0.35), s * 0.13, Math.max(0, s) * (0.2 + hold * 0.5));
     }),
     arms: [0, 1].map((i) => {
       // 右手(1)が竿。左手(0)は下を支え、巻くときはハンドルを回す
       if (i === 1) return LIMB(rodX, 0.22, 0.12 + hold * 0.35);
+      // 釣れたら左手を上げて喜び、逃げられたら垂らす
+      if (landed) return LIMB(-2.6 + bob * 2, -0.5, 0.35);
+      if (lost) return LIMB(-0.2, -0.16, 0.15);
       const crank = k.reeling ? Math.sin(t * 11) * 0.45 : 0;
       return LIMB(-1.45 - hold * 0.3 + crank * 0.35, -0.3, 0.75 + crank);
     }),

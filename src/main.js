@@ -539,18 +539,24 @@ function exitWalk() {
 // 進行は minigame/fishing.js。ここは「押しかた」と「表示」だけを持つ。
 // ボタンは1つで、段階によって役目が変わる:
 //   釣り場に立った → つる(投げる)
-//   待ち           → 押すと早あわせ(逃げられる)
-//   アタリ         → あわせる
+//   投げてから     → 引く。アタリの前に押すと早あわせで逃げられる
+//   アタリ         → 同じ「引く」が赤く光る。ここで押す
 //   勝負           → 押している間だけ巻く
 //   釣果/おしまい  → もう一度
+//
+// 投げてからアタリまでを「まつ」と書いていたが、ボタンは
+// 「押すと何が起きるか」を書く場所なのに"押すな"と言っていて、
+// しかも押すと逃げられる ── 押して損しかしないボタンになっていた。
+// ずっと「引く」にして、早いか遅いかだけの勝負にする。
+// (「あわせる」は釣りの言葉なので使わない)
 
 const fishEl = () => document.getElementById('walk-fish');
 // ボタンの見た目。段階ごとに [絵, 文字, 目立たせるか]
 const FISH_BTN = {
   ready: ['🎣', 'つる', false],
-  cast: ['🎣', 'まつ', false],
-  wait: ['🎣', 'まつ', false],
-  bite: ['❗', 'あわせる', true],
+  cast: ['🎣', '引く', false],
+  wait: ['🎣', '引く', false],
+  bite: ['❗', '引く!', true],
   fight: ['🎣', 'まく', false],
   landed: ['🎣', 'もう一度', false],
   lost: ['🎣', 'もう一度', false],
@@ -558,7 +564,7 @@ const FISH_BTN = {
 // 逃した理由。何が悪かったのか分からないと、次に活かせない
 const FISH_LOST = {
   early: ['💨', '早すぎた', 'まだ食いついていません'],
-  late: ['💨', '逃げられた', 'アタリのうちに あわせる'],
+  late: ['💨', '逃げられた', '赤く光ったら すぐ引く'],
   snap: ['✂️', '糸が切れた', '張りすぎ。赤くなる前に手を離す'],
 };
 
@@ -624,7 +630,7 @@ function renderFishHud(v) {
     setFishButton(v.phase);
     const note = document.getElementById('fish-note');
     if (note) {
-      note.textContent = v.phase === 'bite' ? '❗ あわせる!' : '';
+      note.textContent = v.phase === 'bite' ? '❗ 引く!' : '';
       note.classList.toggle('on', v.phase === 'bite');
     }
   }

@@ -291,6 +291,9 @@ export class WalkMode {
     for (const e of f.update(dt)) this.onFishEvent?.(e);
 
     const v = f.view();
+    // 釣り終わったら糸を巻き取る(浮きも糸も消す)。
+    // 出したままにすると、「もう一度」が出ているのに水に浸かったままに見える。
+    if (!f.active) this.ffx.hide();
     // 投げているあいだの進み具合(浮きが飛んでいく)
     const castK = v.phase === 'cast' ? Math.min(1, this.fishT / CAST_TIME) : 1;
     this.walker.fish(this.fishT, {
