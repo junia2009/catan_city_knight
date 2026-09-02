@@ -86,9 +86,11 @@ export const SPECIES = [
     label: 'ドラゴン',
     icon: '🐉',
     fur: true,
-    accent: 0xffe08a,          // 角・背びれ
-    parts: { horns: true, tail: 'dragon', spikes: true, snout: true },
-    top: 0.035,                // 角のぶん
+    accent: 0xffe08a,          // 角・背びれ・翼の膜
+    // 少しだけ大きく構える(小さいと「かっこいい」から遠ざかる)
+    props: { bodyR: 0.078, headR: 0.102 },
+    parts: { horns: true, wings: true, tail: 'dragon', spikes: true, snout: true },
+    top: 0.06,                 // 反った角のぶん
   },
   {
     id: 8,
