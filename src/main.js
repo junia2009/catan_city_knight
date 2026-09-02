@@ -212,7 +212,7 @@ function renderOnlinePanel() {
       <div class="net-note">合言葉で集まって、同じ島をみんなで歩くこともできます
         (対戦はしません)。</div>
       <div class="row end">
-        <button data-act="net-create-walk" ${online.busy ? 'disabled' : ''}>🚶 散策の部屋を作る</button>
+        <button class="primary" data-act="net-create-walk" ${online.busy ? 'disabled' : ''}>🚶 散策の部屋を作る</button>
       </div>
       <div class="srow"><span>合言葉</span>
         <input id="net-code" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"></div>
