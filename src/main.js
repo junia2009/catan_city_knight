@@ -201,7 +201,7 @@ function renderOnlinePanel() {
   // まだ部屋に入っていない: 作る/合言葉で入る
   if (!online.lobby) {
     panel.innerHTML = `
-      <h3>🌐 オンライン対戦</h3>
+      <h3>🌐 オンライン</h3>
       <div class="net-note">同じ合言葉を共有した友達と、最大4人で対戦できます。<br>
         空いた席はCPUが埋めます。</div>
       <div class="srow"><span>名前</span>
@@ -212,7 +212,7 @@ function renderOnlinePanel() {
       <div class="net-note">合言葉で集まって、同じ島をみんなで歩くこともできます
         (対戦はしません)。</div>
       <div class="row end">
-        <button data-act="net-create-walk" ${online.busy ? 'disabled' : ''}>🚶 散策の部屋を作る</button>
+        <button class="primary" data-act="net-create-walk" ${online.busy ? 'disabled' : ''}>🚶 散策の部屋を作る</button>
       </div>
       <div class="srow"><span>合言葉</span>
         <input id="net-code" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"></div>
