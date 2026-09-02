@@ -318,9 +318,16 @@ function rawEmotePose(key, t, facing) {
       const shake = Math.sin((t - 0.5) * 4.0) * Math.min(1, Math.max(0, t - 0.5));
       return {
         ...base,
-        hips: JOINT(0.1, 0, 0),                 // 腰はほぼまっすぐ(おじぎとの差)
-        chest: JOINT(down * 0.38, 0, 0),        // 丸めた背中
-        head: JOINT(down * 0.55, shake * 0.34, shake * 0.06),
+        // 体ごと少しひねる。後ろから見て動いていると分かるのはこれが一番強い
+        group: JOINT(0, facing + shake * 0.22, 0),
+        hips: JOINT(0.1, 0, shake * 0.05),
+        // **横回転(y)だけでは、後ろから見て何も動かない。**
+        // 頭は丸い球で、しかも回転の軸の上に載っているので、首をひねっても
+        // 輪郭が1ピクセルも動かない ── 実際「全然振っているように見えない」
+        // と言われた。上体を左右に倒す(z)ことで、頭と、垂れた両手が
+        // 実際に横へ動く。振っていると分かるのはこの動きのほう。
+        chest: JOINT(down * 0.38, shake * 0.14, shake * 0.5),
+        head: JOINT(down * 0.5, shake * 0.6, shake * 0.22),
         legs: [0, 1].map((i) => LIMB(0, (i === 0 ? 1 : -1) * 0.05, down * 0.16)),
         // 腕は力なく前へ垂れ、首の動きに少し遅れてついてくる
         arms: [0, 1].map((i) => LIMB(

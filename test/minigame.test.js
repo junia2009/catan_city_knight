@@ -625,3 +625,25 @@ test('emote: しょんぼりは首を左右に振る(おじぎは振らない)',
   const bow = yOf(emoteById(3), 40);
   assert.ok(Math.max(...bow.map(Math.abs)) < 1e-9, 'おじぎで首が振れている');
 });
+
+// 頭は丸い球で、しかも回転の軸の上に載っている。首をひねっても、後ろから
+// 見ると輪郭が1ピクセルも動かない ── 実際「全然振っているように見えない」
+// と言われた。体ごとひねり、上体を左右に倒すことで初めて見える。
+test('emote: しょんぼりは体ごとひねり、上体を左右に倒す(後ろからも見える)', () => {
+  const e = emoteById(5);
+  const at = (k) => emotePose(e.key, k * (e.ms / 1000), 1.0, k);
+  const ys = [];
+  const zs = [];
+  for (let i = 0; i < 60; i += 1) {
+    const p = at((i + 0.5) / 60);
+    ys.push(p.group.y - 1.0);   // facing からのずれ
+    zs.push(p.chest.z);
+  }
+  assert.ok(Math.max(...ys) > 0.1 && Math.min(...ys) < -0.1,
+    `体をひねっていない(${Math.min(...ys).toFixed(2)}〜${Math.max(...ys).toFixed(2)})`);
+  assert.ok(Math.max(...zs) > 0.25 && Math.min(...zs) < -0.25,
+    `上体を倒していない(${Math.min(...zs).toFixed(2)}〜${Math.max(...zs).toFixed(2)})`);
+  // 倒れるのは上体だけ。腰まで倒すと足が地面から浮いて見える
+  const hips = Array.from({ length: 60 }, (_, i) => Math.abs(at((i + 0.5) / 60).hips.z));
+  assert.ok(Math.max(...hips) < 0.12, `腰まで倒れている(${Math.max(...hips).toFixed(2)})`);
+});
