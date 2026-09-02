@@ -39,6 +39,7 @@ import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
 import { EMOTES } from './minigame/emote.js';
+import { WALK_SEATS } from './minigame/remote-st.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 import {
   NetClient, createRoom, clientId, savedName, saveName, serverBase,
@@ -202,18 +203,18 @@ function renderOnlinePanel() {
   if (!online.lobby) {
     panel.innerHTML = `
       <h3>🌐 オンライン</h3>
-      <div class="net-note">同じ合言葉を共有した友達と、最大4人で対戦できます。<br>
-        空いた席はCPUが埋めます。</div>
+      <div class="net-note">部屋を作ると合言葉が出ます。それを友達に伝えて集まります。</div>
       <div class="srow"><span>名前</span>
         <input id="net-name" maxlength="12" placeholder="あなたの名前" value="${savedName()}"></div>
+      <div class="net-note">🎲 <b>対戦</b> ── 最大4人。空いた席はCPUが埋めます。</div>
       <div class="row end">
         <button class="primary" data-act="net-create" ${online.busy ? 'disabled' : ''}>対戦の部屋を作る</button>
       </div>
-      <div class="net-note">合言葉で集まって、同じ島をみんなで歩くこともできます
-        (対戦はしません)。</div>
+      <div class="net-note">🚶 <b>散策</b> ── 最大${WALK_SEATS}人で同じ島を歩きます(対戦なし)。</div>
       <div class="row end">
-        <button class="primary" data-act="net-create-walk" ${online.busy ? 'disabled' : ''}>🚶 散策の部屋を作る</button>
+        <button class="primary" data-act="net-create-walk" ${online.busy ? 'disabled' : ''}>散策の部屋を作る</button>
       </div>
+      <div class="net-note">友達が作った部屋には、教わった合言葉で入れます。</div>
       <div class="srow"><span>合言葉</span>
         <input id="net-code" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"></div>
       <div class="row end">
