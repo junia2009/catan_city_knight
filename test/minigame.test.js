@@ -101,6 +101,32 @@ test('walk: 開始地点は必ず陸の上', () => {
   }
 });
 
+test('walk: 散策部屋の開始地点は席ごとに離れていて、どれも陸の上', () => {
+  for (const mode of MODES) {
+    const s = game(mode);
+    const g = makeGround(s);
+    const seen = [];
+    for (let seat = 0; seat < 8; seat += 1) {
+      const p = spawnPoint(s, seat);
+      assert.ok(g(p.x, p.y).ok, `${mode}: 席 ${seat} の開始地点が陸でない`);
+      for (const q of seen) {
+        const d = Math.hypot(p.x - q.x, p.y - q.y);
+        assert.ok(d > 0.3, `${mode}: 席が近すぎる(${d.toFixed(2)})`);
+      }
+      seen.push(p);
+    }
+  }
+});
+
+test('walk: 席を渡さなければ今までどおり中央から', () => {
+  const s = game('base');
+  const a = spawnPoint(s);
+  const b = spawnPoint(s, null);
+  assert.deepEqual(a, b);
+  // 席ありは必ず中央からずれる(ずらし忘れの検出)
+  assert.notDeepEqual(spawnPoint(s, 0), a);
+});
+
 test('walk: 立っている地面の高さは一定(タイル上面)', () => {
   const s = game('base');
   const g = makeGround(s);

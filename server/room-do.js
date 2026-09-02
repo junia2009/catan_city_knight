@@ -3,6 +3,7 @@
 // ここは「接続の管理」と「いつ誰に何を送るか」だけを担当する。
 
 import { RoomCore, IDLE_DISCONNECT_MS } from './room-core.js';
+import { WalkRelay, TICK_MS } from './walk-relay.js';
 
 // CPU / 切断中の席をサーバーが打つときの間合い(ローカル戦の演出と揃える)
 const AUTO_DELAY_MS = 650;
@@ -25,6 +26,10 @@ export class RoomDO {
     this.room = null;
     this.sockets = new Map(); // WebSocket -> clientId
     this.autoTimer = null;
+    // 散策部屋の位置。メモリだけに持ち、storage には絶対に書かない
+    // (次の瞬間には古くなる値なので、書くと遅くて高いだけ)
+    this.walk = new WalkRelay();
+    this.walkTimer = null;
     // 無操作で切断するまでの時間。テストで短くできるよう環境変数で上書き可能。
     this.idleLimitMs = Number(env?.IDLE_DISCONNECT_MS) || IDLE_DISCONNECT_MS;
     this.ready = ctx.blockConcurrencyWhile(async () => {
@@ -37,11 +42,13 @@ export class RoomDO {
     await this.ready;
     const url = new URL(request.url);
     const code = url.searchParams.get('code') ?? 'ROOM';
+    // 対戦の部屋か、散策の部屋か。作るときにだけ効く(既にある部屋は変えない)
+    const kind = url.searchParams.get('kind') === 'walk' ? 'walk' : 'game';
 
     // 合言葉の確保(新規作成時): まだ誰も使っていなければ true
     if (url.pathname.endsWith('/claim')) {
       if (this.room) return Response.json({ free: false });
-      this.room = new RoomCore({ code });
+      this.room = new RoomCore({ code, kind });
       await this.save();
       // 誰も入らないまま放置された部屋も掃除対象にする(合言葉を空けるため)
       this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
@@ -52,7 +59,7 @@ export class RoomDO {
       return new Response('WebSocket が必要です', { status: 426 });
     }
     if (!this.room) {
-      this.room = new RoomCore({ code });
+      this.room = new RoomCore({ code, kind });
       await this.save();
       this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
     }
@@ -136,6 +143,20 @@ export class RoomDO {
       return this.save();
     }
 
+    // 散策部屋の位置。ここだけは保存もブロードキャストも即時にはしない
+    // ── 溜めておいて tick でまとめて配る(N×N 通を避ける)。
+    if (msg.t === 'pos') {
+      if (room.kind !== 'walk') return;
+      const seat = room.seatOf(clientId);
+      if (seat < 0) return;
+      this.walk.set(clientId, seat, msg.p);
+      // 歩いているのは人の操作。放置と見なして切らないように印を付ける
+      // (保存はしない。lastActivityAt は見張りが見るだけの値)
+      room.touch();
+      this.startWalkTick();
+      return;
+    }
+
     if (msg.t === 'action') {
       const res = room.submitAction(clientId, msg.action);
       if (res.error) {
@@ -153,12 +174,35 @@ export class RoomDO {
     return this.send(ws, { t: 'error', msg: `不明なメッセージ: ${msg.t}` });
   }
 
+  // 散策部屋の配信。溜まった位置を一定間隔で「全員ぶん1通」にして配る。
+  // 誰もいなくなったら止める(動いていない部屋でタイマーを回し続けない)。
+  startWalkTick() {
+    if (this.walkTimer) return;
+    this.walkTimer = setInterval(() => {
+      const people = this.walk.snapshot();
+      if (!people.length) { this.stopWalkTick(); return; }
+      // 宛先ごとに作り直さない。自分の席を飛ばすのは受け取った側の仕事
+      const line = JSON.stringify({ t: 'walkers', people });
+      for (const ws of this.sockets.keys()) {
+        try { ws.send(line); } catch { /* 切断済みは close で片付く */ }
+      }
+    }, TICK_MS);
+  }
+
+  stopWalkTick() {
+    if (!this.walkTimer) return;
+    clearInterval(this.walkTimer);
+    this.walkTimer = null;
+  }
+
   onClose(ws) {
     const clientId = this.sockets.get(ws);
     if (!clientId) return;
     this.sockets.delete(ws);
     // 同じ人が別の接続で生きているなら切断扱いにしない
     if ([...this.sockets.values()].includes(clientId)) return;
+    this.walk.drop(clientId);
+    if (!this.walk.size) this.stopWalkTick();
     this.room.disconnect(clientId);
     this.broadcastLobby();
     this.pumpAuto(); // 切断した席はサーバーが肩代わりして進める
