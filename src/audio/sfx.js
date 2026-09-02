@@ -243,6 +243,22 @@ const VOICES = {
     s.tone(D.a, t + 0.5, 1.4, { type: 'triangle', gain: 0.1, lp: 3000 });
     s.tone(D.d - 12, t + 0.5, 1.6, { type: 'sine', gain: 0.12 });
   },
+  // 足音。どんな音にするかは footsteps.js が決める。
+  // ここは受け取った中身を鳴らすだけ(地面や動きの区別は持たない)。
+  step: (s, t, o = {}) => {
+    const { noise, thud } = o.sound ?? {};
+    if (noise) s.noise(t, noise.dur, noise);
+    // 体重が乗る鈍い音。ノイズのすぐ後ろに置くと「踏んだ」感じになる
+    if (thud) s.tone(thud.midi, t + 0.004, thud.dur, { type: 'sine', gain: thud.gain, lp: 400 });
+  },
+
+  // 海に落ちた。大きく水を叩いてから、細かい泡が残る
+  splash: (s, t) => {
+    s.noise(t, 0.3, { gain: 0.13, freq: 900, q: 0.7, sweep: 3.5 });
+    s.noise(t + 0.06, 0.5, { gain: 0.05, freq: 4200, q: 0.5, sweep: 0.3 });
+    s.tone(38, t, 0.22, { type: 'sine', gain: 0.09, glide: -7 });
+  },
+
   // ---- 釣り(ミニゲーム)----
   // 投げる: 糸が出ていく「シュッ」と、浮きが落ちる「ポチャン」
   cast: (s, t) => {

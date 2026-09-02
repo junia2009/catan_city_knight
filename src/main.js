@@ -37,6 +37,7 @@ import { renderHUD, RES_ICON, COM_ICON, setHumanSeat, setPlayerTitle } from './r
 import { rulesHtml } from './render/rules-content.js';
 import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
+import { stepSound } from './audio/footsteps.js';
 import { pickEdge, pickHex, pickVertex } from './input.js';
 import {
   NetClient, createRoom, clientId, savedName, saveName, serverBase,
@@ -530,7 +531,15 @@ async function startWalk() {
   const mod = await import('./minigame/walk-mode.js');
   walk = new mod.WalkMode(r, state);
   // 落ちた合図は着水の瞬間に出す(戻ってきたときではもう遅い)
-  walk.onSplash = () => { walkNote('🌊 海に落ちた!'); };
+  walk.onSplash = () => { sfx.play('splash'); walkNote('🌊 海に落ちた!'); };
+  // 足音。地面と動きで音が変わる(audio/footsteps.js)
+  walk.onStep = (terrain, motion, vary, gait) => {
+    const sound = stepSound(terrain, motion, vary);
+    // ゆっくり歩くと小さく。跳ぶ・着地は歩く速さに関係なく出す
+    if (motion === 'walk') sound.noise.gain *= 0.45 + gait * 0.55;
+    sfx.play('step', { sound });
+    stepLog?.push({ terrain, motion, gait: +(gait ?? 1).toFixed(2), at: performance.now() });
+  };
   walk.onSink = setDiveVeil;
   walk.onSpot = onFishSpot;
   walk.onFishStep = renderFishHud;
@@ -758,6 +767,8 @@ function setDiveVeil(v) {
   el.style.opacity = String(v);
 }
 
+// 足音の記録(E2E 用)。ふだんは null で、何も溜めない
+let stepLog = null;
 let walkNoteTimer = null;
 function walkNote(text) {
   const el = document.getElementById('walk-where');
@@ -2511,6 +2522,10 @@ window.hexDebug = {
   getFishing: () => (walk?.fishing ? walk.fishing.view() : null),
   fishReel: (on) => walk?.setReeling(on),
   fishBook: () => progress.fish ?? {},
+  hexCenter: (hid) => walk?.hexCenter(hid) ?? null,
+  // 足音(E2E 用)。音は聞けないので、鳴らした記録を見られるようにする
+  recordSteps: (on = true) => { stepLog = on ? [] : null; },
+  getSteps: () => stepLog ?? [],
   getBgm: () => bgm,
   getViewState: () => ({ viewMode, has3d: !!renderer3d, failed: renderer3dFailed, screen }),
   // オンライン対戦(E2E用)

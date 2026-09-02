@@ -10,7 +10,8 @@ const TILE_TOP = 0.26; // board3d.js と同じタイル上面の高さ
 
 // ---- 盤の幾何(board3d.js と同じ計算。歩ける範囲の判定に使う)----
 
-function hexCenter(hid) {
+// ヘックスの中心。歩ける範囲の判定にも、外から場所を指すのにも使う
+export function hexCenter(hid) {
   let x = 0;
   let y = 0;
   for (const vid of LAYOUT.hexVertices[hid]) {

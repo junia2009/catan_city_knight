@@ -80,13 +80,18 @@ export class Walker {
       return r;
     }
 
+    const was = this.phase;
     this.phase += r.speed * Math.min(dt, MAX_DT) * 5.2;
     const gait = Math.min(1, r.speed / WALK_SPEED);
     this._apply(
       r.grounded ? walkPose(this.phase, gait, m.facing) : airPose(m.vy, m.facing),
       y,
     );
-    return r;
+    // 足が地面に着いた瞬間。歩行サイクルは半周(π)で片足ぶんなので、
+    // π の倍数をまたいだら1歩。音を鳴らす側が動きと合わせられるように返す。
+    const stepped = r.grounded && r.speed > 0.05
+      && Math.floor(this.phase / Math.PI) !== Math.floor(was / Math.PI);
+    return stepped ? { ...r, stepped: true, gait } : r;
   }
 
   // 姿勢をメッシュへ流し込む。pose.js が返す項目を「毎回全部」書くので、
