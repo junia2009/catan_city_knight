@@ -201,7 +201,7 @@ function renderOnlinePanel() {
   // まだ部屋に入っていない: 作る/合言葉で入る
   if (!online.lobby) {
     panel.innerHTML = `
-      <h3>🌐 オンライン対戦</h3>
+      <h3>🌐 オンライン</h3>
       <div class="net-note">同じ合言葉を共有した友達と、最大4人で対戦できます。<br>
         空いた席はCPUが埋めます。</div>
       <div class="srow"><span>名前</span>
