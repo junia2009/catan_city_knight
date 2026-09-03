@@ -6,7 +6,7 @@
 import { LAYOUT } from '../rules/board.js';
 import { isLandHex } from '../rules/sea.js';
 import { s as sc } from './scale.js';
-import { TILE_TOP, surfaceHeight, tokenRadius, hexCenter } from '../terrain.js';
+import { TILE_TOP, surfaceHeight, tokenRadius, tokenTop, hexCenter } from '../terrain.js';
 
 export { hexCenter };
 
@@ -51,8 +51,8 @@ function landHexes(state) {
 export function makeGround(state) {
   const { R, inR, normals } = hexMetrics();
   const land = landHexes(state);
-  // トークンの大きさは盤の広さで決まる。毎フレーム測り直さない
-  const tokenR = tokenRadius(state.board);
+  // 円盤の大きさと厚みは盤の広さで決まる。毎フレーム測り直さない
+  const token = { r: tokenRadius(state.board), top: tokenTop(state.board) };
   const inside = (p, c) => {
     const dx = p.x - c.x;
     const dy = p.y - c.y;
@@ -64,7 +64,7 @@ export function makeGround(state) {
     for (const t of land) {
       if (!inside(p, t.c)) continue;
       return {
-        y: TILE_TOP + surfaceHeight(state.board, t.hid, x, z, tokenR),
+        y: TILE_TOP + surfaceHeight(state.board, t.hid, x, z, token),
         ok: true,
         hexId: t.hid,
       };
