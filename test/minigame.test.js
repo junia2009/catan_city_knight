@@ -131,15 +131,44 @@ test('walk: 席を渡さなければ今までどおり中央から', () => {
   assert.notDeepEqual(spawnPoint(s, 0), a);
 });
 
-test('walk: 立っている地面の高さは一定(タイル上面)', () => {
+// 地面は平らではない ── タイル上面の上に地形の起伏と数字トークンが載っていて、
+// 歩く側はその**見えている面**に立つ(terrain.js)。
+// 平らな上面に立たせていたころは、盛り上がったところで足が埋まっていた。
+test('walk: 立つ高さは、描いてある地面の高さ', async () => {
+  const { TILE_TOP, surfaceHeight, tokenRadius, tokenTop } = await import('../src/terrain.js');
   const s = game('base');
   const g = makeGround(s);
-  const ys = new Set();
+  const tk = { r: tokenRadius(s.board), top: tokenTop(s.board) };
+  let bumpy = 0;
   for (const hid of s.board.hexIds) {
     const c = hexCenter(hid);
-    ys.add(g(c.x, c.y).y);
+    for (const [dx, dz] of [[0, 0], [0.3, 0], [-0.3, 0.2], [0.15, -0.45], [0.5, 0.5]]) {
+      const x = c.x + dx;
+      const z = c.y + dz;
+      const got = g(x, z);
+      if (!got.ok) continue;
+      const want = TILE_TOP + surfaceHeight(s.board, got.hexId, x, z, tk);
+      assert.ok(Math.abs(got.y - want) < 1e-12,
+        `${hid} (${dx},${dz}): 足の高さ ${got.y} と地面 ${want} が違う`);
+      if (got.y > TILE_TOP + 0.005) bumpy += 1;
+    }
   }
-  assert.equal(ys.size, 1, `高さが揃っていない: ${[...ys].join(',')}`);
+  // 起伏がまったく無いなら、そもそも一致を見る意味がない(平らに戻っている)
+  assert.ok(bumpy > 10, `地面がどこも平ら(${bumpy} か所しか盛り上がっていない)`);
+});
+
+// 数字トークンは厚み 0.05 の円盤。**その上に立つ。**
+// 見ていなかったころは、円盤の真ん中に立つと膝まで潜っていた(実機で報告された)。
+test('walk: 数字トークンの上では、円盤の上に立つ', async () => {
+  const { TILE_TOP, TOKEN_H } = await import('../src/terrain.js');
+  const s = game('base');
+  const g = makeGround(s);
+  const withToken = s.board.hexIds.filter((h) => s.board.hexes[h].token);
+  assert.ok(withToken.length > 5, '数字トークンのあるヘックスが少なすぎる');
+  for (const hid of withToken) {
+    const c = hexCenter(hid);
+    assert.equal(g(c.x, c.y).y, TILE_TOP + TOKEN_H, `${hid}: トークンに潜っている`);
+  }
 });
 
 // 盤の上の物への当たり判定。すり抜けるとゲームとして目に見えて壊れて見える

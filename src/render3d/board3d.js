@@ -8,10 +8,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  LAYOUT, PIPS, LAKE_NUMBERS, boardVertexIds, boardEdgeIds, boardGeometry, hexIdsWithin,
+  LAYOUT, PIPS, LAKE_NUMBERS, boardVertexIds, boardEdgeIds,
 } from '../rules/board.js';
 import { RES_JP_SHORT } from '../state.js';
 import { BARBARIAN_TRACK_LENGTH as BARB_TRACK } from '../rules/cak/barbarians.js';
+// 地面の高さは terrain.js に集めてある。**描くほうも歩くほうも同じ1本を使う**
+// ── 別々に持つと、描いてある地表と足の高さが食い違って足が埋まる。
+import {
+  TILE_TOP, CAP_PARAMS, CAP_N, capCorners, capVertexHeight, coordHash, boardScale,
+} from '../terrain.js';
 
 export const PLAYER_COLORS_3D = [0xf04343, 0x3f8ef7, 0xffa02e, 0xb06ef0];
 const PLAYER_COLORS_DARK_3D = [0xa32020, 0x2358a8, 0xc06f14, 0x7a42b8];
@@ -29,18 +34,10 @@ const TERRAIN_COLORS = {
   gold: 0xe8c34a,
 };
 
-// 基本の盤(半径2)の頂点の広がり。カメラの構図の基準にする。
-const BASE_EXTENT = (() => {
-  let x = 0, y = 0;
-  for (const vid of boardGeometry(hexIdsWithin(2)).vertexIds) {
-    const v = LAYOUT.vertices[vid];
-    x = Math.max(x, Math.abs(v.x));
-    y = Math.max(y, Math.abs(v.y));
-  }
-  return { x, y };
-})();
+// 盤の広がり(基本の盤=半径2を1とする倍率)は terrain.js の boardScale。
+// カメラの構図にも、トークンの大きさ(= その上に立てる範囲)にも使う。
 
-const TILE_TOP = 0.26; // タイル上面の高さ
+// TILE_TOP(タイル上面の高さ)は terrain.js から取り込んでいる
 const SEA_Y = 0.02;
 
 // ---- 決定的乱数(2D版と同じ思想。装飾の配置用)----
@@ -420,47 +417,20 @@ function makeDune() {
 // ---- 地形の起伏(タイル上面に重ねる低ポリ地表)----
 // 中心(数字トークン)と縁(建物・道)は平らなまま、中間リングだけ盛り上げる。
 // セクター境界の頂点は座標ハッシュで同じ高さ・同じ色になるため継ぎ目は出ない。
-const CAP_PARAMS = {
-  forest: { amp: 0.042, freq: 5.2, jitter: 0.10, tint: 0x3f8152 },
-  pasture: { amp: 0.03, freq: 4.2, jitter: 0.08, tint: 0x93c258 },
-  field: { amp: 0.02, freq: 6.5, jitter: 0.07, tint: 0xe6c04c },
-  hill: { amp: 0.06, freq: 4.6, jitter: 0.11, tint: 0xbd7043 },
-  mountain: { amp: 0.10, freq: 5.8, jitter: 0.14, tint: 0x93a0b2 },
-  desert: { amp: 0.05, freq: 2.6, jitter: 0.06, tint: 0xe6d7a6 },
-  lake: { amp: 0.012, freq: 3.4, jitter: 0.03, tint: 0x49b2d6 }, // さざ波程度
-  gold: { amp: 0.035, freq: 5.0, jitter: 0.09, tint: 0xf0cf63 },
-};
-
-function coordHash(x, z) {
-  const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
-  return s - Math.floor(s);
-}
-
+//
+// 起伏の表(CAP_PARAMS)と高さの式は terrain.js にある。
+// **歩く側(minigame/ground.js)が同じものを読んで、その上に立つ。**
 function makeTerrainCap(hid, terrain) {
   const prm = CAP_PARAMS[terrain];
   if (!prm) return null;
   const c = hexCenterOf(hid);
-  const phase = (hashStr(hid) % 628) / 100;
-  // 角オフセット(全ヘックス同形なので先頭ヘックスから取る)
-  const first = LAYOUT.hexIds[0];
-  const fc = hexCenterOf(first);
-  const corners = LAYOUT.hexVertices[first].map((vid) => [
-    (LAYOUT.vertices[vid].x - fc.x) * 0.955,
-    (LAYOUT.vertices[vid].y - fc.y) * 0.955,
-  ]);
-
-  const N = 4; // セクター内の分割数
+  // 角オフセットと分割数、高さの式は terrain.js から借りる
+  const corners = capCorners();
+  const N = CAP_N;
   const positions = [];
   const colors = [];
   const base = new THREE.Color(prm.tint);
-  const heightAt = (x, z, t) => {
-    // 中心と縁で0、中間で最大のプロファイル
-    const profile = Math.pow(Math.sin(Math.PI * Math.min(t, 1)), 1.3);
-    const n =
-      0.55 + 0.45 * Math.sin(x * prm.freq + phase) * Math.cos(z * (prm.freq * 0.8) - phase);
-    const j = coordHash(x + c.x, z + c.y) * 0.5;
-    return 0.004 + prm.amp * profile * (n * 0.7 + j * 0.6);
-  };
+  const heightAt = (x, z, t) => capVertexHeight(hid, terrain, x, z, t);
   const pushVert = (x, z, t) => {
     positions.push(x, heightAt(x, z, t), z);
     const shade = 1 + (coordHash(x + c.x + 9.7, z + c.y - 3.1) - 0.5) * 2 * prm.jitter;
@@ -476,14 +446,17 @@ function makeTerrainCap(hid, terrain) {
         const p0 = P(i, j);
         const p1 = P(i + 1, j);
         const p2 = P(i, j + 1);
+        // **面は上向きに積む。** 逆に積むと法線が下を向き、表面だけを描く
+        // 材質(FrontSide)では裏面として捨てられて、**1枚も出ない**。
+        // 起伏はずっとそうなっていた(法線 288 本が全部下向きだった)。
         pushVert(p0[0], p0[1], p0[2]);
-        pushVert(p2[0], p2[1], p2[2]);
         pushVert(p1[0], p1[1], p1[2]);
+        pushVert(p2[0], p2[1], p2[2]);
         if (i + j < N - 1) {
           const p3 = P(i + 1, j + 1);
           pushVert(p1[0], p1[1], p1[2]);
-          pushVert(p2[0], p2[1], p2[2]);
           pushVert(p3[0], p3[1], p3[2]);
+          pushVert(p2[0], p2[1], p2[2]);
         }
       }
     }
@@ -498,6 +471,9 @@ function makeTerrainCap(hid, terrain) {
   );
   mesh.position.set(c.x, TILE_TOP, c.y);
   mesh.receiveShadow = true;
+  // 地表メッシュの目印。出ているかどうかを外から確かめるのに使う
+  // (これを真っ赤に塗って撮っても盤の色が変わらない ── 上の説明を参照)。
+  mesh.userData.terrainCap = hid;
   return mesh;
 }
 
@@ -2130,15 +2106,11 @@ export class Board3D {
     const key = `${state.seed}:${state.mode}:${state.board.version ?? 0}`;
     if (this.gameKey === key) return;
     this.gameKey = key;
-    // 盤の広がりを測っておく(カメラの引き具合に使う)
-    let maxX = 0, maxY = 0;
-    for (const vid of boardVertexIds(state.board)) {
-      const v = LAYOUT.vertices[vid];
-      maxX = Math.max(maxX, Math.abs(v.x));
-      maxY = Math.max(maxY, Math.abs(v.y));
-    }
+    // 盤の広がり(カメラの引き具合と、トークンの大きさに使う)。
+    // **歩く側も同じ値を要る** ── トークンの上に立てる範囲が広がるので、
+    // terrain.js の boardScale を通す。
     const prevK = this.boardK;
-    this.boardK = Math.max(maxX / BASE_EXTENT.x, maxY / BASE_EXTENT.y, 1);
+    this.boardK = boardScale(state.board);
     // 盤の広さが変わったらカメラを取り直す(モードを切り替えたとき)
     if (prevK !== this.boardK && this._w && this._h) this._fitCamera(this._w, this._h);
     this.staticGroup.clear();
