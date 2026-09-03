@@ -131,15 +131,38 @@ test('walk: 席を渡さなければ今までどおり中央から', () => {
   assert.notDeepEqual(spawnPoint(s, 0), a);
 });
 
-test('walk: 立っている地面の高さは一定(タイル上面)', () => {
+// 素の地面は平ら(タイル上面)。上に載っているのは数字トークンの円盤だけ。
+test('walk: 素の地面の高さはどこも同じ(タイル上面)', async () => {
+  const { TILE_TOP } = await import('../src/terrain.js');
   const s = game('base');
   const g = makeGround(s);
   const ys = new Set();
   for (const hid of s.board.hexIds) {
     const c = hexCenter(hid);
-    ys.add(g(c.x, c.y).y);
+    // 円盤から離れたところ(縁のほう)を見る
+    ys.add(g(c.x + 0.6, c.y).y);
   }
-  assert.equal(ys.size, 1, `高さが揃っていない: ${[...ys].join(',')}`);
+  assert.deepEqual([...ys], [TILE_TOP], `高さが揃っていない: ${[...ys].join(',')}`);
+});
+
+// 数字トークンは厚み 0.05 の円盤。**その上に立つ。**
+// 見ていなかったころは、円盤の真ん中に立つと膝まで潜っていた(実機で報告された)。
+test('walk: 数字トークンの上では、円盤の上に立つ', async () => {
+  const { TILE_TOP, TOKEN_H } = await import('../src/terrain.js');
+  const s = game('base');
+  const g = makeGround(s);
+  const withToken = s.board.hexIds.filter((h) => s.board.hexes[h].token);
+  assert.ok(withToken.length > 5, '数字トークンのあるヘックスが少なすぎる');
+  for (const hid of withToken) {
+    const c = hexCenter(hid);
+    assert.equal(g(c.x, c.y).y, TILE_TOP + TOKEN_H,
+      `${hid}: トークンに潜っている`);
+  }
+  // トークンの無いヘックス(砂漠)の中心は持ち上がらない
+  for (const hid of s.board.hexIds.filter((h) => !s.board.hexes[h].token)) {
+    const c = hexCenter(hid);
+    assert.equal(g(c.x, c.y).y, TILE_TOP, `${hid}: トークンが無いのに持ち上がっている`);
+  }
 });
 
 // 盤の上の物への当たり判定。すり抜けるとゲームとして目に見えて壊れて見える

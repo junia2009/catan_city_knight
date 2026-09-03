@@ -6,21 +6,14 @@
 import { LAYOUT } from '../rules/board.js';
 import { isLandHex } from '../rules/sea.js';
 import { s as sc } from './scale.js';
+import { TILE_TOP, surfaceHeight, tokenRadius, hexCenter } from '../terrain.js';
 
-const TILE_TOP = 0.26; // board3d.js と同じタイル上面の高さ
+export { hexCenter };
 
 // ---- 盤の幾何(board3d.js と同じ計算。歩ける範囲の判定に使う)----
 
-// ヘックスの中心。歩ける範囲の判定にも、外から場所を指すのにも使う
-export function hexCenter(hid) {
-  let x = 0;
-  let y = 0;
-  for (const vid of LAYOUT.hexVertices[hid]) {
-    x += LAYOUT.vertices[vid].x;
-    y += LAYOUT.vertices[vid].y;
-  }
-  return { x: x / 6, y: y / 6 };
-}
+// ヘックスの中心は terrain.js が持っている(地表の高さと同じ幾何を使うため)。
+// ここからも読めるように再輸出してある(上の export { hexCenter })。
 
 // 六角形の内接円半径と、辺の法線3本。点がヘックスの中かを厳密に見るのに使う。
 function hexMetrics() {
@@ -50,9 +43,16 @@ function landHexes(state) {
 
 // 歩ける地面の判定を、その対戦の盤から作る。
 // 戻り値: (x, z) => { y, ok }
+//
+// y は**見えている地面の高さ**。タイルの上面(TILE_TOP)は平らだが、
+// その上に地形の起伏と数字トークンが載っている(terrain.js)。平らな
+// TILE_TOP に立たせていたころは、盛り上がったところで足が地面に埋まり、
+// トークンの上では膝まで潜っていた。
 export function makeGround(state) {
   const { R, inR, normals } = hexMetrics();
   const land = landHexes(state);
+  // トークンの大きさは盤の広さで決まる。毎フレーム測り直さない
+  const tokenR = tokenRadius(state.board);
   const inside = (p, c) => {
     const dx = p.x - c.x;
     const dy = p.y - c.y;
@@ -62,7 +62,12 @@ export function makeGround(state) {
   return (x, z) => {
     const p = { x, y: z };
     for (const t of land) {
-      if (inside(p, t.c)) return { y: TILE_TOP, ok: true, hexId: t.hid };
+      if (!inside(p, t.c)) continue;
+      return {
+        y: TILE_TOP + surfaceHeight(state.board, t.hid, x, z, tokenR),
+        ok: true,
+        hexId: t.hid,
+      };
     }
     return { y: TILE_TOP, ok: false, hexId: null };
   };

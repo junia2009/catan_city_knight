@@ -8,10 +8,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  LAYOUT, PIPS, LAKE_NUMBERS, boardVertexIds, boardEdgeIds, boardGeometry, hexIdsWithin,
+  LAYOUT, PIPS, LAKE_NUMBERS, boardVertexIds, boardEdgeIds,
 } from '../rules/board.js';
 import { RES_JP_SHORT } from '../state.js';
 import { BARBARIAN_TRACK_LENGTH as BARB_TRACK } from '../rules/cak/barbarians.js';
+// タイル上面の高さと盤の広がりは terrain.js と共有する。
+// **歩く側(minigame/ground.js)が同じ値を要る** ── 別々に持つと、
+// 描いてあるものと足の位置が食い違って足が埋まる。
+import { TILE_TOP, boardScale } from '../terrain.js';
 
 export const PLAYER_COLORS_3D = [0xf04343, 0x3f8ef7, 0xffa02e, 0xb06ef0];
 const PLAYER_COLORS_DARK_3D = [0xa32020, 0x2358a8, 0xc06f14, 0x7a42b8];
@@ -29,18 +33,10 @@ const TERRAIN_COLORS = {
   gold: 0xe8c34a,
 };
 
-// 基本の盤(半径2)の頂点の広がり。カメラの構図の基準にする。
-const BASE_EXTENT = (() => {
-  let x = 0, y = 0;
-  for (const vid of boardGeometry(hexIdsWithin(2)).vertexIds) {
-    const v = LAYOUT.vertices[vid];
-    x = Math.max(x, Math.abs(v.x));
-    y = Math.max(y, Math.abs(v.y));
-  }
-  return { x, y };
-})();
+// 盤の広がり(基本の盤=半径2を1とする倍率)は terrain.js の boardScale。
+// カメラの構図にも、トークンの大きさ(= その上に立てる範囲)にも使う。
 
-const TILE_TOP = 0.26; // タイル上面の高さ
+// TILE_TOP(タイル上面の高さ)は terrain.js から取り込んでいる
 const SEA_Y = 0.02;
 
 // ---- 決定的乱数(2D版と同じ思想。装飾の配置用)----
@@ -420,6 +416,11 @@ function makeDune() {
 // ---- 地形の起伏(タイル上面に重ねる低ポリ地表)----
 // 中心(数字トークン)と縁(建物・道)は平らなまま、中間リングだけ盛り上げる。
 // セクター境界の頂点は座標ハッシュで同じ高さ・同じ色になるため継ぎ目は出ない。
+//
+// **いまは画面に出ていない。** 面がすべて下を向いているため裏面として
+// 捨てられており、真っ赤に塗って撮っても盤の色は変わらない。歩く側も
+// これには乗せていない(見えないものに立たせると宙に浮く)。
+// 出すなら、まず面の向きを直すところから ── 見た目が変わるので別件。
 const CAP_PARAMS = {
   forest: { amp: 0.042, freq: 5.2, jitter: 0.10, tint: 0x3f8152 },
   pasture: { amp: 0.03, freq: 4.2, jitter: 0.08, tint: 0x93c258 },
@@ -498,6 +499,9 @@ function makeTerrainCap(hid, terrain) {
   );
   mesh.position.set(c.x, TILE_TOP, c.y);
   mesh.receiveShadow = true;
+  // 地表メッシュの目印。出ているかどうかを外から確かめるのに使う
+  // (これを真っ赤に塗って撮っても盤の色が変わらない ── 上の説明を参照)。
+  mesh.userData.terrainCap = hid;
   return mesh;
 }
 
@@ -2130,15 +2134,11 @@ export class Board3D {
     const key = `${state.seed}:${state.mode}:${state.board.version ?? 0}`;
     if (this.gameKey === key) return;
     this.gameKey = key;
-    // 盤の広がりを測っておく(カメラの引き具合に使う)
-    let maxX = 0, maxY = 0;
-    for (const vid of boardVertexIds(state.board)) {
-      const v = LAYOUT.vertices[vid];
-      maxX = Math.max(maxX, Math.abs(v.x));
-      maxY = Math.max(maxY, Math.abs(v.y));
-    }
+    // 盤の広がり(カメラの引き具合と、トークンの大きさに使う)。
+    // **歩く側も同じ値を要る** ── トークンの上に立てる範囲が広がるので、
+    // terrain.js の boardScale を通す。
     const prevK = this.boardK;
-    this.boardK = Math.max(maxX / BASE_EXTENT.x, maxY / BASE_EXTENT.y, 1);
+    this.boardK = boardScale(state.board);
     // 盤の広さが変わったらカメラを取り直す(モードを切り替えたとき)
     if (prevK !== this.boardK && this._w && this._h) this._fitCamera(this._w, this._h);
     this.staticGroup.clear();
