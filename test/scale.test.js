@@ -79,6 +79,37 @@ test('縮尺: 人まわりの値どうしの比は縮尺で動かない', () => 
   assert.ok(DESK_REACH > DESK_RADIUS + WALKER_RADIUS, '受付にぶつかると届かない');
 });
 
+// **歩幅と足の運びが噛み合っているか。**
+//
+// 1歩で進む距離が足の振れ幅より大きすぎると、足が地面を擦って進む
+// ──「歩いていない、滑っている」に見える(実機で報告された)。
+// 位相の進みが決め打ちの係数だったころ、×0.5 に縮めたときに脚だけが
+// 半分になって、この比が 4.4 → 8.8 倍に悪化していた。
+test('縮尺: 1歩で進む距離が、足の振れ幅から離れすぎない', async () => {
+  const { FOOT_TRAVEL, STEP_DIST, STEP_SLIP, PHASE_PER_UNIT, LEG_SWING } =
+    await import('../src/minigame/pose.js');
+  const { HIP_Y, s: sc } = await import('../src/minigame/scale.js');
+
+  // 足の振れ幅は「脚の長さ × 腰の振り」から出ていること
+  assert.ok(Math.abs(FOOT_TRAVEL - 2 * sc(HIP_Y) * Math.sin(LEG_SWING)) < 1e-12,
+    '足の振れ幅が脚の長さから出ていない');
+  assert.ok(Math.abs(STEP_DIST / FOOT_TRAVEL - STEP_SLIP) < 1e-12, '滑り率が設計と違う');
+  // 3倍まで。これを超えると、目に見えて足が流れる
+  assert.ok(STEP_SLIP <= 3, `1歩が足の振れ幅の ${STEP_SLIP} 倍もある(滑って見える)`);
+  // 1倍を下回ると足が地面を掻いて後ろへ蹴りすぎる(進むより速く足が動く)
+  assert.ok(STEP_SLIP >= 1, `1歩が足の振れ幅より短い(${STEP_SLIP})`);
+
+  // 位相は距離から引く。1歩(π)ぶん進む距離が STEP_DIST
+  assert.ok(Math.abs(PHASE_PER_UNIT * STEP_DIST - Math.PI) < 1e-12,
+    '位相の進みが1歩の距離と噛み合っていない');
+
+  // **縮尺を変えても、歩数のテンポは変わらないこと。**
+  // 距離あたりの位相は 1/縮尺 で増え、速さは縮尺で減るので、
+  // 秒あたりの歩数(速さ × 位相 ÷ π)は縮尺に依らない。
+  const steps = (WALK_SPEED * PHASE_PER_UNIT) / Math.PI;
+  assert.ok(steps > 2 && steps < 6, `1秒の歩数が極端(${steps.toFixed(2)}歩)`);
+});
+
 // 海は盤の寸法。人を縮めても水面と沈む深さは動かない ── 動かすと、
 // 盤の高さから落ちてきた勢いだけが縮まずに残って、一瞬で沈み切る。
 test('縮尺: 海の寸法は縮尺と無関係', () => {

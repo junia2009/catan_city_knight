@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { speciesById, DEFAULT_SPECIES } from './species.js';
-import { WALK_SCALE } from './scale.js';
+import { WALK_SCALE, HIP_Y } from './scale.js';
 
 const SKIN = 0xffd9a8;
 const CLOTH = 0x2f6fd0;
@@ -24,7 +24,7 @@ const EYE = 0x22242a;
 export const CUTE = {
   // 脚の長さを変えるときは hipY も同じだけ動かすこと。
   // 足首は hipY − thigh − shin なので、脚だけ縮めると靴が宙に浮く。
-  hipY: 0.118,         // 腰の高さ(脚の付け根)
+  hipY: HIP_Y,         // 腰の高さ(脚の付け根)。歩幅の計算に要るので scale.js に置いてある
   bodyR: 0.072,        // 胴の太さ
   bodyLen: 0.04,       // 胴の直線部(短くして豆のような形に)
   bodyY: 0.062,        // 胴の中心(腰から)
