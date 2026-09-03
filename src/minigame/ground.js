@@ -68,7 +68,9 @@ export function makeGround(state) {
 }
 
 // 席ごとに散らす輪の半径。タイル1枚(内接円 ≈ 0.87)に収まる大きさ。
-const SPAWN_RING = 0.5;
+// 中心には釣り大会の受付が立っているので、その手の届く範囲より外に出す
+// ── でないと、島に降りた瞬間から受付のパネルが開きっぱなしになる。
+const SPAWN_RING = 0.62;
 // 散策部屋の席数。輪を何等分するか。
 const SPAWN_SEATS = 8;
 

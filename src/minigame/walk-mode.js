@@ -20,6 +20,7 @@ import { RemoteView, WALK_COLORS } from './remote-view.js';
 import { ST } from './remote-st.js';
 import { emoteById } from './emote.js';
 import { speciesById, DEFAULT_SPECIES } from './species.js';
+import { makeDesk, DESK_RADIUS, DESK_REACH } from './desk.js';
 
 // フレームレートに依らない追従係数。
 // dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
@@ -95,6 +96,17 @@ export class WalkMode {
     this.ground = makeGround(state);
     this.obstacles = collectObstacles(board3d);
     this.seat = seat;
+
+    // 釣り大会の受付。島の中心(みんなが降り立つところ)に立てる。
+    // 席ごとの立ち位置は中心から輪の上へずらしてあるので、台とは重ならない。
+    const home = spawnPoint(state);
+    this.deskAt = { x: home.x, z: home.y };
+    this.desk = makeDesk(board3d.scene, home.x, home.y, this.ground(home.x, home.y).y);
+    // 台にもぶつかるようにする。collectObstacles はシーンを見て集めるので、
+    // あとから足したものは自分で入れる必要がある。
+    this.obstacles.push({ x: home.x, z: home.y, r: DESK_RADIUS, h: 0.62 });
+    this.atDesk = false;
+    this.onDesk = null;      // 受付に入った/出た
     this.species = speciesById(look);
     this.walker = new Walker(
       board3d.scene,
@@ -336,6 +348,14 @@ export class WalkMode {
     // 姿勢だけ上書きする(位置・地面・カメラは update の結果をそのまま使う)
     this._emoteFrame(dt, moving, r);
 
+    // 受付のそばに来たら知らせる(入った/出たときだけ)
+    const near = r.grounded
+      && Math.hypot(w.x - this.deskAt.x, w.z - this.deskAt.z) < DESK_REACH;
+    if (near !== this.atDesk) {
+      this.atDesk = near;
+      this.onDesk?.(near);
+    }
+
     // 港のそばに来たら知らせる(入った/出たときだけ)
     const spot = r.grounded ? spotNear(this.spots, w.x, w.z) : null;
     if (spot !== this.spot) {
@@ -539,6 +559,7 @@ export class WalkMode {
 
   dispose() {
     this.b.onFrame = null;
+    this.desk.dispose();
     this.walker.dispose();
     this.remoteView.dispose();
     this.fx.dispose();

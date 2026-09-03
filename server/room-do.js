@@ -4,6 +4,7 @@
 
 import { RoomCore, IDLE_DISCONNECT_MS } from './room-core.js';
 import { WalkRelay, TICK_MS } from './walk-relay.js';
+import { FishingContest } from './fishing-contest.js';
 
 // CPU / 切断中の席をサーバーが打つときの間合い(ローカル戦の演出と揃える)
 const AUTO_DELAY_MS = 650;
@@ -30,11 +31,15 @@ export class RoomDO {
     // (次の瞬間には古くなる値なので、書くと遅くて高いだけ)
     this.walk = new WalkRelay();
     this.walkTimer = null;
+    // 釣り大会。進行(締め切り・順位)はサーバーが持つ
+    this.contest = new FishingContest();
     // 無操作で切断するまでの時間。テストで短くできるよう環境変数で上書き可能。
     this.idleLimitMs = Number(env?.IDLE_DISCONNECT_MS) || IDLE_DISCONNECT_MS;
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get('room');
       if (saved) this.room = RoomCore.fromJSON(saved);
+      const c = await ctx.storage.get('contest');
+      if (c) this.contest = FishingContest.fromJSON(c);
     });
   }
 
@@ -116,6 +121,9 @@ export class RoomDO {
       this.sockets.set(ws, msg.clientId);
       this.send(ws, { t: 'joined', seat: res.seat, code: room.code, you: msg.clientId });
       this.broadcastLobby();
+      // 大会のいまの様子も渡す。変わったときだけ配っていると、あとから
+      // 来た人はいつまでも受付を見られない(実際そうなっていた)。
+      if (room.kind === 'walk') this.send(ws, { t: 'contest', contest: this.contest.view() });
       if (room.phase === 'playing') this.sendState(ws, res.seat, null);
       this.pumpAuto();
       this.scheduleAlarm(); // 着席したので、ここから放置を見張る
@@ -165,6 +173,25 @@ export class RoomDO {
       return;
     }
 
+    // 釣り大会。どれも席が要る
+    if (msg.t === 'contest') {
+      if (room.kind !== 'walk') return;
+      const seat = room.seatOf(clientId);
+      if (seat < 0) return;
+      const c = this.contest;
+      let res;
+      if (msg.do === 'enter') res = c.enter(seat);
+      else if (msg.do === 'leave') res = c.leave(seat);
+      else if (msg.do === 'start') res = c.start(seat);
+      else if (msg.do === 'land') res = c.land(seat, msg.cm);
+      else return this.send(ws, { t: 'error', msg: `不明な操作: ${msg.do}` });
+      if (res.error) return this.send(ws, { t: 'error', msg: res.error });
+      room.touch();
+      this.broadcastContest();
+      this.startWalkTick();   // 大会中は誰も動かなくても時間を進める
+      return this.saveContest();
+    }
+
     if (msg.t === 'action') {
       const res = room.submitAction(clientId, msg.action);
       if (res.error) {
@@ -186,15 +213,38 @@ export class RoomDO {
   // 誰もいなくなったら止める(動いていない部屋でタイマーを回し続けない)。
   startWalkTick() {
     if (this.walkTimer) return;
+    let n = 0;
     this.walkTimer = setInterval(() => {
+      // 大会の時間切れはここで見る。誰も動いていなくても進む必要がある
+      if (this.contest.tick()) { this.broadcastContest(); this.saveContest(); }
+      // 残り時間は毎秒だけ配る。位置と同じ 10 回/秒で送ると、
+      // 変わらない表を秒 10 回配ることになって、通信のほとんどがこれになる
+      n += 1;
+      if (n % 10 === 0 && this.contest.phase !== 'idle') this.broadcastContest();
+
       const people = this.walk.snapshot();
-      if (!people.length) { this.stopWalkTick(); return; }
+      if (!people.length) {
+        // 大会が動いている間は、誰も歩いていなくても止めない
+        if (this.contest.phase === 'idle') this.stopWalkTick();
+        return;
+      }
       // 宛先ごとに作り直さない。自分の席を飛ばすのは受け取った側の仕事
       const line = JSON.stringify({ t: 'walkers', people });
       for (const ws of this.sockets.keys()) {
         try { ws.send(line); } catch { /* 切断済みは close で片付く */ }
       }
     }, TICK_MS);
+  }
+
+  broadcastContest() {
+    const line = JSON.stringify({ t: 'contest', contest: this.contest.view() });
+    for (const ws of this.sockets.keys()) {
+      try { ws.send(line); } catch { /* 切断済みは close で片付く */ }
+    }
+  }
+
+  saveContest() {
+    return this.ctx.storage.put('contest', this.contest.toJSON());
   }
 
   stopWalkTick() {
@@ -210,7 +260,12 @@ export class RoomDO {
     // 同じ人が別の接続で生きているなら切断扱いにしない
     if ([...this.sockets.values()].includes(clientId)) return;
     this.walk.drop(clientId);
-    if (!this.walk.size) this.stopWalkTick();
+    if (!this.walk.size && this.contest.phase === 'idle') this.stopWalkTick();
+    const seat = this.room.seatOf(clientId);
+    if (seat >= 0 && this.contest.dropSeat(seat)) {
+      this.broadcastContest();
+      this.saveContest();
+    }
     this.room.disconnect(clientId);
     this.broadcastLobby();
     this.pumpAuto(); // 切断した席はサーバーが肩代わりして進める
