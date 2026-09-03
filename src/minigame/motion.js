@@ -8,24 +8,33 @@
 // 見た目(メッシュ・歩行アニメーション)は walker.js が持つ。
 
 import { slideVelocity } from './obstacles.js';
+import { s as sc } from './scale.js';
 
-export const WALK_SPEED = 1.9;   // タイル/秒
+// 長さは縮尺を掛ける(scale.js)。時間と角速度は掛けない ──
+// 掛けると歩き出しや向き変えのテンポまで変わってしまう。
+export const WALK_SPEED = sc(1.9);   // タイル/秒
 const TURN_SPEED = 9;            // 向き変えの速さ
-const ACCEL = 9;                 // 加速(小さいほどぬるっと動く)
-const AIR_ACCEL = 3.5;           // 空中での効き(地上より鈍く。跳んだ勢いが残る)
-const MAX_STEP = 0.05;           // 1回の計算で進める上限(すり抜け防止)
+const ACCEL = sc(9);             // 加速(小さいほどぬるっと動く)
+const AIR_ACCEL = sc(3.5);       // 空中での効き(地上より鈍く。跳んだ勢いが残る)
+const MAX_STEP = sc(0.05);       // 1回の計算で進める上限(すり抜け防止)
 export const MAX_DT = 0.25;      // これを超えた分は捨てる(タブ復帰で飛ばない)
 
 // 海。タイル上面を 0 とした高さで持つ(board3d の SEA_Y 0.02 − TILE_TOP 0.26)
 export const WATER_Y = -0.24;
 const WATER_DRAG = 3.2;          // 水の抵抗。落ちてきた勢いがここで殺される
+// 海は盤の寸法(水面 -0.24 は動かない)。沈むのは「じっくり見せる演出」で、
+// 深さも速さも一緒に縮めると、着水の勢い(盤の高さから落ちてきた分)だけが
+// 縮まずに残って、あっという間に沈み切ってしまう ── 実測 2.9秒 → 1.6秒。
+// ここは縮尺を掛けない。小さくなったぶん、海が深く見えるほうが正しい。
 const SINK_SPEED = -0.5;         // 沈んでいく速さ(終端速度)
 export const SINK_DEPTH = -1.9;  // ここまで沈んだら岸へ戻す
 const WATER_SWAY = 0.9;          // 水中でゆらゆら漂う速さ
 
-// ジャンプ。頂点 0.5 タイル(棒人間の背丈くらい)、滞空 0.8 秒になるよう決めた。
+// ジャンプ。頂点は棒人間の背丈くらい、滞空 0.8 秒になるよう決めた。
 //   h = g t² / 8,  v0 = g t / 2
-export const JUMP_HEIGHT = 0.5;
+// 高さだけ縮めて滞空時間は据え置く ── 同じテンポで低く跳ぶ。
+// 滞空も縮めると小動物のようにせわしなくなり、操作の感触が変わる。
+export const JUMP_HEIGHT = sc(0.5);
 const AIR_TIME = 0.8;
 const GRAVITY = (8 * JUMP_HEIGHT) / (AIR_TIME * AIR_TIME);
 const JUMP_SPEED = (GRAVITY * AIR_TIME) / 2;

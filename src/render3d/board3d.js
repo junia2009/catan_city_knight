@@ -2279,6 +2279,9 @@ export class Board3D {
       this.staticGroup.add(pole);
       const sign = portSprite(port.type);
       sign.position.set(sx, SEA_Y + 0.62, sz);
+      // 盤面ゲームの表示物なので、島を歩く間は小さくする(walk-mode.js)。
+      // 目印にするための大きさなので、棒人間の隣に立つと看板が画面を埋める。
+      sign.userData.portSign = true;
       this.staticGroup.add(sign);
     }
 

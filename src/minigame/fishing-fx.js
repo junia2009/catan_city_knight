@@ -4,13 +4,17 @@
 // 受け取って描くだけで、ゲームの判断はしない。
 
 import * as THREE from 'three';
+import { WALK_SCALE, s as sc } from './scale.js';
 
 const LINE_COLOR = 0xdfefff;
 const FLOAT_TOP = 0xe8503a;
 const FLOAT_BOT = 0xf5f2ea;
 
-// 糸のたるみ。張っていないほど大きく垂れる
-const SAG = 0.22;
+// 糸のたるみ。張っていないほど大きく垂れる。
+// 竿と糸は釣り人の道具なので、寸法も投げる距離も縮尺を掛ける(scale.js)。
+const SAG = sc(0.22);
+// 投げる距離。浮きが岸からどれだけ沖に落ちるか
+const CAST_DIST = sc(1.1);
 const SEG = 12;   // 糸の分割数(たるみを曲線で見せるため)
 
 export class FishingFx {
@@ -36,6 +40,7 @@ export class FishingFx {
     );
     stick.position.y = 0.055;
     this.float.add(top, bot, stick);
+    this.float.scale.setScalar(WALK_SCALE);
     this.float.visible = false;
     scene.add(this.float);
 
@@ -58,6 +63,7 @@ export class FishingFx {
       }),
     );
     this.ring.rotation.x = -Math.PI / 2;
+    this.ring.scale.setScalar(WALK_SCALE);
     this.ring.visible = false;
     scene.add(this.ring);
     this.ringT = 0;
@@ -67,7 +73,7 @@ export class FishingFx {
   }
 
   // 浮きを落とす場所を決める(岸から沖へ向かって投げる)
-  cast(x, z, dirX, dirZ, dist = 1.1) {
+  cast(x, z, dirX, dirZ, dist = CAST_DIST) {
     this.float.position.set(x + dirX * dist, this.seaY, z + dirZ * dist);
     this.float.visible = true;
     this.line.visible = true;
@@ -88,11 +94,11 @@ export class FishingFx {
 
     const f = this.float.position;
     // 浮きの上下。待っている間はゆっくり、アタリでは激しく沈む
-    let bob = Math.sin(this.t * 2.1) * 0.012;
-    if (v.phase === 'bite') bob = -0.045 - Math.abs(Math.sin(this.t * 16)) * 0.05;
+    let bob = Math.sin(this.t * 2.1) * sc(0.012);
+    if (v.phase === 'bite') bob = sc(-0.045 - Math.abs(Math.sin(this.t * 16)) * 0.05);
     else if (v.phase === 'fight') {
       // 張っているほど浮きが水に引き込まれる
-      bob = -0.02 - v.tension * 0.06 + Math.sin(this.t * (v.burst ? 22 : 7)) * 0.02;
+      bob = sc(-0.02 - v.tension * 0.06 + Math.sin(this.t * (v.burst ? 22 : 7)) * 0.02);
     }
     f.y = this.seaY + bob;
 
@@ -109,7 +115,7 @@ export class FishingFx {
     else this.ringT = Math.max(0, this.ringT - dt * 2.2);
     this.ring.visible = this.ringT > 0.01;
     if (this.ring.visible) {
-      this.ring.position.set(f.x, this.seaY + 0.006, f.z);
+      this.ring.position.set(f.x, this.seaY + sc(0.006), f.z);
       this.ring.scale.setScalar(1 + this.ringT * 1.8);
       this.ring.material.opacity = this.ringT * 0.5;
     }
