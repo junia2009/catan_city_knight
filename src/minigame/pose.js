@@ -7,10 +7,37 @@
 // 歩く姿勢が書き戻しておらず、上がってきても足が交差したままになっていた。
 // test/minigame.test.js が「全ての姿勢の項目が揃っていること」を見ている。
 
+// s は各姿勢の中で左右の符号にも使っている名前なので、別名で取り込む
+import { s as sc, HIP_Y } from './scale.js';
+
 const JOINT = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const LIMB = (rootX = 0, rootZ = 0, knee = 0) => ({ rootX, rootZ, knee });
 // 口。0 = にっこり / 1 = 「お」の口(驚き)
 const MOUTH = (open = 0) => ({ open });
+
+// ---- 歩幅 ----
+//
+// **1歩で進む距離を、足が前後に振れる幅に合わせる。**
+// ここがずれると、足が地面を擦って進む ──「歩いていない、滑っている」に見える。
+//
+// 位相の進みを距離ではなく決め打ちの係数(5.2)にしていたため、棒人間を
+// ×0.5 に縮めたときに脚だけが半分になり、1歩で進む距離が足の振れ幅の
+// **8.8 倍**になっていた(実測)。脚の長さから引くようにして、縮尺を
+// 変えても比が動かないようにする。
+export const LEG_SWING = 0.78;   // 腰の振り(ラジアン)。大きいほど大股
+
+// 足が1歩で前後に動く距離。腰を ±LEG_SWING 振ったときの足先の移動量。
+export const FOOT_TRAVEL = 2 * sc(HIP_Y) * Math.sin(LEG_SWING);
+
+// 1歩で進む距離を、足の振れ幅の何倍まで許すか。
+// 1.0 なら足はぴたりと地面に留まるが、この体格でこの速さ(体の 16 倍/秒)だと
+// 秒 14 歩になって脚が見えなくなる。**3 倍**で「小さい生きものが忙しなく
+// 駆けている」ところに収めた(秒 3.8 歩)。
+export const STEP_SLIP = 3;
+export const STEP_DIST = FOOT_TRAVEL * STEP_SLIP;
+
+// 進んだ距離 → 歩行サイクルの位相。1歩(左右のどちらか)が π。
+export const PHASE_PER_UNIT = Math.PI / STEP_DIST;
 
 // 歩き。手足を交互に振るだけの素直なもの。
 // 体は上下しない ── カメラが追うので、揺らすと画面全体が揺れて見づらい。
@@ -27,7 +54,7 @@ export function walkPose(phase, gait, facing) {
     legs: [0, 1].map((i) => {
       const s = i === 0 ? 1 : -1;
       const swing = Math.sin(t) * s;
-      return LIMB(swing * 0.62 * gait, 0, Math.max(0, -swing) * 0.9 * gait);
+      return LIMB(swing * LEG_SWING * gait, 0, Math.max(0, -swing) * 0.9 * gait);
     }),
     // 腕: 脚と逆位相
     arms: [0, 1].map((i) => {

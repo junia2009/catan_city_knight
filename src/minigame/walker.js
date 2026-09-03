@@ -14,7 +14,9 @@
 
 import * as THREE from 'three';
 import { WalkerMotion, WALK_SPEED, MAX_DT } from './motion.js';
-import { walkPose, airPose, tumblePose, sinkPose, fishPose, emotePose } from './pose.js';
+import {
+  walkPose, airPose, tumblePose, sinkPose, fishPose, emotePose, PHASE_PER_UNIT,
+} from './pose.js';
 import { makeWalker } from './body.js';
 
 export { WALK_SPEED };
@@ -110,7 +112,10 @@ export class Walker {
     }
 
     const was = this.phase;
-    this.phase += r.speed * Math.min(dt, MAX_DT) * 5.2;
+    // 位相は**進んだ距離**で進める(速さ × 刻み = 距離)。
+    // 1歩で進む距離は脚の長さから引いてある(pose.js)ので、
+    // 縮尺を変えても足と地面の関係が崩れない。
+    this.phase += r.speed * Math.min(dt, MAX_DT) * PHASE_PER_UNIT;
     const gait = Math.min(1, r.speed / WALK_SPEED);
     this._apply(
       r.grounded ? walkPose(this.phase, gait, m.facing) : airPose(m.vy, m.facing),
