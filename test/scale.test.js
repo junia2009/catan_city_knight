@@ -141,4 +141,25 @@ test('縮尺: 受付のまわりは片付ける(木で塞がれない広さ)', a
     const gap = Math.hypot(o.x - at.x, o.z - at.z) - o.r - wr;
     assert.ok(gap > DESK_REACH, `残した物が受付の手前を塞ぐ(${gap.toFixed(2)})`);
   }
+
+  // 広場のすぐ外に立った**太い**木。中心は広場の外(0.52 > DESK_CLEAR)でも
+  // 枝は 0.34 まで届く ── 中心の距離で切ると残ってしまい、受付の手前で
+  // 行き止まりになる(本番でそうなっていた実測値)。
+  const fat = [{ x: -0.133, z: -0.501, r: 0.175, h: 0.32 }];
+  assert.ok(Math.hypot(fat[0].x, fat[0].z) > DESK_CLEAR, '前提: 中心は広場の外');
+  assert.equal(clearAround(fat, at, DESK_CLEAR).kept.length, 0,
+    '広場にはみ出した木が残った');
+
+  // どんな並びでも「残った物は寄れる隙間に届かない」こと。
+  // 個別の並びだけで押さえていると、次の抜け道を見逃す。
+  let rs = 1;
+  const rnd = () => ((rs = (rs * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const many = Array.from({ length: 400 }, () => ({
+    x: (rnd() - 0.5) * 3, z: (rnd() - 0.5) * 3, r: 0.05 + rnd() * 0.2, h: 0.3,
+  }));
+  for (const o of clearAround(many, at, DESK_CLEAR).kept) {
+    const gap = Math.hypot(o.x - at.x, o.z - at.z) - o.r - wr;
+    assert.ok(gap > DESK_REACH,
+      `残した物が受付の手前を塞ぐ(隙間 ${gap.toFixed(2)} / r ${o.r.toFixed(2)})`);
+  }
 });
