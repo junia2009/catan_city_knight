@@ -23,7 +23,18 @@ import { emoteById } from './emote.js';
 import { speciesById, DEFAULT_SPECIES } from './species.js';
 import { makeDesk } from './desk.js';
 import { meetFor } from './meets.js';
+import { makeDragon } from '../render3d/board3d.js';
 import { WALK_SCALE, s as sc } from './scale.js';
+
+// シーンから外した物の後片付け。持ち物を辿って全部捨てる
+function disposeTree(root) {
+  root.traverse((o) => {
+    o.geometry?.dispose?.();
+    if (o.material) {
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose?.());
+    }
+  });
+}
 
 // フレームレートに依らない追従係数。
 // dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
@@ -130,6 +141,10 @@ export class WalkMode {
     }
     this.atDesk = false;
     this.onDesk = null;      // 受付に入った/出た
+    // 「ドラゴンから逃げろ」の竜。居場所を決めるのはサーバー(dragon-hunt.js)で、
+    // ここは届いた場所へ滑らかに寄せて描くだけ ── 各自で動かすと、端末ごとに
+    // 違う場所に竜がいて「当たった/当たってない」で揉める。
+    this.hunt = null;        // { mesh, x, z, a, tx, tz, ta }
     this.species = speciesById(look);
     this.walker = new Walker(
       board3d.scene,
@@ -210,6 +225,56 @@ export class WalkMode {
     this._placeCamera(0, true);
 
     this.b.onFrame = (t) => this._frame(t);
+  }
+
+  // ---- ドラゴンから逃げろ ----
+
+  // サーバーから届いた竜の居場所。null で仕舞う。
+  // 届くのは 10 回/秒なので、そのまま置くとカクつく。目標として持っておいて
+  // 毎フレーム寄せる(棒人間の補間と同じ考え方)。
+  setDragon(d) {
+    if (!d) {
+      if (this.hunt) { this.b.scene.remove(this.hunt.mesh); disposeTree(this.hunt.mesh); }
+      this.hunt = null;
+      return;
+    }
+    if (!this.hunt) {
+      const mesh = makeDragon();
+      // 盤の上の竜は駒の大きさ。飛んでいる竜は棒人間と同じ縮尺で見せる
+      // ── 等倍だと島の半分を覆ってしまう。
+      mesh.scale.setScalar(WALK_SCALE * 0.8);
+      this.b.scene.add(mesh);
+      this.hunt = { mesh, x: d.x, z: d.z, a: d.a, tx: d.x, tz: d.z, ta: d.a };
+    }
+    this.hunt.tx = d.x;
+    this.hunt.tz = d.z;
+    this.hunt.ta = d.a;
+  }
+
+  // 竜を1フレーム進める(位置を寄せて、翼を羽ばたかせる)
+  _dragonFrame(dt, t) {
+    const h = this.hunt;
+    if (!h) return;
+    const k = smooth(9, dt);
+    h.x += (h.tx - h.x) * k;
+    h.z += (h.tz - h.z) * k;
+    // 向きは近いほうへ回す(π をまたぐとき一周させない)
+    let diff = h.ta - h.a;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    h.a += diff * k;
+    const g = this.ground(h.x, h.z);
+    // 飛ぶ高さは**地面すれすれ**にする。歩きのカメラは 35°ほど見下ろして
+    // いるので、高く飛ばすほど画面の上へ外れる ── 実測では、棒人間の
+    // 2.4 倍の高さだと真正面に置いても1枚も写らなかった。
+    // それでも3タイル以上離れると画面から出るので、どちらから来ているかは
+    // 上のバーの矢印で知らせる(main.js の renderMeetBar)。
+    h.mesh.position.set(h.x, (g.ok ? g.y : SEA_Y) + sc(0.12) + Math.sin(t / 620) * sc(0.04), h.z);
+    h.mesh.rotation.y = h.a;
+    for (const [i, w] of (h.mesh.userData.wings ?? []).entries()) {
+      const f = Math.sin(t / 130 + i * Math.PI) * 0.5;
+      w.rotation.z = (i === 0 ? 1 : -1) * (0.35 + f);
+    }
   }
 
   // ---- 操作 ----
@@ -356,6 +421,8 @@ export class WalkMode {
     if (this.paused) return;
     // 散策部屋。釣っていても止まっていても、相手は動くし自分も知らせる
     this._netFrame(dt, t);
+    // 竜も釣りの最中に止めない ── 竿を出したまま捕まるのが正しい
+    this._dragonFrame(dt, t);
 
     if (this.fishing) {
       this._fishFrame(dt);
@@ -586,6 +653,7 @@ export class WalkMode {
   dispose() {
     this.b.onFrame = null;
     for (const { o, scale } of this.signs) o.scale.copy(scale);  // 港の看板を戻す
+    this.setDragon(null);
     this.desk?.dispose();
     this.walker.dispose();
     this.remoteView.dispose();

@@ -35,12 +35,16 @@ export function fishbookHtml(progress, { walk = false } = {}) {
       <small>${got ? `${got.best} cm ・ ${got.n}匹` : TIER_LABEL[f.tier]}</small>
     </div>`;
   }).join('');
-  // 釣り大会の通算。一度も出ていないうちは出さない(空の行が増えるだけ)
-  const m = progress.meet ?? {};
-  const meet = m.played
-    ? `<p class="fbook-head">🏆 釣り大会 優勝 <b>${m.won}</b>/${m.played} 回
-       ・ 自己最高 <b>${m.bestCm}</b> cm</p>`
-    : '';
+  // 散策部屋の集まりの通算。出ていないものは出さない(空の行が増えるだけ)
+  const meet = [
+    ['fishing', '🏆 釣り大会', (v) => `自己最高 <b>${v}</b> cm`],
+    ['dragonhunt', '🐉 ドラゴンから逃げろ', (v) => `最長 <b>${v}</b> 秒`],
+  ].map(([kind, label, best]) => {
+    const m = progress.meets?.[kind];
+    if (!m?.played) return '';
+    return `<p class="fbook-head">${label} 優勝 <b>${m.won}</b>/${m.played} 回
+      ・ ${best(m.best)}</p>`;
+  }).join('');
   return `<p class="fbook-head">図鑑 <b>${c.got}/${c.total}</b> 種類 ・ ぜんぶで <b>${c.caught}</b> 匹</p>
     ${meet}
     <div class="fbook">${rows}</div>

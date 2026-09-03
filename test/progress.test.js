@@ -307,9 +307,9 @@ const row = (seat, cm, best = cm) => ({ seat, cm, count: 1, best });
 
 test('大会: 1位なら優勝、出ていなければ何も起きない', () => {
   const v = view([row(0, 200), row(1, 120)]);
-  const out = { entered: false, won: false, cm: 0, place: 0 };
-  assert.deepEqual(contestOutcome(v, 0), { entered: true, won: true, cm: 200, place: 1 });
-  assert.deepEqual(contestOutcome(v, 1), { entered: true, won: false, cm: 120, place: 2 });
+  const out = { entered: false, won: false, score: 0, place: 0 };
+  assert.deepEqual(contestOutcome(v, 0), { entered: true, won: true, score: 200, place: 1 });
+  assert.deepEqual(contestOutcome(v, 1), { entered: true, won: false, score: 120, place: 2 });
   assert.deepEqual(contestOutcome(v, 5), out);
   assert.deepEqual(contestOutcome(v, null), out);
   assert.deepEqual(contestOutcome(undefined, 0), out);
@@ -332,11 +332,11 @@ test('大会: まったく同じ釣果なら同率優勝(2人とも実績が付�
     assert.equal(o.won, true, `席${s} が同率優勝にならない`);
     assert.equal(o.place, 1);
   }
-  assert.deepEqual(contestOutcome(v, 2), { entered: true, won: false, cm: 50, place: 3 });
+  assert.deepEqual(contestOutcome(v, 2), { entered: true, won: false, score: 50, place: 3 });
   // 同率の2人とも実績が取れる
   for (const s of [0, 1]) {
     const { won } = contestOutcome(v, s);
-    const { unlocked } = addContestResult(emptyProgress(), { won, cm: 200, key: `A#${s}` });
+    const { unlocked } = addContestResult(emptyProgress(), { won, score: 200, key: `A#${s}` });
     assert.deepEqual(unlocked, ['meet-win'], `席${s} に実績が付かない`);
   }
 });
@@ -355,38 +355,38 @@ test('大会: 同率は2位でも3位でも同じ数え方(次の順位を飛ば
 });
 
 test('大会: 優勝すると実績と称号が付く', () => {
-  const { progress: p, unlocked } = addContestResult(emptyProgress(), { won: true, cm: 200, key: 'AAAA#1' });
+  const { progress: p, unlocked } = addContestResult(emptyProgress(), { won: true, score: 200, key: 'AAAA#1' });
   assert.deepEqual(unlocked, ['meet-win']);
   assert.ok(p.achievements['meet-win'], '実績が入っていない');
   assert.equal(p.title, 'meet-win', '初めての実績は自動で名乗る');
   assert.deepEqual(
-    { played: p.meet.played, won: p.meet.won, bestCm: p.meet.bestCm },
+    { played: p.meets.fishing.played, won: p.meets.fishing.won, bestCm: p.meets.fishing.best },
     { played: 1, won: 1, bestCm: 200 },
   );
 });
 
 test('大会: 負けた回は数えるだけで実績は付かない', () => {
-  const { progress: p, unlocked } = addContestResult(emptyProgress(), { won: false, cm: 90, key: 'AAAA#1' });
+  const { progress: p, unlocked } = addContestResult(emptyProgress(), { won: false, score: 90, key: 'AAAA#1' });
   assert.deepEqual(unlocked, []);
   assert.equal(p.achievements['meet-win'], undefined);
   assert.deepEqual(
-    { played: p.meet.played, won: p.meet.won, bestCm: p.meet.bestCm },
+    { played: p.meets.fishing.played, won: p.meets.fishing.won, bestCm: p.meets.fishing.best },
     { played: 1, won: 0, bestCm: 90 },
   );
 });
 
 // 結果は25秒のあいだ毎秒配られる。そのたびに数えたら回数が25倍になる
 test('大会: 同じ回は二度数えない(別の回なら数える)', () => {
-  let p = addContestResult(emptyProgress(), { won: true, cm: 200, key: 'AAAA#1' }).progress;
-  p = addContestResult(p, { won: true, cm: 200, key: 'AAAA#1' }).progress;
-  assert.equal(p.meet.played, 1, '同じ回を二度数えた');
-  p = addContestResult(p, { won: false, cm: 300, key: 'AAAA#2' }).progress;
-  assert.equal(p.meet.played, 2);
-  assert.equal(p.meet.bestCm, 300, '自己最高は負けた回も見る');
+  let p = addContestResult(emptyProgress(), { won: true, score: 200, key: 'AAAA#1' }).progress;
+  p = addContestResult(p, { won: true, score: 200, key: 'AAAA#1' }).progress;
+  assert.equal(p.meets.fishing.played, 1, '同じ回を二度数えた');
+  p = addContestResult(p, { won: false, score: 300, key: 'AAAA#2' }).progress;
+  assert.equal(p.meets.fishing.played, 2);
+  assert.equal(p.meets.fishing.best, 300, '自己最高は負けた回も見る');
   // 部屋が変われば回数は1から振り直される。部屋のコードまで見ていないと数え損ねる
-  p = addContestResult(p, { won: true, cm: 10, key: 'BBBB#1' }).progress;
-  assert.equal(p.meet.played, 3, '別の部屋の1回目を数え損ねた');
-  assert.equal(p.meet.bestCm, 300, '振るわない回で自己最高が下がった');
+  p = addContestResult(p, { won: true, score: 10, key: 'BBBB#1' }).progress;
+  assert.equal(p.meets.fishing.played, 3, '別の部屋の1回目を数え損ねた');
+  assert.equal(p.meets.fishing.best, 300, '振るわない回で自己最高が下がった');
 });
 
 test('大会: 対戦の締めでは釣り大会の実績は解除されない', () => {
@@ -401,20 +401,77 @@ test('大会: 対戦の締めでは釣り大会の実績は解除されない', 
 
 test('大会: addContestResult は元の戦績を書き換えない', () => {
   const p = emptyProgress();
-  addContestResult(p, { won: true, cm: 200, key: 'AAAA#1' });
-  assert.equal(p.meet.played, 0);
+  addContestResult(p, { won: true, score: 200, key: 'AAAA#1' });
+  assert.deepEqual(p.meets, {});
   assert.deepEqual(p.achievements, {});
   assert.equal(p.title, null);
 });
 
 test('大会: 古い保存(通算なし)や壊れた値でも 0 から始まる', () => {
-  assert.deepEqual(parseProgress(JSON.stringify({ games: [] })).meet, emptyMeet());
+  assert.deepEqual(parseProgress(JSON.stringify({ games: [] })).meets, {});
   const broken = parseProgress(JSON.stringify({
-    meet: { played: 'たくさん', won: -3, bestCm: null, last: 7 },
+    meets: { fishing: { played: 'たくさん', won: -3, best: null, last: 7 } },
   }));
-  assert.deepEqual(broken.meet, emptyMeet(), '壊れた値がそのまま入った');
+  assert.deepEqual(broken.meets.fishing, emptyMeet(), '壊れた値がそのまま入った');
   // 壊れた値の上に足しても NaN にならない
-  const after = addContestResult(broken, { won: true, cm: 50, key: 'AAAA#1' }).progress;
-  assert.equal(after.meet.played, 1);
-  assert.equal(after.meet.bestCm, 50);
+  const after = addContestResult(broken, { won: true, score: 50, key: 'AAAA#1' }).progress;
+  assert.equal(after.meets.fishing.played, 1);
+  assert.equal(after.meets.fishing.best, 50);
+});
+
+// 釣り大会だけだった頃の保存は meet に1つぶんだけ入っている。
+// 遊びが増えて遊びごとに分けたので、読むときに釣りの欄へ移す。
+test('大会: 昔の保存(meet ひとつ)は釣りの通算として読み戻す', () => {
+  const old = parseProgress(JSON.stringify({
+    meet: { played: 4, won: 2, bestCm: 310, last: 'ZZZZ#3' },
+  }));
+  assert.deepEqual(old.meets.fishing, { played: 4, won: 2, best: 310, last: 'ZZZZ#3' });
+  assert.equal(old.meets.dragonhunt, undefined, '出ていない遊びの欄まで作った');
+});
+
+// 竜のほうは「逃げきった人だけが勝ち」。全員捕まった回の最長生存者を
+// 勝ちにすると、逃げきる実績が逃げきらなくても取れてしまう。
+test('竜: 逃げきった人だけが勝ち、実績もそちらだけ', () => {
+  const hunt = (rows) => ({ kind: 'dragonhunt', phase: 'result', round: 1, rank: rows });
+  const v = hunt([
+    { seat: 0, ms: 90000, alive: true },
+    { seat: 1, ms: 40000, alive: false },
+  ]);
+  assert.deepEqual(contestOutcome(v, 0), { entered: true, won: true, score: 90, place: 1 });
+  assert.deepEqual(contestOutcome(v, 1), { entered: true, won: false, score: 40, place: 2 });
+
+  // 全員捕まった回は、いちばん長く粘った人でも勝ちにしない
+  const wiped = hunt([
+    { seat: 0, ms: 50000, alive: false },
+    { seat: 1, ms: 10000, alive: false },
+  ]);
+  assert.equal(contestOutcome(wiped, 0).won, false, '全員捕まったのに勝ちになった');
+  assert.equal(contestOutcome(wiped, 0).place, 1, '順位は付く');
+
+  // 実績は逃げきった側だけ
+  const win = addContestResult(emptyProgress(), {
+    kind: 'dragonhunt', won: true, score: 90, key: 'A#1',
+  });
+  assert.deepEqual(win.unlocked, ['hunt-survive']);
+  const lose = addContestResult(emptyProgress(), {
+    kind: 'dragonhunt', won: false, score: 50, key: 'A#1',
+  });
+  assert.deepEqual(lose.unlocked, []);
+});
+
+// 遊びごとに別の欄。釣りで優勝しても竜の実績は付かない(逆も)。
+test('大会: 遊びごとに通算も実績も分かれている', () => {
+  const p = addContestResult(emptyProgress(), {
+    kind: 'fishing', won: true, score: 200, key: 'A#1',
+  }).progress;
+  assert.ok(p.achievements['meet-win']);
+  assert.equal(p.achievements['hunt-survive'], undefined, '釣りで竜の実績が付いた');
+  assert.equal(p.meets.dragonhunt, undefined);
+
+  const q = addContestResult(p, {
+    kind: 'dragonhunt', won: true, score: 90, key: 'A#2',
+  }).progress;
+  assert.ok(q.achievements['hunt-survive']);
+  assert.equal(q.meets.fishing.played, 1, '別の遊びが釣りの通算を消した');
+  assert.equal(q.meets.dragonhunt.played, 1);
 });

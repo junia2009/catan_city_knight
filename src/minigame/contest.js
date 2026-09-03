@@ -13,25 +13,48 @@
 // 並べ替えの決着(合計 → 大物 → 席番号)と、順位そのものは別もの。
 // 席番号は「表に並べる順」を決めるためだけのもので、これで順位まで
 // 割ってしまうと、まったく同じ釣果でも席が若いほうだけが優勝になる。
+// ahead(r, o) は「o は r より上か」。決着が付かない者どうしが同率になる。
+export function placeBy(rows, ahead) {
+  return rows.map((r) => ({ ...r, place: 1 + rows.filter((o) => ahead(r, o)).length }));
+}
+
+// 逃げきった人は、捕まった人より必ず上。時間だけで比べると、捕まった
+// 直後に回が終わったとき「捕まった人と逃げきった人が同率」になってしまう
+// (最後のひとりになった回では必ずそうなる)。
+// 同じ側どうしなら、長く生き残ったほうが上 ── 秒でまるめて同着は同率にする。
+export const huntAhead = (r, o) => (o.alive && !r.alive)
+  || (!!o.alive === !!r.alive && Math.round(o.ms / 1000) > Math.round(r.ms / 1000));
+
+// 釣り大会の順位。合計 → いちばん大きい1匹、で決着が付かなければ同率。
 export function placeOf(rank) {
-  const ahead = (a, b) => b.cm > a.cm || (b.cm === a.cm && b.best > a.best);
-  return rank.map((r) => ({ ...r, place: 1 + rank.filter((o) => ahead(r, o)).length }));
+  return placeBy(rank, (r, o) => o.cm > r.cm || (o.cm === r.cm && o.best > r.best));
 }
 
 // view は FishingContest#view() が返すもの。seat は自分の席。
-// 戻り値: { entered, won, cm, place }
+// 戻り値: { entered, won, score, place }
 //   entered … その回に出ていたか(途中から見ていただけなら false)
 //   won     … 優勝したか(同率優勝も優勝)
-//   cm      … 自分の合計
+//   score   … 自分の記録(釣りは合計 cm、竜は生き残った秒)
 //   place   … 自分の順位(出ていなければ 0)
 export function contestOutcome(view, seat) {
   const rank = view?.rank ?? [];
+  // サーバーが place を入れて配っているが、ここでも数え直す ── 古い版の
+  // サーバーが繋がっていても、優勝の判定だけは自前で決められるように。
+  const rows = view?.kind === 'dragonhunt' ? placeBy(rank, huntAhead) : placeOf(rank);
   // 席が無い(まだ入っていない)なら find は空振りする。null を別に見なくてよい
-  const me = placeOf(rank).find((r) => r.seat === seat);
-  if (!me) return { entered: false, won: false, cm: 0, place: 0 };
-  // ひとりしか残らなかった回と、誰も釣れなかった回は優勝にしない。
-  // 相手が抜けた瞬間や、全員ボウズのまま時間切れで称号が付くと、
-  // 「勝った」感じがまるでしない。
-  const won = rank.length >= 2 && me.cm > 0 && me.place === 1;
-  return { entered: true, won, cm: me.cm, place: me.place };
+  const me = rows.find((r) => r.seat === seat);
+  if (!me) return { entered: false, won: false, score: 0, place: 0 };
+  // ひとりしか残らなかった回は優勝にしない ── 相手が抜けた瞬間に称号が
+  // 付くと、勝った気がまるでしない。
+  if (rank.length < 2) return { entered: true, won: false, score: 0, place: me.place };
+  if (view?.kind === 'dragonhunt') {
+    // 逃げきった人だけが勝ち。全員捕まった回に「いちばん長く粘った人」を
+    // 勝ちにすると、逃げきる実績が逃げきらなくても取れてしまう。
+    return {
+      entered: true, won: !!me.alive, score: Math.round(me.ms / 1000), place: me.place,
+    };
+  }
+  // 誰も釣れなかった回も優勝にしない
+  const won = me.cm > 0 && me.place === 1;
+  return { entered: true, won, score: me.cm, place: me.place };
 }

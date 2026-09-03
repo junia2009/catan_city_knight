@@ -5,7 +5,15 @@
 import { RoomCore, IDLE_DISCONNECT_MS } from './room-core.js';
 import { WalkRelay, TICK_MS } from './walk-relay.js';
 import { FishingContest } from './fishing-contest.js';
-import { hasMeet } from '../src/minigame/meets.js';
+import { DragonHunt } from './dragon-hunt.js';
+import { hasMeet, meetFor } from '../src/minigame/meets.js';
+import { spawnPoint } from '../src/minigame/ground.js';
+import { createGame } from '../src/state.js';
+
+// 島ごとの進行。表(src/minigame/meets.js)の id で引く。
+// 表に足したのにここへ書き忘れると、受付は立つのに何も始まらない島ができる
+// ── test/meets.test.js がその食い違いを見張っている。
+const ENGINES = { fishing: FishingContest, dragonhunt: DragonHunt };
 
 // CPU / 切断中の席をサーバーが打つときの間合い(ローカル戦の演出と揃える)
 const AUTO_DELAY_MS = 650;
@@ -32,16 +40,49 @@ export class RoomDO {
     // (次の瞬間には古くなる値なので、書くと遅くて高いだけ)
     this.walk = new WalkRelay();
     this.walkTimer = null;
-    // 釣り大会。進行(締め切り・順位)はサーバーが持つ
-    this.contest = new FishingContest();
+    // 島の集まり。進行(締め切り・順位・竜の位置)はサーバーが持つ。
+    // 受付の無い島では null。
+    this.contest = null;
     // 無操作で切断するまでの時間。テストで短くできるよう環境変数で上書き可能。
     this.idleLimitMs = Number(env?.IDLE_DISCONNECT_MS) || IDLE_DISCONNECT_MS;
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get('room');
       if (saved) this.room = RoomCore.fromJSON(saved);
       const c = await ctx.storage.get('contest');
-      if (c) this.contest = FishingContest.fromJSON(c);
+      // 島に合う進行だけ読み戻す。島を変えたあとの保存が残っていても、
+      // 別の遊びの状態を持ち込まない(kind で確かめる)。
+      this.contest = this.makeMeet(this.room?.settings?.mode);
+      if (c && this.contest && c.kind === this.contest.kind) {
+        this.contest = ENGINES[c.kind].fromJSON(c);
+        this.primeMeet();
+      }
     });
+  }
+
+  // 島に合う進行を作る。受付の無い島では null。
+  makeMeet(mode) {
+    const m = meetFor(mode);
+    const Engine = m && ENGINES[m.id];
+    if (!Engine) return null;
+    const e = new Engine();
+    this.contest = e;
+    this.primeMeet();
+    return e;
+  }
+
+  // 島の形に依るものを進行に渡す。サーバーは盤を持たないので、
+  // 必要になったぶんだけここで求める(いまは竜の飛び立つ場所だけ)。
+  primeMeet() {
+    if (!this.contest?.setHome) return;
+    // 島はクライアントと同じ「種 + 島の種類」から作る(main.js の
+    // makeWalkIsland と同じ引数でないと、竜が別の島の中心から飛び立つ)。
+    const r = this.room;
+    if (!r) return;
+    const state = createGame({
+      seed: r.seed, playerCount: 4, humanIndex: -1, mode: r.settings.mode,
+    });
+    const home = spawnPoint(state);
+    this.contest.setHome(home.x, home.y);
   }
 
   async fetch(request) {
@@ -124,7 +165,7 @@ export class RoomDO {
       this.broadcastLobby();
       // 大会のいまの様子も渡す。変わったときだけ配っていると、あとから
       // 来た人はいつまでも受付を見られない(実際そうなっていた)。
-      if (room.kind === 'walk' && hasMeet(room.settings.mode)) {
+      if (room.kind === 'walk' && this.contest) {
         this.send(ws, { t: 'contest', contest: this.contest.view() });
       }
       if (room.phase === 'playing') this.sendState(ws, res.seat, null);
@@ -150,10 +191,11 @@ export class RoomDO {
       const before = room.settings.mode;
       const res = room.setSettings(clientId, msg.settings);
       if (res.error) return this.send(ws, { t: 'error', msg: res.error });
-      // 島を変えると島そのものが別物になる(種も振り直される)。走っている
-      // 大会をそのまま残すと、誰も居ない前の島の順位が配られ続ける。
-      if (room.settings.mode !== before && this.contest.phase !== 'idle') {
-        this.contest = new FishingContest();
+      // 島を変えると島そのものが別物になる(種も振り直される)し、
+      // 開かれるものも変わる。走っている回を残すと、誰も居ない前の島の
+      // 順位が配られ続けるので、島に合う進行に作り直す。
+      if (room.settings.mode !== before) {
+        this.makeMeet(room.settings.mode);
         this.broadcastContest();
         this.saveContest();
       }
@@ -189,18 +231,13 @@ export class RoomDO {
       if (room.kind !== 'walk') return;
       // 受付の無い島では何も開かれない。表(src/minigame/meets.js)は
       // クライアントと共有しているので、判定が食い違うことはない。
-      if (!hasMeet(room.settings.mode)) {
+      if (!this.contest || !hasMeet(room.settings.mode)) {
         return this.send(ws, { t: 'error', msg: 'この島に受付はありません' });
       }
       const seat = room.seatOf(clientId);
       if (seat < 0) return;
-      const c = this.contest;
-      let res;
-      if (msg.do === 'enter') res = c.enter(seat);
-      else if (msg.do === 'leave') res = c.leave(seat);
-      else if (msg.do === 'start') res = c.start(seat);
-      else if (msg.do === 'land') res = c.land(seat, msg.cm);
-      else return this.send(ws, { t: 'error', msg: `不明な操作: ${msg.do}` });
+      // 中身は進行のほうが知っている。room-do は遊びごとの操作を持たない
+      const res = this.contest.command(seat, msg.do, msg);
       if (res.error) return this.send(ws, { t: 'error', msg: res.error });
       room.touch();
       this.broadcastContest();
@@ -231,17 +268,21 @@ export class RoomDO {
     if (this.walkTimer) return;
     let n = 0;
     this.walkTimer = setInterval(() => {
-      // 大会の時間切れはここで見る。誰も動いていなくても進む必要がある
-      if (this.contest.tick()) { this.broadcastContest(); this.saveContest(); }
-      // 残り時間は毎秒だけ配る。位置と同じ 10 回/秒で送ると、
-      // 変わらない表を秒 10 回配ることになって、通信のほとんどがこれになる
-      n += 1;
-      if (n % 10 === 0 && this.contest.phase !== 'idle') this.broadcastContest();
-
       const people = this.walk.snapshot();
+      // 竜は全員の位置を見て動く(dragon-hunt.js)。**進める前に渡す** ──
+      // あとで渡すと、竜は常に 1 tick 古い位置を追いかけることになる。
+      this.contest?.setPositions?.(people);
+      // 時間切れと竜の一歩はここで見る。誰も動いていなくても進む必要がある
+      if (this.contest?.tick()) { this.broadcastContest(); this.saveContest(); }
+      n += 1;
+      // 竜は動き続けるので毎 tick 配る。釣り大会は表が変わらないので、
+      // 秒 10 回も配ると通信のほとんどがそれになる ── 毎秒だけにする。
+      const busy = this.contest && this.contest.phase !== 'idle';
+      if (busy && (this.contest.kind === 'dragonhunt' || n % 10 === 0)) this.broadcastContest();
+
       if (!people.length) {
-        // 大会が動いている間は、誰も歩いていなくても止めない
-        if (this.contest.phase === 'idle') this.stopWalkTick();
+        // 開催中は、誰も歩いていなくても止めない
+        if (!busy) this.stopWalkTick();
         return;
       }
       // 宛先ごとに作り直さない。自分の席を飛ばすのは受け取った側の仕事
@@ -253,6 +294,7 @@ export class RoomDO {
   }
 
   broadcastContest() {
+    if (!this.contest) return;
     const line = JSON.stringify({ t: 'contest', contest: this.contest.view() });
     for (const ws of this.sockets.keys()) {
       try { ws.send(line); } catch { /* 切断済みは close で片付く */ }
@@ -260,6 +302,7 @@ export class RoomDO {
   }
 
   saveContest() {
+    if (!this.contest) return this.ctx.storage.delete('contest');
     return this.ctx.storage.put('contest', this.contest.toJSON());
   }
 
@@ -276,9 +319,9 @@ export class RoomDO {
     // 同じ人が別の接続で生きているなら切断扱いにしない
     if ([...this.sockets.values()].includes(clientId)) return;
     this.walk.drop(clientId);
-    if (!this.walk.size && this.contest.phase === 'idle') this.stopWalkTick();
+    if (!this.walk.size && (this.contest?.phase ?? 'idle') === 'idle') this.stopWalkTick();
     const seat = this.room.seatOf(clientId);
-    if (seat >= 0 && this.contest.dropSeat(seat)) {
+    if (seat >= 0 && this.contest?.dropSeat(seat)) {
       this.broadcastContest();
       this.saveContest();
     }

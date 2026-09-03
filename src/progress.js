@@ -16,12 +16,13 @@ export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 
 export function emptyProgress() {
   return {
-    v: PROGRESS_VERSION, games: [], achievements: {}, title: null, fish: {}, meet: emptyMeet(),
+    v: PROGRESS_VERSION, games: [], achievements: {}, title: null, fish: {}, meets: {},
   };
 }
 
-// 釣り大会の通算。last は「最後に数えた回」の目印(addContestResult 参照)。
-export const emptyMeet = () => ({ played: 0, won: 0, bestCm: 0, last: null });
+// 集まり1つぶんの通算。best の単位は遊びによる(釣りは cm、竜は秒)。
+// last は「最後に数えた回」の目印(addContestResult 参照)。
+export const emptyMeet = () => ({ played: 0, won: 0, best: 0, last: null });
 
 // 対戦1回ぶんの記録。state をそのまま持つと重いので、要点だけ取り出す。
 // (盤面を再現したいときのために seed は残す)
@@ -133,18 +134,21 @@ export function addCatch(progress, fishId, cm, now = Date.now()) {
 //
 // key は「部屋のコード + 何回目の大会か」。結果は25秒のあいだ毎秒配られるし、
 // その最中に再読み込みすると同じ回がもう一度届く。同じ key は数えない。
-export function addContestResult(progress, { won, cm = 0, key = null, at = Date.now() }) {
-  const prev = progress.meet ?? emptyMeet();
+export function addContestResult(
+  progress, { kind = 'fishing', won, score = 0, key = null, at = Date.now() },
+) {
+  const prev = progress.meets?.[kind] ?? emptyMeet();
   if (key != null && prev.last === key) return { progress, unlocked: [] };
   const meet = {
     played: prev.played + 1,
     won: prev.won + (won ? 1 : 0),
-    bestCm: Math.max(prev.bestCm ?? 0, cm),
+    best: Math.max(prev.best ?? 0, score),
     last: key,
   };
-  const next = { ...progress, meet, achievements: { ...progress.achievements } };
+  const meets = { ...(progress.meets ?? {}), [kind]: meet };
+  const next = { ...progress, meets, achievements: { ...progress.achievements } };
   const unlocked = [];
-  for (const id of unlockedByMeet({ meet })) {
+  for (const id of unlockedByMeet({ kind, meet, meets })) {
     if (next.achievements[id]) continue; // すでに持っている
     next.achievements[id] = { at, mode: null };
     unlocked.push(id);
@@ -196,14 +200,29 @@ export function parseProgress(raw) {
       title: typeof p.title === 'string' ? p.title : null,
       // 釣り図鑑は後から足した。古い保存には無いので、無ければ空で始める
       fish: p.fish && typeof p.fish === 'object' ? p.fish : {},
-      meet: sanitizeMeet(p.meet),
+      meets: sanitizeMeets(p),
     };
   } catch {
     return emptyProgress();
   }
 }
 
-// 釣り大会の通算も後から足した。数でないものが入っていたら 0 に倒す
+// 集まりの通算。もとは釣り大会1つぶんだけを meet に持っていたので、
+// 古い保存があれば釣りの欄へ移す(遊びが増えたので遊びごとに分けた)。
+function sanitizeMeets(p) {
+  const out = {};
+  const src = (p?.meets && typeof p.meets === 'object') ? p.meets : {};
+  for (const [kind, m] of Object.entries(src)) out[kind] = sanitizeMeet(m);
+  if (!out.fishing && p?.meet) {
+    const old = sanitizeMeet(p.meet);
+    // 旧い版は cm でしか持っていない
+    old.best = sanitizeMeet({ best: p.meet.bestCm }).best;
+    if (old.played) out.fishing = old;
+  }
+  return out;
+}
+
+// 数でないものが入っていたら 0 に倒す
 // (壊れた値のまま足すと NaN が保存に焼き付いて、以後ずっと NaN になる)。
 function sanitizeMeet(m) {
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
@@ -211,7 +230,7 @@ function sanitizeMeet(m) {
   return {
     played: n(m.played),
     won: n(m.won),
-    bestCm: n(m.bestCm),
+    best: n(m.best),
     last: typeof m.last === 'string' ? m.last : null,
   };
 }
