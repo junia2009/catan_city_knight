@@ -85,12 +85,37 @@ export function makeBlocker(list) {
     // 押し出しきれない場所がある ── 木が2本近すぎて、間に立てる余地が
     // どこにも無い場合など。そこへは入れず、来た場所に留める。
     if (overlaps(here, x, z, selfR)) {
+      // 順に押し出すと、物が2つあるところでは互いの押し出しが打ち消し合って
+      // 行き場を失う。そのときは**1つずつの縁**を候補にして、行きたい所に
+      // いちばん近い「どこにも触れない点」へ逃がす。
+      const side = nearestFree(here, toX, toZ, selfR);
+      if (side) return { x: side.x, z: side.z, hit: true };
       if (!overlaps(here, fromX, fromZ, selfR)) return { x: fromX, z: fromZ, hit: true };
       // 元の場所も重なっている(湧いた位置が物の中など)。
       // 留まると永久に抜けられないので、押し出した先へ進める。
     }
     return { x, z, hit: true };
   };
+}
+
+// 行きたい所にいちばん近い「どこにも触れない点」を、物の縁の上から探す。
+// 挟まったときの逃げ道。見つからなければ null。
+function nearestFree(obs, toX, toZ, selfR) {
+  let best = null;
+  for (const o of obs) {
+    const need = o.r + selfR;
+    let dx = toX - o.x;
+    let dz = toZ - o.z;
+    let d = Math.hypot(dx, dz);
+    if (d < 1e-9) { dx = 1; dz = 0; d = 1; }
+    const cx = o.x + (dx / d) * need;
+    const cz = o.z + (dz / d) * need;
+    const far = (cx - toX) ** 2 + (cz - toZ) ** 2;
+    if (best && far >= best.far) continue;
+    if (overlaps(obs, cx, cz, selfR)) continue;
+    best = { x: cx, z: cz, far };
+  }
+  return best;
 }
 
 function overlaps(obs, x, z, selfR) {
@@ -101,12 +126,33 @@ function overlaps(obs, x, z, selfR) {
   return false;
 }
 
+// 真正面からぶつかったときに、殺した勢いのどれだけを「回り込み」に回すか。
+// 0 だと ── つまり接線の成分をそのまま使うと ── 丸い岩に**正面から**
+// 当たった人は接線が 0 なのでその場に貼りつき、スティックを倒し続けても
+// 永久に動かない(実測: 岩1つの正面で完全停止、速さ 0 のまま)。
+// 実際に嵌まっていたのはこれ。人は少し首を振れば抜けられるが、
+// 「押しているのに動かない」は壊れて見える。
+export const SLIDE_ROUND = 0.6;
+
 // ぶつかった面に沿って滑らせる(壁に向かう成分だけ speed を殺す)。
 // これをやらないと、木に向かって歩き続けたときに velocity だけが
 // 溜まっていき、離れた瞬間に飛び出す。
+//
+// 正面衝突のときは、どちらかへ回り込ませる(SLIDE_ROUND)。左右は
+// 接線の成分の符号で決め、それも 0 なら右へ ── 毎フレーム同じ答えを
+// 返すので、岩の前で左右にがたつくことはない。
 export function slideVelocity(vel, nx, nz) {
   const into = vel.x * nx + vel.z * nz;
   if (into >= 0) return;
   vel.x -= nx * into;
   vel.z -= nz * into;
+  const tx = -nz;
+  const tz = nx;
+  const along = vel.x * tx + vel.z * tz;
+  const want = -into * SLIDE_ROUND;
+  if (Math.abs(along) >= want) return;
+  const side = along === 0 ? 1 : Math.sign(along);
+  const add = (want - Math.abs(along)) * side;
+  vel.x += tx * add;
+  vel.z += tz * add;
 }

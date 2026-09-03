@@ -236,6 +236,80 @@ test('walk: 盤の上の物を通り抜けられない(歩き続けても中に�
   assert.ok(w.pos.z > start.y, '障害物の手前まで進んでいない');
 });
 
+// 目標へまっすぐ倒し続ける。たどり着けたら経過秒、駄目なら止まった場所。
+// 入力の x は**画面の右** = 世界の -X(motion.js の _step)。ここを取り違えると
+// 障害物を避けたのではなく逃げているだけ、という結果になる。
+function walkTo(obs, from, to, ground = () => ({ y: 0, ok: true }), seconds = 12) {
+  const w = new WalkerMotion(ground, makeBlocker(obs));
+  w.setPosition(from.x, from.z);
+  const dt = 1 / 60;
+  for (let i = 0; i < seconds / dt; i++) {
+    const dx = to.x - w.pos.x;
+    const dz = to.z - w.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.08) return { ok: true, t: i * dt };
+    w.update(dt, { x: -dx / d, y: dz / d }, 0);
+  }
+  return { ok: false, x: w.pos.x, z: w.pos.z, speed: Math.hypot(w.vel.x, w.vel.z) };
+}
+
+// 丸い岩に**正面から**当たると接線の成分が 0 になり、押し出しと打ち消しが
+// 釣り合って、スティックを倒し続けても速さ 0 のまま貼りついていた
+// (竜の巣の山へ登れないことがあったのはこれ。人は少し首を振れば抜けられるが、
+//  「押しているのに動かない」は壊れて見える)。
+test('walk: 岩の正面から押しても貼りつかず、回り込んで向こうへ行ける', () => {
+  const r = walkTo([{ x: 0, z: 0, r: 0.25, h: 1 }], { x: 0, z: -1.2 }, { x: 0, z: 1.2 });
+  assert.ok(r.ok, `岩の正面で嵌まった(${JSON.stringify(r)})`);
+});
+
+test('walk: 岩が3つ並んだ谷でも、押し続ければ抜けられる', () => {
+  const obs = [
+    { x: -0.7, z: 0.35, r: 0.3, h: 1 },
+    { x: 0.7, z: 0.35, r: 0.3, h: 1 },
+    { x: 0, z: 0.9, r: 0.3, h: 1 },   // 正面をふさぐ1つ
+  ];
+  const r = walkTo(obs, { x: 0, z: -1.2 }, { x: 0, z: 2.0 });
+  assert.ok(r.ok, `谷で嵌まった(${JSON.stringify(r)})`);
+});
+
+// 回り込ませるといっても、通れない隙間を通してはいけない。
+// 棒人間の直径より狭い所へは、これまでどおり入れないままであること。
+test('walk: 体より狭い隙間はすり抜けない', () => {
+  const gap = WALKER_RADIUS * 2 * 0.8;  // 体より2割狭い
+  const half = 0.25 + gap / 2;
+  const obs = [{ x: -half, z: 0, r: 0.25, h: 1 }, { x: half, z: 0, r: 0.25, h: 1 }];
+  const r = walkTo(obs, { x: 0, z: -1.2 }, { x: 0, z: 1.2 });
+  assert.ok(!r.ok, '体より狭い隙間を通り抜けた');
+  assert.ok(r.z < 0, `岩の向こう側へ出ている(z ${r.z})`);
+});
+
+// 岩が寄り集まった所へ入り込むと、順に押し出しても押し出しきれず、
+// 「まだ物の中」という答えが返っていた ── 出られないまま、毎フレーム
+// 中で押し合いになる。1つずつの縁を候補にして、触れない点へ逃がすこと。
+// (配置は実際の島から取り出したものではなく、総当たりで見つけた最小の形)
+test('walk: 岩が寄り集まった中に入り込んでも、触れない場所へ出してくれる', () => {
+  const obs = [
+    { x: -0.234, z: -0.072, r: 0.242, h: 1 },
+    { x: -0.434, z: 0.425, r: 0.171, h: 1 },
+    { x: 0.221, z: 0.154, r: 0.284, h: 1 },
+  ];
+  const block = makeBlocker(obs);
+  const step = 0.016;
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const r = block(0, 0, Math.sin(a) * step, Math.cos(a) * step, WALKER_RADIUS, 0);
+    const inside = obs.find((o) => Math.hypot(r.x - o.x, r.z - o.z) < o.r + WALKER_RADIUS - 1e-6);
+    assert.ok(!inside, `物の中に押し出された(向き ${a.toFixed(2)} → ${r.x.toFixed(3)}, ${r.z.toFixed(3)})`);
+  }
+});
+
+test('walk: 体より広い隙間はこれまでどおり通れる', () => {
+  const gap = WALKER_RADIUS * 2 * 1.2;
+  const half = 0.25 + gap / 2;
+  const obs = [{ x: -half, z: 0, r: 0.25, h: 1 }, { x: half, z: 0, r: 0.25, h: 1 }];
+  assert.ok(walkTo(obs, { x: 0, z: -1.2 }, { x: 0, z: 1.2 }).ok, '通れるはずの隙間で嵌まった');
+});
+
 test('walk: 島の端を踏み外すと落ち、直前の足場に戻る', () => {
   const s = game('base');
   const ground = makeGround(s);
@@ -324,16 +398,21 @@ test('walk: 低い物は跳び越えられ、高い物は跳んでも越えら�
 
   // 距離も高さも「跳べる高さ・自分の太さ」に対しての比で書く。
   // 絶対値で書くと、縮尺(scale.js)を変えたときに中身は正しいのに落ちる。
+  // 見るのは「**真上を通って**向こう側へ出たか」。単に z が向こうへ行ったかで
+  // 見ると、脇へ回り込んだだけ(obstacles.js の SLIDE_ROUND)でも越えたことに
+  // なってしまう ── 越えたのなら、物の幅の中を通っているはず。
   const tryPass = (h) => {
     const o = { x: start.x, z: start.y + JUMP_HEIGHT * 1.6, r: WALKER_RADIUS * 2, h };
     const w = new WalkerMotion(ground, makeBlocker([o]));
     w.setPosition(start.x, start.y);
+    let over = false;
     for (let i = 0; i < 200; i++) {
       // 障害物の手前で踏み切る
       if (Math.abs(w.pos.z - (o.z - JUMP_HEIGHT * 1.1)) < 0.03 && w.grounded) w.jump();
       w.update(1 / 60, { x: 0, y: 1 }, 0);
+      if (w.pos.z > o.z + o.r && Math.abs(w.pos.x - o.x) < o.r) over = true;
     }
-    return w.pos.z > o.z + o.r; // 向こう側へ抜けたか
+    return over;
   };
 
   assert.equal(tryPass(JUMP_HEIGHT * 0.4), true, '低い物を跳び越えられない');
