@@ -8,6 +8,21 @@ import { s as sc } from './scale.js';
 
 export const WALKER_RADIUS = sc(0.10); // 棒人間の太さ(肩幅ぶん。scale.js)
 
+// ある点のまわりを片付ける。{ kept, cleared } を返す。
+//
+// 受付のまわりに使う。**木や岩は盤の寸法で、棒人間を縮めても縮まない**ので、
+// 中心に受付を建てると、寄れる隙間(受付の縁〜手の届く距離)が木で埋まって
+// 誰も受付にたどり着けなくなる ── 実際そうなっていた。
+// 受付は「木を片付けた広場」に立っている、という扱いにする。
+export function clearAround(obstacles, at, r) {
+  const kept = [];
+  const cleared = [];
+  for (const o of obstacles) {
+    (Math.hypot(o.x - at.x, o.z - at.z) <= r ? cleared : kept).push(o);
+  }
+  return { kept, cleared };
+}
+
 // 押し出しの繰り返し回数。木が2本並んだ隙間などで、
 // 1回の押し出しが別の物にめり込むことがあるので数回ならす。
 const PASSES = 3;

@@ -105,3 +105,40 @@ test('縮尺: 島の端から端までが歩いて何秒か', () => {
   // 等倍(3.6秒)では鬼ごっこにならないので縮めた。5秒を切ったら縮め足りない
   assert.ok(cross > 5, `島を横断するのが速すぎる(${cross.toFixed(1)}秒)`);
 });
+
+// 受付は島の中心に立つが、**木や岩は盤の寸法で棒人間ほど縮まない**。
+// 縮尺を下げると、受付の縁から手の届く距離までの隙間が木で埋まって、
+// 誰も受付にたどり着けなくなる ── 実際そうなっていた(2人目がエントリー
+// できない、として報告された)。受付のまわりは片付けて広場にする。
+test('縮尺: 受付のまわりは片付ける(木で塞がれない広さ)', async () => {
+  const { clearAround, WALKER_RADIUS: wr } = await import('../src/minigame/obstacles.js');
+  const { DESK_CLEAR, DESK_REACH, DESK_RADIUS } = await import('../src/minigame/ground.js');
+
+  // 広場は「寄れる隙間」をまるごと含むこと。含まないと、隙間に木が残る。
+  assert.ok(DESK_CLEAR > DESK_REACH + wr, '広場が手の届く範囲より狭い');
+  // 降り立つ輪(席ごとの立ち位置)も広場の中にあること
+  const st = createGame({ seed: 11, playerCount: 4, humanIndex: 0, mode: 'dragon' });
+  const home = spawnPoint(st);
+  for (let seat = 0; seat < 8; seat += 1) {
+    const p = spawnPoint(st, seat);
+    const d = Math.hypot(p.x - home.x, p.y - home.y);
+    assert.ok(d + wr < DESK_CLEAR, `席 ${seat} の立ち位置が広場の外(${d.toFixed(2)})`);
+  }
+
+  // 実際に塞いでいた並び(本番の実測値)で、片付けられることを見る
+  const at = { x: 0, z: 0 };
+  const trees = [
+    { x: 0.28, z: 0, r: 0.15, h: 0.32 },
+    { x: 0, z: 0.29, r: 0.09, h: 0.24 },
+    { x: -0.36, z: 0, r: 0.13, h: 0.29 },
+    { x: 1.4, z: 0, r: 0.15, h: 0.35 },   // 遠いので残る
+  ];
+  const { kept, cleared } = clearAround(trees, at, DESK_CLEAR);
+  assert.equal(cleared.length, 3, '受付を塞いでいた木が残った');
+  assert.equal(kept.length, 1, '遠くの木まで片付けた');
+  // 残った物が、寄れる隙間に食い込んでいないこと
+  for (const o of kept) {
+    const gap = Math.hypot(o.x - at.x, o.z - at.z) - o.r - wr;
+    assert.ok(gap > DESK_REACH, `残した物が受付の手前を塞ぐ(${gap.toFixed(2)})`);
+  }
+});

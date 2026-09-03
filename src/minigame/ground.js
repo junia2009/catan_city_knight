@@ -76,6 +76,10 @@ export function makeGround(state) {
 export const DESK_RADIUS = sc(0.2);  // ぶつかる大きさ
 // この距離まで近づいたらエントリーできる
 export const DESK_REACH = sc(0.5);
+// 受付のまわりを片付ける広さ(木も岩も無い広場にする)。
+// **降り立つ輪(0.62)より広く**取ること ── 輪の上に木が残っていると、
+// そこに降りた人が最初から木に埋まる。
+export const DESK_CLEAR = sc(0.95);
 
 // 席ごとに散らす輪の半径。人まわりの長さなので縮尺を掛ける(scale.js)。
 // **受付の手の届く範囲(DESK_REACH)より外に出すこと** ── でないと、
