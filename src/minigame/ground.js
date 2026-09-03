@@ -108,6 +108,42 @@ export function spawnPoint(state, seat = null) {
   return makeGround(state)(p.x, p.y).ok ? p : c;
 }
 
+// ---- 竜の棲む山 ----
+
+// ドラゴンの島で、竜が棲んでいるヘックスの中心。
+//
+// 場所を決めているのは対戦のルール(rules/dragon.js の dragonNestHex ──
+// いちばん出目のいい山)。散策でもそこに竜が居るし、大会が始まればそこから
+// 飛び立つ。**受付(島の中心)とは別**で、こちらは「島の住人の居場所」。
+//
+// サーバーもクライアントもこの1本を通すこと ── 別々に求めると、
+// 画面では山に居る竜が、当たり判定では広場から飛んでくることになる。
+// 竜の居ない島では null。
+export function nestPoint(state) {
+  const hid = state?.dragon?.nestHex;
+  if (hid == null) return null;
+  const c = hexCenter(hid);
+  return { x: c.x, y: c.y };
+}
+
+// 竜が棲んでいるヘックス。距離ではなく**この山に足を踏み入れたか**で
+// 目を覚まさせる。
+//
+// 距離で見ると島ごとに意味が変わってしまう ── 巣が受付の隣に来る島では
+// (中心から 1.73、隣のヘックスの中心までの距離)、広場に立っているだけで
+// 竜が起きたままになる。「自分の山に人が登ってきた」なら、島の形が
+// どうであれ同じ意味になる。
+export function nestHexOf(state) {
+  return state?.dragon?.nestHex ?? null;
+}
+
+// 大会の「主」がどこから現れるか(いまは竜だけ)。
+// 住んでいる場所があればそこ、無ければ島の中心。サーバーの primeMeet が
+// ここを通す ── 分岐を Durable Object の中に置くとテストから触れない。
+export function meetHome(state) {
+  return nestPoint(state) ?? spawnPoint(state);
+}
+
 // ---- 釣り場(港)----
 
 // 縁のちょうど上に立たせると、わずかな行き過ぎで海に落ちる。少しだけ陸側に置く。

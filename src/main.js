@@ -10,8 +10,8 @@ import {
   pieceForEdge, roadBuildingCount, roadBuildingSpots,
 } from './rules/road-building.js';
 import {
-  addCatch, addContestResult, addResult, clearProgress, currentTitle, loadProgress, resultOf,
-  saveProgress, setTitle,
+  addCatch, addContestResult, addResult, clearProgress, currentTitle, loadProgress, noteSeen,
+  resultOf, saveProgress, setTitle,
 } from './progress.js';
 import { achievementById } from './achievements.js';
 import { fishbookHtml, recordsHtml } from './render/records.js';
@@ -670,6 +670,9 @@ async function startWalk() {
   }
   atDesk = false;
   renderContest();
+  // 竜の巣まで登った。ひとりで歩いていても付く ── 大会と違って
+  // 勝ち負けではなく「そこへ行った」ことなので、部屋に居るかは関係ない。
+  walk.onNest = (near) => { if (near) noteNestVisit(); };
   // 落ちた合図は着水の瞬間に出す(戻ってきたときではもう遅い)
   walk.onSplash = () => { sfx.play('splash'); walkNote('🌊 海に落ちた!'); };
   // 足音。地面と動きで音が変わる(audio/footsteps.js)
@@ -946,6 +949,25 @@ function noteContestResult(c) {
   saveProgress(progress);
   meetUnlocked = r.unlocked;
   if (r.unlocked.length) sfx.play('win');
+}
+
+// 竜の巣まで登った。2度目からは何も起きない(noteSeen が見ている)。
+function noteNestVisit() {
+  const r = noteSeen(progress, 'nest');
+  if (!r.unlocked.length && r.progress === progress) {
+    // もう行っている。それでも寄ったことは伝える(何も起きないと不安になる)
+    walkNote('🐉 竜は眠っている');
+    return;
+  }
+  progress = r.progress;
+  saveProgress(progress);
+  if (r.unlocked.length) {
+    sfx.play('win');
+    const a = achievementById(r.unlocked[0]);
+    walkNote(`🎉 実績を解除: ${a?.icon ?? ''} ${a?.name ?? ''}`);
+  } else {
+    walkNote('🐉 竜は眠っている');
+  }
 }
 
 // 竜がどっちから来ているか。
@@ -2883,6 +2905,10 @@ window.hexDebug = {
   // reach も返す。E2E が「どれだけ寄れば届くか」を決め打ちすると、
   // 縮尺(minigame/scale.js)を変えたときにそこだけ落ちる。
   deskAt: () => (walk?.deskAt ? { ...walk.deskAt, reach: DESK_REACH } : null),
+  // 竜の巣(E2E 用)。居場所と、いま自分がその山の上に立っているか
+  nestAt: () => (walk?.nestAt ? { ...walk.nestAt, hex: walk.nestHex } : null),
+  atNest: () => !!walk?.atNest,
+  nestWake: () => walk?.nestWake ?? 0,
   meet: (action, extra) => net?.contest(action, extra),
   getWalkEmote: () => (walk?.emote ? { ...walk.emote } : null),
   // 島を歩く・釣り(E2E用)。港まで歩かせずに試せるようにする

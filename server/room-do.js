@@ -7,7 +7,7 @@ import { WalkRelay, TICK_MS } from './walk-relay.js';
 import { FishingContest } from './fishing-contest.js';
 import { DragonHunt } from './dragon-hunt.js';
 import { hasMeet, meetFor } from '../src/minigame/meets.js';
-import { spawnPoint } from '../src/minigame/ground.js';
+import { meetHome } from '../src/minigame/ground.js';
 import { createGame } from '../src/state.js';
 
 // 島ごとの進行。表(src/minigame/meets.js)の id で引く。
@@ -84,7 +84,12 @@ export class RoomDO {
     const state = createGame({
       seed: r.seed, playerCount: 4, humanIndex: -1, mode: r.settings.mode,
     });
-    const home = spawnPoint(state);
+    // **竜は自分の巣から飛び立つ。**
+    // 以前は島の中心 ── つまり受付の広場、全員が立っているところ ── から
+    // 湧いていた。世界としておかしいし、始まった瞬間に全員の真上に居る。
+    // 巣は遠くの山なので、近づいてくるあいだに逃げ場を選べる。
+    // 巣が無い島(釣りなど)では中心に倒す(meetHome)。
+    const home = meetHome(state);
     this.contest.setHome(home.x, home.y);
   }
 

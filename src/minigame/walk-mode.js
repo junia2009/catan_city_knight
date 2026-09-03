@@ -7,7 +7,7 @@
 
 import * as THREE from 'three';
 import {
-  makeGround, spawnPoint, fishingSpots, spotNear, hexCenter,
+  makeGround, spawnPoint, fishingSpots, spotNear, hexCenter, nestPoint, nestHexOf,
   DESK_RADIUS, DESK_REACH, DESK_CLEAR,
 } from './ground.js';
 import { makeBlocker, clearAround } from './obstacles.js';
@@ -155,6 +155,26 @@ export class WalkMode {
     // ここは届いた場所へ滑らかに寄せて描くだけ ── 各自で動かすと、端末ごとに
     // 違う場所に竜がいて「当たった/当たってない」で揉める。
     this.hunt = null;        // { mesh, x, z, a, tx, tz, ta }
+
+    // 巣に棲んでいる竜。**盤の駒として既にそこに立っている**ので、
+    // 作らずに借りる(board3d.dragonMesh。ドラゴンの島だけ visible)。
+    // 歩いている間だけ「棲んでいる竜」として動かす ── 眠って、呼吸して、
+    // 近づけば首をこちらへ向ける。盤の上では今までどおり浮いて羽ばたく。
+    const nest = nestPoint(state);
+    this.nestAt = nest ? { x: nest.x, z: nest.y } : null;
+    this.nestHex = nestHexOf(state);
+    this.nestMesh = this.nestAt ? board3d.dragonMesh : null;
+    this.atNest = false;
+    this.onNest = null;      // 巣のそばに来た/離れた
+    // 0 = 眠っている、1 = 起きてこちらを見ている
+    this.nestWake = 0;
+    // 借り物なので、出るときに返せるよう元の姿勢を覚えておく
+    this.nestRest = this.nestMesh ? {
+      y: this.nestMesh.position.y,
+      rotY: this.nestMesh.rotation.y,
+      head: { ...(this.nestMesh.userData.headRest ?? { x: 0, y: 0 }) },
+      wingX: (this.nestMesh.userData.wings ?? []).map((w) => w.rotation.x),
+    } : null;
     this.species = speciesById(look);
     this.walker = new Walker(
       board3d.scene,
@@ -183,9 +203,13 @@ export class WalkMode {
     this.input = { x: 0, y: 0 };
     this.keys = new Set();
     this.camYaw = 0;
-    // 距離だけ縮めるとカメラが地面すれすれまで下りて、手前の地形が画面を
-    // 埋める(縮尺を下げるほどひどくなる)。見下ろす角度も一緒に起こす。
-    this.camPitch = 0.62;
+    // 見下ろす角度。**深くすると自分の足元しか見えなくなる。**
+    // 0.62 で始めていたが、それだと水平線が画面の上に外れていて、
+    // 3タイルより遠いものは何も映らない ── 島に何を置いても見えないので、
+    // 「誰も居ない島」に見えていた(巣の竜すら1枚も写っていなかった)。
+    // 0.40 だと島と海と、遠くの山に居る竜まで入る。
+    // もっと見上げたいときは画面の右半分を上へなぞる(orbit で 0.05 まで)。
+    this.camPitch = 0.40;
     this.camDist = sc(2.1);
     this.last = 0;
     this.onRespawn = null;
@@ -284,6 +308,89 @@ export class WalkMode {
     for (const [i, w] of (h.mesh.userData.wings ?? []).entries()) {
       const f = Math.sin(t / 130 + i * Math.PI) * 0.5;
       w.rotation.z = (i === 0 ? 1 : -1) * (0.35 + f);
+    }
+  }
+
+  // ---- 巣に棲んでいる竜 ----
+
+  // 眠っている竜を1フレーム進める。
+  //
+  // board3d の _tickRobber が毎フレーム先に姿勢を書く(浮かせて羽ばたかせる)
+  // ので、**その後**に呼ばれるここで上書きする(順番は board3d.js の loop)。
+  // 大会が始まって竜が飛んでいる間は、こちらの竜は仕舞う ── 同じ1匹なので、
+  // 巣にも空にも居ると2匹になる。
+  _nestFrame(dt, t) {
+    const m = this.nestMesh;
+    if (!m) return;
+    if (this.hunt) { m.visible = false; return; }
+    m.visible = true;
+
+    const w = this.walker.pos;
+    // 「自分の山に人が登ってきたか」。距離で見ると、巣が受付の隣に来る島で
+    // 広場に立っているだけで起きたままになる(ground.js の nestHexOf)。
+    const onNest = this.ground(w.x, w.z).hexId === this.nestHex;
+    // 目を覚ますのはゆっくり、寝直すのはもっとゆっくり。
+    // 境目をまたいでも姿勢が跳ねないのは、この鈍さが効いているため。
+    this.nestWake += ((onNest ? 1 : 0) - this.nestWake) * smooth(onNest ? 1.6 : 0.5, dt);
+    const k = this.nestWake;
+
+    // 息づかい。眠っているときはゆっくり深く、起きると浅く速くなる
+    const breath = Math.sin(t / (1800 - k * 900)) * (0.014 - k * 0.006);
+    m.position.y = this.ground(m.position.x, m.position.z).y + breath;
+
+    // 翼。眠っている間は畳んでいて、起きると半分ひらく
+    for (const [i, wing] of (m.userData.wings ?? []).entries()) {
+      const folded = -0.24;
+      const open = -Math.PI * 0.30 + Math.sin(t / 900 + i * Math.PI) * 0.05;
+      wing.rotation.x = folded + (open - folded) * k;
+    }
+
+    // 起きたら体ごとこちらへ向き直る。
+    // 首だけ回しても、真下に立たれると顔は見えない ── 登ってきた人からは
+    // 腹と尾しか映らず、「見られている」が伝わらなかった。体が回れば顔が来る。
+    const toMe = Math.atan2(w.x - m.position.x, w.z - m.position.z);
+    if (k > 0.02) {
+      let turn = toMe - m.rotation.y;
+      while (turn > Math.PI) turn -= Math.PI * 2;
+      while (turn < -Math.PI) turn += Math.PI * 2;
+      // ゆっくり。大きい生きものが向き直る速さ(飛ぶときの旋回とは別もの)
+      m.rotation.y += turn * smooth(0.9 * k, dt);
+    }
+
+    // 首。眠っているうちは顎を落として、起きると持ち上げて、
+    // 体が回りきるまでの差を首で埋める。
+    const head = m.userData.head;
+    if (head) {
+      const rest = m.userData.headRest ?? { x: 0.15, y: 0 };
+      head.rotation.x = 0.85 + (rest.x - 0.85 - 0.2) * k;
+      let rel = toMe - m.rotation.y;
+      while (rel > Math.PI) rel -= Math.PI * 2;
+      while (rel < -Math.PI) rel += Math.PI * 2;
+      head.rotation.y = rest.y + Math.max(-1.1, Math.min(1.1, rel)) * k;
+    }
+
+    // 巣まで登ったか(入った/出たときだけ知らせる)
+    if (onNest !== this.atNest) {
+      this.atNest = onNest;
+      this.onNest?.(onNest);
+    }
+  }
+
+  // 借りていた竜を盤に返す。姿勢を戻さないと、対戦の画面に
+  // 首を垂れて翼を畳んだままの竜が残る(_tickRobber は翼の z しか書かない)。
+  _nestRestore() {
+    const m = this.nestMesh;
+    if (!m || !this.nestRest) return;
+    m.visible = true;
+    m.position.y = this.nestRest.y;
+    m.rotation.y = this.nestRest.rotY;
+    for (const [i, wing] of (m.userData.wings ?? []).entries()) {
+      wing.rotation.x = this.nestRest.wingX[i] ?? wing.rotation.x;
+    }
+    const head = m.userData.head;
+    if (head) {
+      head.rotation.x = this.nestRest.head.x;
+      head.rotation.y = this.nestRest.head.y;
     }
   }
 
@@ -433,6 +540,8 @@ export class WalkMode {
     this._netFrame(dt, t);
     // 竜も釣りの最中に止めない ── 竿を出したまま捕まるのが正しい
     this._dragonFrame(dt, t);
+    // 巣の竜も同じ。釣っていようが図鑑を開いていようが、島に棲んでいる
+    this._nestFrame(dt, t);
 
     if (this.fishing) {
       this._fishFrame(dt);
@@ -664,6 +773,7 @@ export class WalkMode {
     this.b.onFrame = null;
     for (const { o, scale } of this.signs) o.scale.copy(scale);  // 港の看板を戻す
     for (const { o, vis } of this.clearedObjs) o.visible = vis;  // 片付けた木を戻す
+    this._nestRestore();                                         // 巣の竜を盤に返す
     this.setDragon(null);
     this.desk?.dispose();
     this.walker.dispose();

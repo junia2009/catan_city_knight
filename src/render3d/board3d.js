@@ -1236,6 +1236,11 @@ export function makeDragon() {
   const wingR = makeWing(-1);
   g.add(wingL, wingR);
   g.userData.wings = [wingL, wingR];
+  // 首から上も外から動かせるようにしておく。島を歩いていると竜を**下から**
+  // 見ることになり、そのときは翼より頭の向きのほうが「生きている」を作る
+  // (眠る・目を覚ます・こちらを見る)。基準の姿勢も一緒に覚えておく。
+  g.userData.head = head;
+  g.userData.headRest = { x: head.rotation.x, y: head.rotation.y, z: head.position.z };
   g.scale.setScalar(1.7);
   return g;
 }
