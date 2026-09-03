@@ -17,7 +17,7 @@ import {
 import {
   ACHIEVEMENTS, TIERS, achievementById, marksOf, progressOf, titleOf, unlockedBy,
 } from '../src/achievements.js';
-import { contestOutcome } from '../src/minigame/contest.js';
+import { contestOutcome, placeOf } from '../src/minigame/contest.js';
 
 function game({
   mode = 'base', difficulty = 'normal', won = true, points = 10, turns = 40, marks = {},
@@ -307,11 +307,12 @@ const row = (seat, cm, best = cm) => ({ seat, cm, count: 1, best });
 
 test('大会: 1位なら優勝、出ていなければ何も起きない', () => {
   const v = view([row(0, 200), row(1, 120)]);
-  assert.deepEqual(contestOutcome(v, 0), { entered: true, won: true, cm: 200 });
-  assert.deepEqual(contestOutcome(v, 1), { entered: true, won: false, cm: 120 });
-  assert.deepEqual(contestOutcome(v, 5), { entered: false, won: false, cm: 0 });
-  assert.deepEqual(contestOutcome(v, null), { entered: false, won: false, cm: 0 });
-  assert.deepEqual(contestOutcome(undefined, 0), { entered: false, won: false, cm: 0 });
+  const out = { entered: false, won: false, cm: 0, place: 0 };
+  assert.deepEqual(contestOutcome(v, 0), { entered: true, won: true, cm: 200, place: 1 });
+  assert.deepEqual(contestOutcome(v, 1), { entered: true, won: false, cm: 120, place: 2 });
+  assert.deepEqual(contestOutcome(v, 5), out);
+  assert.deepEqual(contestOutcome(v, null), out);
+  assert.deepEqual(contestOutcome(undefined, 0), out);
 });
 
 // 相手が抜けた瞬間や、全員ボウズで時間切れ ── どちらも「勝った」感じがしない
@@ -320,6 +321,37 @@ test('大会: ひとりだけの回と、誰も釣れなかった回は優勝に
   assert.equal(contestOutcome(view([row(0, 0), row(1, 0)]), 0).won, false, 'ボウズで優勝になった');
   // 出てはいるので、回数には数える
   assert.equal(contestOutcome(view([row(0, 200)]), 0).entered, true);
+});
+
+// 合計も大物も同じなら、席が若いほうだけを優勝にはしない
+test('大会: まったく同じ釣果なら同率優勝(2人とも実績が付く)', () => {
+  const v = view([row(0, 200, 120), row(1, 200, 120), row(2, 50)]);
+  assert.deepEqual(placeOf(v.rank).map((r) => r.place), [1, 1, 3], '競技順位になっていない');
+  for (const s of [0, 1]) {
+    const o = contestOutcome(v, s);
+    assert.equal(o.won, true, `席${s} が同率優勝にならない`);
+    assert.equal(o.place, 1);
+  }
+  assert.deepEqual(contestOutcome(v, 2), { entered: true, won: false, cm: 50, place: 3 });
+  // 同率の2人とも実績が取れる
+  for (const s of [0, 1]) {
+    const { won } = contestOutcome(v, s);
+    const { unlocked } = addContestResult(emptyProgress(), { won, cm: 200, key: `A#${s}` });
+    assert.deepEqual(unlocked, ['meet-win'], `席${s} に実績が付かない`);
+  }
+});
+
+// 合計が並んでも「いちばん大きい1匹」で決着が付くなら同率ではない
+test('大会: 合計が同じでも大物で決まるなら同率にしない', () => {
+  const v = view([row(0, 200, 150), row(1, 200, 90)]);
+  assert.deepEqual(placeOf(v.rank).map((r) => r.place), [1, 2]);
+  assert.equal(contestOutcome(v, 0).won, true);
+  assert.equal(contestOutcome(v, 1).won, false, '大物で負けたのに優勝になった');
+});
+
+test('大会: 同率は2位でも3位でも同じ数え方(次の順位を飛ばす)', () => {
+  const v = view([row(0, 300), row(1, 100), row(2, 100), row(3, 10)]);
+  assert.deepEqual(placeOf(v.rank).map((r) => r.place), [1, 2, 2, 4]);
 });
 
 test('大会: 優勝すると実績と称号が付く', () => {
