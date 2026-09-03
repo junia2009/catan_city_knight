@@ -381,6 +381,7 @@ function onNetLobby(msg) {
 // (放っておくと、めいめい違う島の上で相手の位置だけが動くことになる)。
 function onWalkLobby(msg) {
   walk?.setWalkerNames(msg.seats);
+  renderContest();   // 名簿が変わると、順位表の名前とすがたも変わる
   if (!walk || !walkIsland) return;
   const mode = msg.settings?.mode ?? 'base';
   if (msg.seed === walkIsland.seed && mode === walkIsland.mode) return;
@@ -405,6 +406,8 @@ function startNet(code, name, kind = 'game') {
     onState: onNetState,
     // 散策部屋: 全員ぶんの位置が 10 回/秒で届く
     onWalkers: (people) => walk?.putWalkers(people),
+    // 釣り大会。進行はサーバー持ちなので、届いた表をそのまま描く
+    onContest: (c) => { contest = c; renderContest(); },
     onError: (msg, fatal) => {
       online.error = msg;
       if (fatal) {
@@ -648,7 +651,11 @@ async function startWalk() {
   if (seat != null) {
     walk.onPos = (p) => net?.pos(p);
     walk.setWalkerNames(lobby.seats);
+    // 受付に寄ったらパネルを出す
+    walk.onDesk = (near) => { atDesk = near; renderContest(); };
   }
+  atDesk = false;
+  renderContest();
   // 落ちた合図は着水の瞬間に出す(戻ってきたときではもう遅い)
   walk.onSplash = () => { sfx.play('splash'); walkNote('🌊 海に落ちた!'); };
   // 足音。地面と動きで音が変わる(audio/footsteps.js)
@@ -673,6 +680,9 @@ async function startWalk() {
 function exitWalk() {
   setWalkBook(false);
   setWalkEmotes(false);
+  atDesk = false;
+  contest = null;
+  renderContest();
   walk?.dispose();
   walk = null;
   setDiveVeil(0);
@@ -796,6 +806,10 @@ function showCatch() {
   const f = walk?.fishing;
   if (!f?.fish) return;
   sfx.play('catchFish');
+  // 大会中なら記録を申告する。ガラクタは 0cm(釣っても得点にならない)
+  if (contest?.phase === 'running' && contest.entries.includes(mySeat())) {
+    net?.contest('land', { cm: f.fish.tier === 'junk' ? 0 : f.cm });
+  }
   const r = addCatch(progress, f.fish.id, f.cm);
   progress = r.progress;
   saveProgress(progress);
@@ -869,6 +883,100 @@ function setWalkBook(on) {
   walk.setPaused(walkBookOpen);
   // 移動スティックが出たままにならないように
   if (walkBookOpen) walkStickHide();
+}
+
+// ---- 釣り大会 ----
+//
+// 進行(締め切り・順位)はサーバーが持つ(server/fishing-contest.js)。
+// ここは「配られた表を描く」と「受付を押す」だけ。自分で残り時間を
+// 数え始めると、端末ごとに違う残り時間が出て揉める。
+let contest = null;     // サーバーから届いた view
+let atDesk = false;     // 受付のそばに立っているか
+
+function mySeat() { return net?.seat ?? null; }
+function seatName(seat) {
+  const s = online.lobby?.seats?.find((x) => x.seat === seat);
+  return s?.name ?? `席${seat + 1}`;
+}
+function seatIcon(seat) {
+  const s = online.lobby?.seats?.find((x) => x.seat === seat);
+  return speciesById(s?.look).icon;
+}
+const mmss = (ms) => {
+  const t = Math.ceil(ms / 1000);
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+};
+
+// 大会中ずっと出る細いバー(残り時間と自分の記録)
+function renderMeetBar() {
+  const el = document.getElementById('walk-meet');
+  if (!el) return;
+  const c = contest;
+  const on = !!c && (c.phase === 'running' || c.phase === 'result');
+  el.classList.toggle('on', on);
+  if (!on) { el.classList.remove('hurry'); return; }
+  const me = c.rank.find((r) => r.seat === mySeat());
+  const place = me ? c.rank.indexOf(me) + 1 : 0;
+  if (c.phase === 'result') {
+    const top = c.rank[0];
+    el.innerHTML = top
+      ? `🏆 ${seatIcon(top.seat)} ${seatName(top.seat)} <b>${top.cm}cm</b>`
+      : '🏆 記録なし';
+    el.classList.remove('hurry');
+    return;
+  }
+  el.classList.toggle('hurry', c.remain <= 30000);
+  el.innerHTML = `<span class="t">⏱ ${mmss(c.remain)}</span>`
+    + (me ? ` 🎣 ${me.cm}cm(${place}位/${c.rank.length}人)` : ' 観戦中');
+}
+
+// 受付のそばで開くパネル
+function renderContestPanel() {
+  const el = document.getElementById('walk-contest');
+  if (!el) return;
+  // まだ何も届いていないなら「誰もエントリーしていない受付」として扱う
+  const c = contest ?? { phase: 'idle', entries: [], rank: [], total: 180000, minPlayers: 2 };
+  const seat = mySeat();
+  // 受付から離れたら閉じる。ただし結果だけは、その場に居なくても見せたい
+  const show = seat != null && (atDesk || c.phase === 'result');
+  el.classList.toggle('on', show);
+  if (!show) { el.innerHTML = ''; return; }
+
+  if (c.phase === 'result') {
+    const rows = c.rank.length
+      ? c.rank.map((r, i) => `<div class="${r.seat === seat ? 'me' : ''}">
+          <span>${['🥇', '🥈', '🥉'][i] ?? `${i + 1}.`} ${seatIcon(r.seat)} ${seatName(r.seat)}</span>
+          <b>${r.cm}cm <small>(${r.count}匹)</small></b></div>`).join('')
+      : '<div>だれも釣れませんでした</div>';
+    el.innerHTML = `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>
+      <div class="note">受付でもう一度エントリーできます</div>`;
+    return;
+  }
+  if (c.phase === 'running') {
+    el.innerHTML = `<h4>🎣 大会中</h4>
+      <div class="note">港で釣って、合計の長さを競います。残り ${mmss(c.remain)}</div>`;
+    return;
+  }
+
+  const joined = c.entries.includes(seat);
+  const who = c.entries.length
+    ? c.entries.map((x) => `<span>${seatIcon(x)} ${seatName(x)}</span>`).join('')
+    : '<span class="note">まだ誰もいません</span>';
+  const canStart = joined && c.entries.length >= c.minPlayers;
+  el.innerHTML = `<h4>🎣 釣り大会 受付</h4>
+    <div class="who">${who}</div>
+    <div class="note">${Math.floor(c.total / 60000)}分で、釣った魚の合計の長さを競います。<br>
+      ガラクタは0cmです。</div>
+    <div class="row">
+      <button data-act="meet-${joined ? 'leave' : 'enter'}">${joined ? 'エントリーを取り消す' : 'エントリーする'}</button>
+      ${canStart ? '<button class="primary" data-act="meet-start">はじめる</button>' : ''}
+    </div>
+    ${joined && !canStart ? `<div class="note">あと${c.minPlayers - c.entries.length}人ではじめられます</div>` : ''}`;
+}
+
+function renderContest() {
+  renderMeetBar();
+  renderContestPanel();
 }
 
 // エモート。上のバーのボタンで開いて、選ぶと1つ出して閉じる。
@@ -2148,6 +2256,12 @@ document.addEventListener('click', (e) => {
     case 'goto-walk':
       enterWalk();
       return;
+    case 'meet-enter': net?.contest('enter'); return;
+    case 'meet-leave': net?.contest('leave'); return;
+    case 'meet-start':
+      net?.contest('start');
+      sfx.play('ui');
+      return;
     case 'net-look':     // すがたを選んだ
       setMyLook(arg);
       net?.setLook(myLook);
@@ -2678,6 +2792,11 @@ window.hexDebug = {
   // すがた(E2E 用)。選び直すと次に島へ入ったときに反映される
   setLook: (id) => { setMyLook(id); net?.setLook(myLook); return myLook; },
   getLook: () => myLook,
+  // 釣り大会(E2E 用)
+  getContest: () => contest,
+  atDesk: () => atDesk,
+  deskAt: () => (walk ? { ...walk.deskAt } : null),
+  meet: (action, extra) => net?.contest(action, extra),
   getWalkEmote: () => (walk?.emote ? { ...walk.emote } : null),
   // 島を歩く・釣り(E2E用)。港まで歩かせずに試せるようにする
   walkTo: (x, z) => walk?.walker.setPosition(x, z),

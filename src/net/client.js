@@ -122,6 +122,9 @@ export class NetClient {
       case 'lobby':
         this.h.onLobby?.(msg);
         break;
+      case 'contest':
+        this.h.onContest?.(msg.contest);
+        break;
       case 'walkers':
         this.h.onWalkers?.(msg.people);
         break;
@@ -181,6 +184,11 @@ export class NetClient {
   setLook(look) {
     this.look = look;
     return this.send({ t: 'look', look });
+  }
+
+  // 釣り大会。do は 'enter' / 'leave' / 'start' / 'land'
+  contest(action, extra = {}) {
+    return this.send({ t: 'contest', do: action, ...extra });
   }
 
   pos(p) {

@@ -707,6 +707,51 @@
   /* 出している間はボタンを光らせる(もう一度押すと出し直せると分かるように) */
   [data-act="walk-emote"].on { background: rgba(255, 217, 125, 0.34); }
 
+  /* ---------- 釣り大会 ---------- */
+  /* 大会中ずっと出る細いバー。上のバーの下に置く(ボタンと取り合わない) */
+  #walk-meet {
+    position: absolute; z-index: 2; pointer-events: none;
+    top: calc(46px + env(safe-area-inset-top));
+    left: 50%; transform: translateX(-50%);
+    display: none; align-items: center; gap: 10px;
+    padding: 5px 14px; border-radius: 999px;
+    background: rgba(8, 22, 38, 0.82);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: #fff; font-size: 13px; font-weight: 700;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6); white-space: nowrap;
+  }
+  #walk-meet.on { display: flex; }
+  #walk-meet .t { color: var(--accent2); font-variant-numeric: tabular-nums; }
+  /* 残り30秒を切ったら赤く点滅させる */
+  #walk-meet.hurry .t { color: #ff9a8a; animation: meetHurry 1s ease-in-out infinite; }
+  @keyframes meetHurry { 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { #walk-meet.hurry .t { animation: none; } }
+
+  /* 受付のそばで開くパネル。歩いて離れると閉じる */
+  #walk-contest {
+    position: absolute; z-index: 3; pointer-events: none;
+    left: 50%; transform: translateX(-50%);
+    bottom: calc(120px + env(safe-area-inset-bottom));
+    width: min(320px, calc(100vw - 32px));
+    display: none; flex-direction: column; gap: 8px;
+    padding: 12px 14px; border-radius: 14px;
+    background: rgba(8, 22, 38, 0.9);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #fff;
+  }
+  #walk-contest.on { display: flex; }
+  #walk-contest h4 { margin: 0; font-size: 14px; color: var(--accent2); text-align: center; }
+  #walk-contest .who { font-size: 12.5px; line-height: 1.7; }
+  #walk-contest .who span { display: inline-block; margin-right: 8px; }
+  #walk-contest .note { font-size: 11.5px; color: var(--dim); text-align: center; }
+  #walk-contest .row { display: flex; gap: 8px; justify-content: center; }
+  #walk-contest button { pointer-events: auto; flex: 1; }
+  /* 順位表(結果)。名前と記録を2列で */
+  .meet-rank { font-size: 13px; line-height: 1.9; }
+  .meet-rank div { display: flex; justify-content: space-between; gap: 10px; }
+  .meet-rank .me { color: var(--accent2); font-weight: 700; }
+  .meet-rank b { font-variant-numeric: tabular-nums; }
+
   /* 釣り図鑑(島を歩く中から開く)。HUD より上に出す */
   #walk-book {
     position: absolute; inset: 0; z-index: 3; pointer-events: auto;
@@ -1417,6 +1462,9 @@
       <button data-act="walk-exit">✕ もどる</button>
     </div>
     <div id="walk-emotes"></div>
+    <!-- 釣り大会。受付のそばで開く小さなパネルと、大会中の細いバー -->
+    <div id="walk-contest"></div>
+    <div id="walk-meet"></div>
     <div id="walk-dive"></div>
     <div id="walk-stick"><i></i></div>
     <button id="walk-jump" type="button" aria-label="ジャンプ">⤒<span>ジャンプ</span></button>
