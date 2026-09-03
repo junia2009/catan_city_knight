@@ -943,18 +943,20 @@ function renderMeetBar() {
   el.classList.toggle('on', on);
   if (!on) { el.classList.remove('hurry'); return; }
   const me = c.rank.find((r) => r.seat === mySeat());
-  const place = me ? c.rank.indexOf(me) + 1 : 0;
   if (c.phase === 'result') {
-    const top = c.rank[0];
-    el.innerHTML = top
-      ? `🏆 ${seatIcon(top.seat)} ${seatName(top.seat)} <b>${top.cm}cm</b>`
-      : '🏆 記録なし';
+    // 同率優勝がありうる。並び順の1行目だけを出すと、片方が消える
+    const tops = c.rank.filter((r) => r.place === 1);
+    el.innerHTML = tops.length === 0
+      ? '🏆 記録なし'
+      : tops.length === 1
+      ? `🏆 ${seatIcon(tops[0].seat)} ${seatName(tops[0].seat)} <b>${tops[0].cm}cm</b>`
+      : `🏆 ${tops.map((r) => seatIcon(r.seat)).join('')} 同率1位 <b>${tops[0].cm}cm</b>`;
     el.classList.remove('hurry');
     return;
   }
   el.classList.toggle('hurry', c.remain <= 30000);
   el.innerHTML = `<span class="t">⏱ ${mmss(c.remain)}</span>`
-    + (me ? ` 🎣 ${me.cm}cm(${place}位/${c.rank.length}人)` : ' 観戦中');
+    + (me ? ` 🎣 ${me.cm}cm(${me.place}位/${c.rank.length}人)` : ' 観戦中');
 }
 
 // 受付のそばで開くパネル
@@ -971,8 +973,9 @@ function renderContestPanel() {
 
   if (c.phase === 'result') {
     const rows = c.rank.length
-      ? c.rank.map((r, i) => `<div class="${r.seat === seat ? 'me' : ''}">
-          <span>${['🥇', '🥈', '🥉'][i] ?? `${i + 1}.`} ${seatIcon(r.seat)} ${seatName(r.seat)}</span>
+      // メダルは並び順ではなく順位で出す。同率なら 🥇 が2つ並ぶ
+      ? c.rank.map((r) => `<div class="${r.seat === seat ? 'me' : ''}">
+          <span>${['🥇', '🥈', '🥉'][r.place - 1] ?? `${r.place}.`} ${seatIcon(r.seat)} ${seatName(r.seat)}</span>
           <b>${r.cm}cm <small>(${r.count}匹)</small></b></div>`).join('')
       : '<div>だれも釣れませんでした</div>';
     // 新しく取った実績。ここで出さないと、戦績画面を開くまで気づけない

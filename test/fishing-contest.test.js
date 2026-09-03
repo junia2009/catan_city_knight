@@ -79,6 +79,20 @@ test('大会: 合計が同じなら、大物を釣ったほうが上', () => {
   c.land(1, 100, at(1000));
   const rank = c.view(at(9000)).rank;
   assert.equal(rank[0].seat, 1, '大物のほうが上にならない');
+  assert.deepEqual(rank.map((r) => r.place), [1, 2], '大物で決着が付くのに同率になった');
+});
+
+// 席番号は「表に並べる順」を決めるだけ。合計も大物も同じなら同率にする
+// ── ここを並び順で数えると、席が若いほうだけが優勝になる。
+test('大会: 合計も大物も同じなら同率で配る', () => {
+  const c = new FishingContest();
+  for (const s of [0, 1, 2]) c.enter(s, at(0));
+  c.start(0, at(0));
+  c.land(0, 100, at(1000));
+  c.land(1, 100, at(1000));
+  c.land(2, 20, at(1000));
+  const rank = c.view(at(9000)).rank;
+  assert.deepEqual(rank.map((r) => [r.seat, r.place]), [[0, 1], [1, 1], [2, 3]]);
 });
 
 test('大会: 壊れた申告は弾く(上限・間隔・でたらめ)', () => {

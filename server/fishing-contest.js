@@ -14,6 +14,10 @@
 //   - 釣り上げの最短間隔(投げて待って上げるより速くは入らない)
 // これで、バグや連打で桁違いの数字が並ぶことは防げる。
 
+// 順位づけはクライアントと同じものを使う(src/minigame/contest.js)。
+// 別々に数えると、表に出る「2位」と実績の判定がずれる。
+import { placeOf } from '../src/minigame/contest.js';
+
 // 3分。短いと1匹も釣れずに終わり、長いと中だるみする。
 export const CONTEST_MS = 180000;
 // 結果を見せている時間。過ぎたら受付に戻る
@@ -142,10 +146,12 @@ export class FishingContest {
   // 残り時間は「ミリ秒」で配る。締め切りの時刻を配ると、端末の時計が
   // ずれている人だけ違う残り時間を見ることになる。
   view(now = Date.now()) {
-    const rank = [...this.scores.entries()]
+    // 並べる順は 合計 → 大物 → 席番号。席番号は「表に並べる順」を決めるだけで、
+    // 順位(place)は placeOf が別に数える ── 合計も大物も同じなら同率にする。
+    const sorted = [...this.scores.entries()]
       .map(([seat, s]) => ({ seat, cm: s.cm, count: s.count, best: s.best }))
-      // 合計が同じなら、大物を釣ったほうが上
       .sort((a, b) => b.cm - a.cm || b.best - a.best || a.seat - b.seat);
+    const rank = placeOf(sorted);
     return {
       phase: this.phase,
       round: this.round,
