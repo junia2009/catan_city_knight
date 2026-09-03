@@ -1113,7 +1113,8 @@ function drawShipBadge(sp, text) {
 }
 
 // ドラゴン(ドラゴンの島): 羽ばたく赤竜
-function makeDragon() {
+// 散策の「ドラゴンから逃げろ」でも同じ竜を飛ばす(minigame/walk-mode.js)
+export function makeDragon() {
   const g = new THREE.Group();
   const bodyMat = mat(0x9c2b22, { roughness: 0.45 });
   const darkMat = mat(0x5e1512, { roughness: 0.55 });

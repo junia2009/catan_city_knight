@@ -247,7 +247,15 @@ export const ACHIEVEMENTS = [
     desc: '散策部屋の釣り大会で優勝する',
     title: '釣り名人',
     icon: '🎣', tier: 'silver', scope: '散策部屋',
-    checkMeet: ({ meet }) => meet.won > 0,
+    checkMeet: ({ meets }) => (meets.fishing?.won ?? 0) > 0,
+  },
+  {
+    id: 'hunt-survive',
+    name: '竜をかわす',
+    desc: '「ドラゴンから逃げろ」で最後まで逃げきる',
+    title: '韋駄天',
+    icon: '🐉', tier: 'silver', scope: '散策部屋',
+    checkMeet: ({ meets }) => (meets.dragonhunt?.won ?? 0) > 0,
   },
 ];
 

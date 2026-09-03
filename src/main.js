@@ -414,7 +414,13 @@ function startNet(code, name, kind = 'game') {
     // 散策部屋: 全員ぶんの位置が 10 回/秒で届く
     onWalkers: (people) => walk?.putWalkers(people),
     // 釣り大会。進行はサーバー持ちなので、届いた表をそのまま描く
-    onContest: (c) => { contest = c; noteContestResult(c); renderContest(); },
+    onContest: (c) => {
+      contest = c;
+      // 竜の居場所はサーバーが決めている。走っている間だけ出す
+      walk?.setDragon(c?.phase === 'running' && c.dragon ? c.dragon : null);
+      noteContestResult(c);
+      renderContest();
+    },
     onError: (msg, fatal) => {
       online.error = msg;
       if (fatal) {
@@ -817,7 +823,9 @@ function showCatch() {
   if (!f?.fish) return;
   sfx.play('catchFish');
   // 大会中なら記録を申告する。ガラクタは 0cm(釣っても得点にならない)
-  if (contest?.phase === 'running' && contest.entries.includes(mySeat())) {
+  // 釣り大会のときだけ申告する。竜の島では釣っても得点にならない
+  if (contest?.kind === 'fishing' && contest.phase === 'running'
+      && contest.entries.includes(mySeat())) {
     net?.contest('land', { cm: f.fish.tier === 'junk' ? 0 : f.cm });
   }
   const r = addCatch(progress, f.fish.id, f.cm);
@@ -928,15 +936,43 @@ function noteContestResult(c) {
   if (c.round === meetRound) return;
   meetRound = c.round;
   meetUnlocked = [];
-  const { entered, won, cm } = contestOutcome(c, mySeat());
+  const { entered, won, score } = contestOutcome(c, mySeat());
   if (!entered) return; // 見ていただけ
   const r = addContestResult(progress, {
-    won, cm, key: `${net?.code ?? '?'}#${c.round}`,
+    kind: c.kind, won, score, key: `${net?.code ?? '?'}#${c.round}`,
   });
   progress = r.progress;
   saveProgress(progress);
   meetUnlocked = r.unlocked;
   if (r.unlocked.length) sfx.play('win');
+}
+
+// 竜がどっちから来ているか。
+//
+// 歩きのカメラは見下ろしが強くて手前しか映らない ── 実測で、竜が3タイル
+// 離れると画面の外(または上の HUD の裏)に出てしまう。**追われているのに
+// 見えない**のは鬼ごっことして成立しないので、向きと距離を文字で知らせる。
+//
+// 矢印は「画面の上が前」。カメラの向きから引くので、振り向けば矢印も回る。
+const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
+function dragonArrow(d) {
+  if (!walk || !d) return '';
+  const me = walk.walker.pos;
+  const dist = Math.hypot(d.x - me.x, d.z - me.z);
+  // カメラの向きを 0 とした角度。画面の上が前になる
+  const rel = Math.atan2(d.x - me.x, d.z - me.z) - walk.camYaw;
+  const i = ((Math.round(rel / (Math.PI / 4)) % 8) + 8) % 8;
+  return `${ARROWS[i]} ${dist.toFixed(1)}`;
+}
+
+// 順位表に出す記録。遊びごとに単位が違う(釣りは cm、竜は生き残った時間)
+function meetScore(c, r) {
+  if (c.kind === 'dragonhunt') {
+    return r.alive
+      ? '<b>逃げきり</b>'
+      : `<b>${(r.ms / 1000).toFixed(1)}秒</b>`;
+  }
+  return `<b>${r.cm}cm <small>(${r.count}匹)</small></b>`;
 }
 
 // 大会中ずっと出る細いバー(残り時間と自分の記録)
@@ -954,14 +990,20 @@ function renderMeetBar() {
     el.innerHTML = tops.length === 0
       ? '🏆 記録なし'
       : tops.length === 1
-      ? `🏆 ${seatIcon(tops[0].seat)} ${seatName(tops[0].seat)} <b>${tops[0].cm}cm</b>`
-      : `🏆 ${tops.map((r) => seatIcon(r.seat)).join('')} 同率1位 <b>${tops[0].cm}cm</b>`;
+      ? `🏆 ${seatIcon(tops[0].seat)} ${seatName(tops[0].seat)} ${meetScore(c, tops[0])}`
+      : `🏆 ${tops.map((r) => seatIcon(r.seat)).join('')} 同率1位 ${meetScore(c, tops[0])}`;
     el.classList.remove('hurry');
     return;
   }
   el.classList.toggle('hurry', c.remain <= 30000);
+  const alive = c.rank.filter((r) => r.alive).length;
+  const mine = c.kind === 'dragonhunt'
+    ? (me?.alive
+      ? ` 🐉 <b>${dragonArrow(c.dragon)}</b> のこり${alive}人`
+      : ' 💀 つかまった')
+    : (me ? ` 🎣 ${me.cm}cm(${me.place}位/${c.rank.length}人)` : ' 観戦中');
   el.innerHTML = `<span class="t">⏱ ${mmss(c.remain)}</span>`
-    + (me ? ` 🎣 ${me.cm}cm(${me.place}位/${c.rank.length}人)` : ' 観戦中');
+    + (me ? mine : ' 観戦中');
 }
 
 // 受付のそばで開くパネル
@@ -983,8 +1025,8 @@ function renderContestPanel() {
       // メダルは並び順ではなく順位で出す。同率なら 🥇 が2つ並ぶ
       ? c.rank.map((r) => `<div class="${r.seat === seat ? 'me' : ''}">
           <span>${['🥇', '🥈', '🥉'][r.place - 1] ?? `${r.place}.`} ${seatIcon(r.seat)} ${seatName(r.seat)}</span>
-          <b>${r.cm}cm <small>(${r.count}匹)</small></b></div>`).join('')
-      : '<div>だれも釣れませんでした</div>';
+          ${meetScore(c, r)}</div>`).join('')
+      : `<div>${c.kind === 'dragonhunt' ? 'だれも出ませんでした' : 'だれも釣れませんでした'}</div>`;
     // 新しく取った実績。ここで出さないと、戦績画面を開くまで気づけない
     const got = meetUnlocked.map(achievementById).filter(Boolean)
       .map((a) => `<div class="meet-ach">🎉 実績を解除しました
@@ -995,7 +1037,7 @@ function renderContestPanel() {
   }
   if (c.phase === 'running') {
     el.innerHTML = `<h4>${meet.title}(開催中)</h4>
-      <div class="note">${meet.hint}残り ${mmss(c.remain)}</div>`;
+      <div class="note">${meet.hint}<br>残り ${mmss(c.remain)}</div>`;
     return;
   }
 
@@ -1006,8 +1048,7 @@ function renderContestPanel() {
   const canStart = joined && c.entries.length >= c.minPlayers;
   el.innerHTML = `<h4>${meet.title} 受付</h4>
     <div class="who">${who}</div>
-    <div class="note">${Math.floor(c.total / 60000)}分。${meet.hint}<br>
-      ガラクタは0cmです。</div>
+    <div class="note">${Math.round(c.total / 1000)}秒。${meet.hint}</div>
     <div class="row">
       <button data-act="meet-${joined ? 'leave' : 'enter'}">${joined ? 'エントリーを取り消す' : 'エントリーする'}</button>
       ${canStart ? '<button class="primary" data-act="meet-start">はじめる</button>' : ''}
