@@ -1146,19 +1146,22 @@ export function makeDragon() {
   jaw.position.set(0, -0.055, 0.09);
   jaw.rotation.x = 0.18; // わずかに開いた口
   // 角(後方へ反る2本)
+  const eyes = [];
   for (const sx of [-1, 1]) {
     const horn = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.16, 5), boneMat);
     horn.position.set(sx * 0.05, 0.07, -0.05);
     horn.rotation.x = -2.35;
     horn.rotation.z = sx * 0.25;
     head.add(horn);
-    // 目(発光)
+    // 目(発光)。左右で別の材質にしておく ── 眠っている竜は目を閉じるので、
+    // 片方だけ書き換えたいことがある(材質を共有すると両目が道連れになる)
     const eye = new THREE.Mesh(
       new THREE.SphereGeometry(0.018, 6, 6),
       new THREE.MeshBasicMaterial({ color: 0xffcc33 }),
     );
     eye.position.set(sx * 0.055, 0.015, 0.055);
     head.add(eye);
+    eyes.push(eye);
   }
   // 口元の熾火(かすかな光)
   const ember = new THREE.Mesh(
@@ -1233,6 +1236,10 @@ export function makeDragon() {
   // (眠る・目を覚ます・こちらを見る)。基準の姿勢も一緒に覚えておく。
   g.userData.head = head;
   g.userData.headRest = { x: head.rotation.x, y: head.rotation.y, z: head.position.z };
+  // 目と口元の熾火。眠っている竜は「灯が消えている」ので、翼だけでなく
+  // ここも一緒に落とす ── 遠くからだと、翼の形より灯のほうがよく見える
+  g.userData.eyes = eyes;
+  g.userData.ember = ember;
   g.scale.setScalar(1.7);
   return g;
 }

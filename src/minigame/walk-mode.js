@@ -65,6 +65,18 @@ const lerp = (a, b, k) => a + (b - a) * k;
 const WING_FOLD = { x: -0.15, y: 1.9, z: 0.25, hand: -2.9 };
 const WING_OPEN = { x: -Math.PI * 0.30, y: 0.35, z: 0.31, hand: 0 };
 
+// 眠っている竜の目。**灯が消える**のがいちばん遠くまで届く合図で、
+// 翼の形は近づかないと分からない。閉じた瞼は「潰した球 + 体と同じ暗い色」で、
+// 光る点が消えて顔に一本の線が残る。
+const EYE_SHUT = 0.16;              // 閉じたときの縦の潰し具合
+const EYE_DARK = new THREE.Color(0x5e1512); // 眠っている目(竜の暗いほうの体色)
+const EYE_LIT = new THREE.Color(0xffcc33);  // 起きている目
+const EMBER_SLEEP = 0.10;           // 口元の熾火。眠っていてもわずかに残す
+const EMBER_WAKE = 0.9;
+// まばたき。起きているときだけ、ときどき。生きている合図はこれがいちばん安い
+const BLINK_EVERY = 4200;           // ms
+const BLINK_MS = 150;
+
 // 釣っている間のカメラ。竿は右手(モデルの +X 側)なので、そちらへ回り込むと
 // 竿と糸が本人に重ならない。
 const FISH_YAW = -0.75;     // 本人の向きからどれだけ横へ回り込むか
@@ -189,6 +201,9 @@ export class WalkMode {
       wingY: (this.nestMesh.userData.wings ?? []).map((w) => w.rotation.y),
       wingZ: (this.nestMesh.userData.wings ?? []).map((w) => w.rotation.z),
       handZ: (this.nestMesh.userData.wingHands ?? []).map((h) => h.rotation.z),
+      eyes: (this.nestMesh.userData.eyes ?? [])
+        .map((e) => ({ y: e.scale.y, color: e.material.color.clone() })),
+      ember: this.nestMesh.userData.ember?.material.opacity ?? null,
     } : null;
     this.species = speciesById(look);
     this.walker = new Walker(
@@ -401,6 +416,22 @@ export class WalkMode {
       head.rotation.y = rest.y + Math.max(-1.1, Math.min(1.1, rel)) * k;
     }
 
+    // 目。眠っているうちは瞼を下ろして灯を落とし、起きると点る。
+    // 起きているあいだは、ときどきまばたきする。
+    const blinkT = t % BLINK_EVERY;
+    const blink = blinkT < BLINK_MS ? Math.sin((blinkT / BLINK_MS) * Math.PI) : 0;
+    const open = lerp(EYE_SHUT, 1, k) * (1 - blink * k);
+    for (const eye of m.userData.eyes ?? []) {
+      eye.scale.y = open;
+      eye.material.color.copy(EYE_DARK).lerp(EYE_LIT, k * (1 - blink));
+    }
+    const ember = m.userData.ember;
+    // 熾火は呼吸に合わせて息づく(眠っていても消えてはいない)
+    if (ember) {
+      const puff = 1 + Math.sin(t / (1800 - k * 900)) * 0.35;
+      ember.material.opacity = lerp(EMBER_SLEEP, EMBER_WAKE, k) * puff;
+    }
+
     // 巣まで登ったか(入った/出たときだけ知らせる)
     if (onNest !== this.atNest) {
       this.atNest = onNest;
@@ -424,6 +455,17 @@ export class WalkMode {
     // 手首は盤側が触らない ── 戻し忘れると、対戦の画面に翼を畳んだ竜が残る
     for (const [i, hand] of (m.userData.wingHands ?? []).entries()) {
       hand.rotation.z = this.nestRest.handZ[i] ?? hand.rotation.z;
+    }
+    // 目と熾火も盤側は書き直さない。消したまま返すと、対戦の画面に
+    // 目の落ちた竜が座り続ける
+    for (const [i, eye] of (m.userData.eyes ?? []).entries()) {
+      const rest = this.nestRest.eyes[i];
+      if (!rest) continue;
+      eye.scale.y = rest.y;
+      eye.material.color.copy(rest.color);
+    }
+    if (m.userData.ember && this.nestRest.ember != null) {
+      m.userData.ember.material.opacity = this.nestRest.ember;
     }
     const head = m.userData.head;
     if (head) {
