@@ -751,6 +751,14 @@
   .meet-rank div { display: flex; justify-content: space-between; gap: 10px; }
   .meet-rank .me { color: var(--accent2); font-weight: 700; }
   .meet-rank b { font-variant-numeric: tabular-nums; }
+  /* その回で解除した実績。順位表の下に1行だけ足す */
+  .meet-ach {
+    font-size: 12.5px; text-align: center; line-height: 1.6;
+    padding: 6px 8px; border-radius: 10px;
+    background: rgba(255, 209, 102, 0.14);
+    border: 1px solid rgba(255, 209, 102, 0.4);
+  }
+  .meet-ach small { display: block; color: var(--dim); }
 
   /* 釣り図鑑(島を歩く中から開く)。HUD より上に出す */
   #walk-book {
