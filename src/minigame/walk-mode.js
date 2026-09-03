@@ -170,10 +170,11 @@ export class WalkMode {
     this.nestWake = 0;
     // 借り物なので、出るときに返せるよう元の姿勢を覚えておく
     this.nestRest = this.nestMesh ? {
-      y: this.nestMesh.position.y,
+      pos: this.nestMesh.position.clone(),
       rotY: this.nestMesh.rotation.y,
       head: { ...(this.nestMesh.userData.headRest ?? { x: 0, y: 0 }) },
       wingX: (this.nestMesh.userData.wings ?? []).map((w) => w.rotation.x),
+      wingZ: (this.nestMesh.userData.wings ?? []).map((w) => w.rotation.z),
     } : null;
     this.species = speciesById(look);
     this.walker = new Walker(
@@ -334,15 +335,28 @@ export class WalkMode {
     this.nestWake += ((onNest ? 1 : 0) - this.nestWake) * smooth(onNest ? 1.6 : 0.5, dt);
     const k = this.nestWake;
 
+    // **居場所は動かさない。** 盤の「暴走」の飛翔アニメーション
+    // (board3d の robberAnim)が動き出すと、島を歩いている最中に竜が
+    // 横へ流れていってしまう。島に入ったときの場所に留める ──
+    // 巣の中心ではなく**盤が置いた場所**に留めること(盤は駒が見やすいように
+    // 少し手前へずらして置いている。中心へ寄せると見た目が変わる)。
+    m.position.x = this.nestRest.pos.x;
+    m.position.z = this.nestRest.pos.z;
     // 息づかい。眠っているときはゆっくり深く、起きると浅く速くなる
     const breath = Math.sin(t / (1800 - k * 900)) * (0.014 - k * 0.006);
     m.position.y = this.ground(m.position.x, m.position.z).y + breath;
 
-    // 翼。眠っている間は畳んでいて、起きると半分ひらく
+    // 翼。眠っている間は畳んでいて、起きると半分ひらく。
+    // **z(羽ばたき)も必ず書く。** 盤の _tickRobber は毎フレーム z を
+    // 動かしていて、書かずにおくと**寝ている竜が羽ばたき続ける**
+    // ── 畳んだ x と合わさって、翼を広げているように見えていた。
     for (const [i, wing] of (m.userData.wings ?? []).entries()) {
+      const side = i === 0 ? 1 : -1;
       const folded = -0.24;
       const open = -Math.PI * 0.30 + Math.sin(t / 900 + i * Math.PI) * 0.05;
       wing.rotation.x = folded + (open - folded) * k;
+      // 眠っている間は閉じたまま。起きたら、ゆっくりとした呼吸ぶんだけ動く
+      wing.rotation.z = side * (0.04 + k * (0.31 + Math.sin(t / 700 + i * Math.PI) * 0.06));
     }
 
     // 起きたら体ごとこちらへ向き直る。
@@ -382,10 +396,11 @@ export class WalkMode {
     const m = this.nestMesh;
     if (!m || !this.nestRest) return;
     m.visible = true;
-    m.position.y = this.nestRest.y;
+    m.position.copy(this.nestRest.pos);
     m.rotation.y = this.nestRest.rotY;
     for (const [i, wing] of (m.userData.wings ?? []).entries()) {
       wing.rotation.x = this.nestRest.wingX[i] ?? wing.rotation.x;
+      wing.rotation.z = this.nestRest.wingZ[i] ?? wing.rotation.z;
     }
     const head = m.userData.head;
     if (head) {
