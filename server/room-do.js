@@ -278,10 +278,13 @@ export class RoomDO {
       // 時間切れと竜の一歩はここで見る。誰も動いていなくても進む必要がある
       if (this.contest?.tick()) { this.broadcastContest(); this.saveContest(); }
       n += 1;
-      // 竜は動き続けるので毎 tick 配る。釣り大会は表が変わらないので、
-      // 秒 10 回も配ると通信のほとんどがそれになる ── 毎秒だけにする。
+      // 竜は**走っている間だけ**動き続けるので、そこだけ毎 tick 配る。
+      // 表が変わらない受付や結果まで秒 10 回配ると、通信の無駄なだけでなく、
+      // 受け取った側が受付のパネルを秒 10 回描き直すことになる
+      // (実機の指では押せなくなる。src/render/dom.js を参照)。
       const busy = this.contest && this.contest.phase !== 'idle';
-      if (busy && (this.contest.kind === 'dragonhunt' || n % 10 === 0)) this.broadcastContest();
+      const live = busy && this.contest.kind === 'dragonhunt' && this.contest.phase === 'running';
+      if (busy && (live || n % 10 === 0)) this.broadcastContest();
 
       if (!people.length) {
         // 開催中は、誰も歩いていなくても止めない

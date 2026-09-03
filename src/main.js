@@ -36,6 +36,7 @@ import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-r
 import { avatarSvg } from './render/avatars.js';
 import { renderHUD, RES_ICON, COM_ICON, setHumanSeat, setPlayerTitle } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
+import { setHTML } from './render/dom.js';
 import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
@@ -987,11 +988,11 @@ function renderMeetBar() {
   if (c.phase === 'result') {
     // 同率優勝がありうる。並び順の1行目だけを出すと、片方が消える
     const tops = c.rank.filter((r) => r.place === 1);
-    el.innerHTML = tops.length === 0
+    setHTML(el, tops.length === 0
       ? '🏆 記録なし'
       : tops.length === 1
       ? `🏆 ${seatIcon(tops[0].seat)} ${seatName(tops[0].seat)} ${meetScore(c, tops[0])}`
-      : `🏆 ${tops.map((r) => seatIcon(r.seat)).join('')} 同率1位 ${meetScore(c, tops[0])}`;
+      : `🏆 ${tops.map((r) => seatIcon(r.seat)).join('')} 同率1位 ${meetScore(c, tops[0])}`);
     el.classList.remove('hurry');
     return;
   }
@@ -1002,8 +1003,7 @@ function renderMeetBar() {
       ? ` 🐉 <b>${dragonArrow(c.dragon)}</b> のこり${alive}人`
       : ' 💀 つかまった')
     : (me ? ` 🎣 ${me.cm}cm(${me.place}位/${c.rank.length}人)` : ' 観戦中');
-  el.innerHTML = `<span class="t">⏱ ${mmss(c.remain)}</span>`
-    + (me ? mine : ' 観戦中');
+  setHTML(el, `<span class="t">⏱ ${mmss(c.remain)}</span>` + (me ? mine : ' 観戦中'));
 }
 
 // 受付のそばで開くパネル
@@ -1018,7 +1018,7 @@ function renderContestPanel() {
   // 受付から離れたら閉じる。ただし結果だけは、その場に居なくても見せたい
   const show = !!meet && seat != null && (atDesk || c.phase === 'result');
   el.classList.toggle('on', show);
-  if (!show) { el.innerHTML = ''; return; }
+  if (!show) { setHTML(el, ''); return; }
 
   if (c.phase === 'result') {
     const rows = c.rank.length
@@ -1031,13 +1031,13 @@ function renderContestPanel() {
     const got = meetUnlocked.map(achievementById).filter(Boolean)
       .map((a) => `<div class="meet-ach">🎉 実績を解除しました
         <b>${a.icon} ${a.name}</b><small>称号「${a.title}」</small></div>`).join('');
-    el.innerHTML = `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>${got}
-      <div class="note">受付でもう一度エントリーできます</div>`;
+    setHTML(el, `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>${got}
+      <div class="note">受付でもう一度エントリーできます</div>`);
     return;
   }
   if (c.phase === 'running') {
-    el.innerHTML = `<h4>${meet.title}(開催中)</h4>
-      <div class="note">${meet.hint}<br>残り ${mmss(c.remain)}</div>`;
+    setHTML(el, `<h4>${meet.title}(開催中)</h4>
+      <div class="note">${meet.hint}<br>残り ${mmss(c.remain)}</div>`);
     return;
   }
 
@@ -1046,14 +1046,17 @@ function renderContestPanel() {
     ? c.entries.map((x) => `<span>${seatIcon(x)} ${seatName(x)}</span>`).join('')
     : '<span class="note">まだ誰もいません</span>';
   const canStart = joined && c.entries.length >= c.minPlayers;
-  el.innerHTML = `<h4>${meet.title} 受付</h4>
+  // ここは押せるボタンが入る唯一の場面。setHTML で「変わったときだけ」書く
+  // ことに意味がある ── 受付の間もサーバーは表を配り続けているので、
+  // 毎回作り直すとボタンの節点が入れ替わって、指のタップが消える。
+  setHTML(el, `<h4>${meet.title} 受付</h4>
     <div class="who">${who}</div>
     <div class="note">${Math.round(c.total / 1000)}秒。${meet.hint}</div>
     <div class="row">
       <button data-act="meet-${joined ? 'leave' : 'enter'}">${joined ? 'エントリーを取り消す' : 'エントリーする'}</button>
       ${canStart ? '<button class="primary" data-act="meet-start">はじめる</button>' : ''}
     </div>
-    ${joined && !canStart ? `<div class="note">あと${c.minPlayers - c.entries.length}人ではじめられます</div>` : ''}`;
+    ${joined && !canStart ? `<div class="note">あと${c.minPlayers - c.entries.length}人ではじめられます</div>` : ''}`);
 }
 
 function renderContest() {

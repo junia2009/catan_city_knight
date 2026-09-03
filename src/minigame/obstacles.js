@@ -14,11 +14,17 @@ export const WALKER_RADIUS = sc(0.10); // 棒人間の太さ(肩幅ぶん。scal
 // 中心に受付を建てると、寄れる隙間(受付の縁〜手の届く距離)が木で埋まって
 // 誰も受付にたどり着けなくなる ── 実際そうなっていた。
 // 受付は「木を片付けた広場」に立っている、という扱いにする。
+//
+// **見るのは中心の距離ではなく、はみ出しているかどうか**(距離 - 半径)。
+// 中心で切ると、広場のすぐ外に立った太い木が枝を広場の中まで伸ばしたまま
+// 残る ── 半径 0.18 の木は中心が 0.52 でも 0.34 まで届くので、
+// 受付の手前で行き止まりになる(実際そうなっていた)。
 export function clearAround(obstacles, at, r) {
   const kept = [];
   const cleared = [];
   for (const o of obstacles) {
-    (Math.hypot(o.x - at.x, o.z - at.z) <= r ? cleared : kept).push(o);
+    const edge = Math.hypot(o.x - at.x, o.z - at.z) - (o.r ?? 0);
+    (edge <= r ? cleared : kept).push(o);
   }
   return { kept, cleared };
 }
