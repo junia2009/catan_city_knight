@@ -1,4 +1,7 @@
-// 島の中心に立つ「釣り大会の受付」。
+// 島の中心に立つ「集まりの受付」。
+//
+// 何の受付が立つかは島の種類で決まる(minigame/meets.js)。看板の文言は
+// その表から渡ってくるので、ここには特定の遊びの名前を書かない。
 //
 // ここへ寄るとエントリーできる。目印なので、遠くからでも見えるように
 // 旗を高く上げてある ── 島は木や山で見通しが悪く、低い台だけだと
@@ -8,22 +11,21 @@
 // ここは見た目と「近いかどうか」だけ。
 
 import * as THREE from 'three';
+import { WALK_SCALE } from './scale.js';
 
-// 台の大きさ。棒人間(身長 0.45 ほど)の腰くらいに来る高さ
+// 台の大きさ。棒人間の腰くらいに来る高さ(縮尺を掛ける前の素の値)
 const TOP_Y = 0.19;
 const HALF = 0.17;      // 台の横幅の半分
 const DEPTH = 0.10;
-export const DESK_RADIUS = 0.2;   // ぶつかる大きさ
-// この距離まで近づいたらエントリーできる。
-// 降り立つ輪(0.62)より内側にしてある ── 同じにすると、島に着いた瞬間から
-// パネルが開いていて、自分から寄った感じがしない。
-// 台にはぶつかるので、実際に立てるのは 0.36 あたりから。
-export const DESK_REACH = 0.5;
+// 見た目の寸法は素のまま書いて、いちばん外の入れ物に縮尺を1回だけ掛ける
+// (scale.js)。ぶつかる大きさと「どこまで近づけるか」は ground.js にある
+// ── 降り立つ輪との前後関係を1か所で見たいので、寸法はあちらにまとめた。
 
 // 看板の文字。canvas に描いて板に貼る(フォントを積まずに済む)。
+// 文言は島ごとに違う(minigame/meets.js の sign)ので、外から受け取る。
 // BoxGeometry の UV は面ごとに「外から見て正しい向き」に張られているので、
 // 表裏どちらの面に貼っても鏡文字にはならない(自前で反転すると逆に鏡になる)。
-function makeSignFace() {
+function makeSignFace([big, small]) {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 128;
@@ -34,17 +36,18 @@ function makeSignFace() {
   c.font = 'bold 46px system-ui, sans-serif';
   c.textAlign = 'center';
   c.textBaseline = 'middle';
-  c.fillText('つり大会', 128, 52);
+  c.fillText(big, 128, 52);
   c.font = 'bold 26px system-ui, sans-serif';
-  c.fillText('受付', 128, 96);
+  c.fillText(small, 128, 96);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
 }
 
-export function makeDesk(scene, x, z, groundY) {
+export function makeDesk(scene, x, z, groundY, meet) {
   const g = new THREE.Group();
   g.position.set(x, groundY, z);
+  g.scale.setScalar(WALK_SCALE);
 
   const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a32, roughness: 0.85 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x4a3a24, roughness: 0.8 });
@@ -79,7 +82,7 @@ export function makeDesk(scene, x, z, groundY) {
   // 看板。無地の板だと「ただの台」に見えるので、文字を焼き込む。
   // 受付は島の真ん中に立っていて、どちらから来るか分からない。表裏の
   // 両面に貼って、反対側から来た人にも「何の台か」が読めるようにする。
-  const faces = [board, board, board, board, makeSignFace(), makeSignFace()];
+  const faces = [board, board, board, board, makeSignFace(meet.sign), makeSignFace(meet.sign)];
   const sign = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.015), faces);
   sign.position.set(-HALF + 0.12, 0.40, -DEPTH * 0.3);
   sign.castShadow = true;

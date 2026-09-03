@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import {
   makeGround, spawnPoint, fishingSpots, spotNear, hexCenter,
+  DESK_RADIUS, DESK_REACH,
 } from './ground.js';
 import { makeBlocker } from './obstacles.js';
 import { MAX_DT, SINK_DEPTH, WATER_Y } from './motion.js';
@@ -20,7 +21,9 @@ import { RemoteView, WALK_COLORS } from './remote-view.js';
 import { ST } from './remote-st.js';
 import { emoteById } from './emote.js';
 import { speciesById, DEFAULT_SPECIES } from './species.js';
-import { makeDesk, DESK_RADIUS, DESK_REACH } from './desk.js';
+import { makeDesk } from './desk.js';
+import { meetFor } from './meets.js';
+import { WALK_SCALE, s as sc } from './scale.js';
 
 // フレームレートに依らない追従係数。
 // dt を直に掛けると、低フレームでは 1 を超えて「瞬間移動」になる。
@@ -42,16 +45,19 @@ const SEA_Y = 0.02;         // board3d.js と同じ水面の高さ
 // 釣っている間のカメラ。竿は右手(モデルの +X 側)なので、そちらへ回り込むと
 // 竿と糸が本人に重ならない。
 const FISH_YAW = -0.75;     // 本人の向きからどれだけ横へ回り込むか
-const FISH_PITCH = 0.30;    // 見下ろす角度
-const FISH_DIST = 1.9;
-const FISH_AIM = 0.42;      // 本人から浮きのほうへ、どれだけ先を見るか
+const FISH_PITCH = 0.30;    // 見下ろす角度(角度は縮尺と無関係)
+const FISH_DIST = sc(1.9);
+const FISH_AIM = sc(0.42);  // 本人から浮きのほうへ、どれだけ先を見るか
 
 // 散策部屋: 自分の位置を送る間隔(サーバーの配る間隔と揃える)
 const SEND_MS = 100;
 // 動きがこれ以下なら送らない。立ち止まっている人は通信ゼロになる
 const SEND_MOVE = 0.01;
 const SEND_TURN = 0.02;
-const BLOCK_MIN_HEIGHT = 0.15; // これより低い物はまたげる(草・花・畝・砂丘)
+// またげる高さは脚の長さの話なので縮尺を掛ける ── 掛けないと、小さく
+// なったのに今までどおり草も畝もまたげてしまう。
+const BLOCK_MIN_HEIGHT = sc(0.15); // これより低い物はまたげる(草・花・畝・砂丘)
+// こちらは「タイルより大きいか」を見るので盤の寸法。縮尺は掛けない。
 const BLOCK_MAX_RADIUS = 0.5;  // これより大きい物は地形そのもの(タイル・海・桟橋)
 
 // シーンに置かれている物から、ぶつかる物の一覧を作る。
@@ -94,17 +100,34 @@ export class WalkMode {
   constructor(board3d, state, fishSeed = Date.now() >>> 0, seat = null, look = DEFAULT_SPECIES) {
     this.b = board3d;
     this.ground = makeGround(state);
+    // 港の看板は「盤を上から見たときの目印」の大きさで作られている。
+    // 棒人間を縮めたぶんカメラも寄るので、そのままだと隣に立った看板が
+    // 画面を埋めて、竿も浮きも見えなくなる。歩いている間だけ小さくする。
+    // 障害物を拾う前に縮めるので、ぶつかる大きさも一緒に小さくなる。
+    this.signs = [];
+    board3d.staticGroup.traverse((o) => {
+      if (!o.userData?.portSign) return;
+      this.signs.push({ o, scale: o.scale.clone() });
+      o.scale.multiplyScalar(WALK_SCALE);
+    });
     this.obstacles = collectObstacles(board3d);
     this.seat = seat;
 
-    // 釣り大会の受付。島の中心(みんなが降り立つところ)に立てる。
-    // 席ごとの立ち位置は中心から輪の上へずらしてあるので、台とは重ならない。
-    const home = spawnPoint(state);
-    this.deskAt = { x: home.x, z: home.y };
-    this.desk = makeDesk(board3d.scene, home.x, home.y, this.ground(home.x, home.y).y);
-    // 台にもぶつかるようにする。collectObstacles はシーンを見て集めるので、
-    // あとから足したものは自分で入れる必要がある。
-    this.obstacles.push({ x: home.x, z: home.y, r: DESK_RADIUS, h: 0.62 });
+    // 集まりの受付。島の中心(みんなが降り立つところ)に立てる。
+    // 島の種類ごとに何が開かれるかが違い、何も無い島には受付も立たない
+    // (一覧は minigame/meets.js。サーバーも同じ表で弾く)。
+    this.meet = meetFor(state.mode);
+    this.deskAt = null;
+    this.desk = null;
+    if (this.meet) {
+      // 席ごとの立ち位置は中心から輪の上へずらしてあるので、台とは重ならない
+      const home = spawnPoint(state);
+      this.deskAt = { x: home.x, z: home.y };
+      this.desk = makeDesk(board3d.scene, home.x, home.y, this.ground(home.x, home.y).y, this.meet);
+      // 台にもぶつかるようにする。collectObstacles はシーンを見て集めるので、
+      // あとから足したものは自分で入れる必要がある。
+      this.obstacles.push({ x: home.x, z: home.y, r: DESK_RADIUS, h: sc(0.62) });
+    }
     this.atDesk = false;
     this.onDesk = null;      // 受付に入った/出た
     this.species = speciesById(look);
@@ -135,8 +158,10 @@ export class WalkMode {
     this.input = { x: 0, y: 0 };
     this.keys = new Set();
     this.camYaw = 0;
-    this.camPitch = 0.42;
-    this.camDist = 2.1;
+    // 距離だけ縮めるとカメラが地面すれすれまで下りて、手前の地形が画面を
+    // 埋める(縮尺を下げるほどひどくなる)。見下ろす角度も一緒に起こす。
+    this.camPitch = 0.62;
+    this.camDist = sc(2.1);
     this.last = 0;
     this.onRespawn = null;
     this.onJump = null;
@@ -310,7 +335,7 @@ export class WalkMode {
   }
 
   zoom(d) {
-    this.camDist = Math.max(1.2, Math.min(5, this.camDist + d));
+    this.camDist = Math.max(sc(1.2), Math.min(sc(5), this.camDist + d));
   }
 
   _keyInput() {
@@ -348,8 +373,9 @@ export class WalkMode {
     // 姿勢だけ上書きする(位置・地面・カメラは update の結果をそのまま使う)
     this._emoteFrame(dt, moving, r);
 
-    // 受付のそばに来たら知らせる(入った/出たときだけ)
-    const near = r.grounded
+    // 受付のそばに来たら知らせる(入った/出たときだけ)。
+    // 受付の無い島では deskAt が null なので、そもそも近づけない
+    const near = !!this.deskAt && r.grounded
       && Math.hypot(w.x - this.deskAt.x, w.z - this.deskAt.z) < DESK_REACH;
     if (near !== this.atDesk) {
       this.atDesk = near;
@@ -472,8 +498,8 @@ export class WalkMode {
 
     // 沈むにつれてカメラを本人の高さまで下ろす。見下ろしたままだと
     // カメラが水面より下に来るのが最後の一瞬だけになり、水中が見えない。
-    const dive = Math.max(0, Math.min(1, -my / 0.6));
-    const eye = (0.42 + h) * (1 - dive) + 0.16 * dive;
+    const dive = Math.max(0, Math.min(1, -my / 0.6));  // 沈む深さは盤の寸法
+    const eye = (sc(0.42) + h) * (1 - dive) + sc(0.16) * dive;
 
     const want = new THREE.Vector3(
       w.x - Math.sin(this.camYaw) * flat,
@@ -482,7 +508,7 @@ export class WalkMode {
     );
     if (snap) cam.position.copy(want);
     else cam.position.lerp(want, smooth(9, dt));
-    cam.lookAt(w.x, groundY + lift + 0.36 * (1 - dive) + 0.1 * dive, w.z);
+    cam.lookAt(w.x, groundY + lift + sc(0.36) * (1 - dive) + sc(0.1) * dive, w.z);
   }
 
   // いま立っているヘックスの地形(HUD に出す)
@@ -559,7 +585,8 @@ export class WalkMode {
 
   dispose() {
     this.b.onFrame = null;
-    this.desk.dispose();
+    for (const { o, scale } of this.signs) o.scale.copy(scale);  // 港の看板を戻す
+    this.desk?.dispose();
     this.walker.dispose();
     this.remoteView.dispose();
     this.fx.dispose();

@@ -5,6 +5,7 @@
 import { RoomCore, IDLE_DISCONNECT_MS } from './room-core.js';
 import { WalkRelay, TICK_MS } from './walk-relay.js';
 import { FishingContest } from './fishing-contest.js';
+import { hasMeet } from '../src/minigame/meets.js';
 
 // CPU / 切断中の席をサーバーが打つときの間合い(ローカル戦の演出と揃える)
 const AUTO_DELAY_MS = 650;
@@ -123,7 +124,9 @@ export class RoomDO {
       this.broadcastLobby();
       // 大会のいまの様子も渡す。変わったときだけ配っていると、あとから
       // 来た人はいつまでも受付を見られない(実際そうなっていた)。
-      if (room.kind === 'walk') this.send(ws, { t: 'contest', contest: this.contest.view() });
+      if (room.kind === 'walk' && hasMeet(room.settings.mode)) {
+        this.send(ws, { t: 'contest', contest: this.contest.view() });
+      }
       if (room.phase === 'playing') this.sendState(ws, res.seat, null);
       this.pumpAuto();
       this.scheduleAlarm(); // 着席したので、ここから放置を見張る
@@ -144,8 +147,16 @@ export class RoomDO {
     }
 
     if (msg.t === 'settings') {
+      const before = room.settings.mode;
       const res = room.setSettings(clientId, msg.settings);
       if (res.error) return this.send(ws, { t: 'error', msg: res.error });
+      // 島を変えると島そのものが別物になる(種も振り直される)。走っている
+      // 大会をそのまま残すと、誰も居ない前の島の順位が配られ続ける。
+      if (room.settings.mode !== before && this.contest.phase !== 'idle') {
+        this.contest = new FishingContest();
+        this.broadcastContest();
+        this.saveContest();
+      }
       this.broadcastLobby();
       return this.save();
     }
@@ -176,6 +187,11 @@ export class RoomDO {
     // 釣り大会。どれも席が要る
     if (msg.t === 'contest') {
       if (room.kind !== 'walk') return;
+      // 受付の無い島では何も開かれない。表(src/minigame/meets.js)は
+      // クライアントと共有しているので、判定が食い違うことはない。
+      if (!hasMeet(room.settings.mode)) {
+        return this.send(ws, { t: 'error', msg: 'この島に受付はありません' });
+      }
       const seat = room.seatOf(clientId);
       if (seat < 0) return;
       const c = this.contest;

@@ -9,6 +9,7 @@
 
 import * as THREE from 'three';
 import { speciesById, DEFAULT_SPECIES } from './species.js';
+import { WALK_SCALE } from './scale.js';
 
 const SKIN = 0xffd9a8;
 const CLOTH = 0x2f6fd0;
@@ -455,6 +456,11 @@ export function makeWalker(color = CLOTH, species = speciesById(DEFAULT_SPECIES)
   if (parts.spikes) hips.add(makeSpikes(accent, p));
   if (parts.belly) hips.add(makeBelly(accent, p));
 
+  // 縮尺は一番外側の入れ物に1回だけ掛ける(scale.js)。
+  // 部位の寸法を1つずつ掛けると必ずどこかを取り残すし、名札や吹き出しも
+  // この入れ物の子なので、まとめて同じ率で縮む。
+  // applyPose は位置と回転しか触らないので、この scale は消えない。
+  g.scale.setScalar(WALK_SCALE);
   return { group: g, hips, chest, head, mouth, arms, legs, rod };
 }
 

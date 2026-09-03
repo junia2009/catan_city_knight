@@ -4,7 +4,9 @@
 // ここも THREE を使わない ── 障害物は {x, z, r} の素の配列で受け取り、
 // 実際に何が置いてあるかを拾うのは walk-mode.js の仕事。
 
-export const WALKER_RADIUS = 0.10; // 棒人間の太さ(肩幅ぶん)
+import { s as sc } from './scale.js';
+
+export const WALKER_RADIUS = sc(0.10); // 棒人間の太さ(肩幅ぶん。scale.js)
 
 // 押し出しの繰り返し回数。木が2本並んだ隙間などで、
 // 1回の押し出しが別の物にめり込むことがあるので数回ならす。

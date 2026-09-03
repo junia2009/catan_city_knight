@@ -40,6 +40,8 @@ import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
 import { contestOutcome } from './minigame/contest.js';
+import { DESK_REACH } from './minigame/ground.js';
+import { meetFor } from './minigame/meets.js';
 import { EMOTES } from './minigame/emote.js';
 import { WALK_SEATS } from './minigame/remote-st.js';
 import { SPECIES, speciesById, cleanSpecies, DEFAULT_SPECIES } from './minigame/species.js';
@@ -305,6 +307,9 @@ function renderWalkLobby(panel, lb, err) {
     <div class="srow"><span>すがた</span>${seg('net-look',
       SPECIES.map((sp) => [String(sp.id), `${sp.icon} ${sp.label}`]), String(myLook), false)}</div>
     <div class="srow"><span>島</span>${seg('net-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師'], ['sea', '⛵航海者']], lb.settings.mode, !host)}</div>
+    <div class="net-note meet-note">${meetFor(lb.settings.mode)
+      ? `🎪 この島では <b>${meetFor(lb.settings.mode).name}</b> が開けます(中心の受付から)`
+      : 'この島に受付はありません。ただ歩いて、港で釣りができます。'}</div>
     <div class="net-status ${online.status}"><span class="dot"></span>${STATUS_JP[online.status] ?? ''}</div>
     ${err}
     <div class="net-note">${host
@@ -966,8 +971,10 @@ function renderContestPanel() {
   // まだ何も届いていないなら「誰もエントリーしていない受付」として扱う
   const c = contest ?? { phase: 'idle', entries: [], rank: [], total: 180000, minPlayers: 2 };
   const seat = mySeat();
+  // 受付の無い島(meets.js に無いもの)ではそもそも何も出さない
+  const meet = walk?.meet ?? null;
   // 受付から離れたら閉じる。ただし結果だけは、その場に居なくても見せたい
-  const show = seat != null && (atDesk || c.phase === 'result');
+  const show = !!meet && seat != null && (atDesk || c.phase === 'result');
   el.classList.toggle('on', show);
   if (!show) { el.innerHTML = ''; return; }
 
@@ -987,8 +994,8 @@ function renderContestPanel() {
     return;
   }
   if (c.phase === 'running') {
-    el.innerHTML = `<h4>🎣 大会中</h4>
-      <div class="note">港で釣って、合計の長さを競います。残り ${mmss(c.remain)}</div>`;
+    el.innerHTML = `<h4>${meet.title}(開催中)</h4>
+      <div class="note">${meet.hint}残り ${mmss(c.remain)}</div>`;
     return;
   }
 
@@ -997,9 +1004,9 @@ function renderContestPanel() {
     ? c.entries.map((x) => `<span>${seatIcon(x)} ${seatName(x)}</span>`).join('')
     : '<span class="note">まだ誰もいません</span>';
   const canStart = joined && c.entries.length >= c.minPlayers;
-  el.innerHTML = `<h4>🎣 釣り大会 受付</h4>
+  el.innerHTML = `<h4>${meet.title} 受付</h4>
     <div class="who">${who}</div>
-    <div class="note">${Math.floor(c.total / 60000)}分で、釣った魚の合計の長さを競います。<br>
+    <div class="note">${Math.floor(c.total / 60000)}分。${meet.hint}<br>
       ガラクタは0cmです。</div>
     <div class="row">
       <button data-act="meet-${joined ? 'leave' : 'enter'}">${joined ? 'エントリーを取り消す' : 'エントリーする'}</button>
@@ -2829,7 +2836,9 @@ window.hexDebug = {
   // 釣り大会(E2E 用)
   getContest: () => contest,
   atDesk: () => atDesk,
-  deskAt: () => (walk ? { ...walk.deskAt } : null),
+  // reach も返す。E2E が「どれだけ寄れば届くか」を決め打ちすると、
+  // 縮尺(minigame/scale.js)を変えたときにそこだけ落ちる。
+  deskAt: () => (walk?.deskAt ? { ...walk.deskAt, reach: DESK_REACH } : null),
   meet: (action, extra) => net?.contest(action, extra),
   getWalkEmote: () => (walk?.emote ? { ...walk.emote } : null),
   // 島を歩く・釣り(E2E用)。港まで歩かせずに試せるようにする
@@ -2854,6 +2863,7 @@ window.hexDebug = {
     code: online.code,
     lobby: online.lobby,
     isHost: isHost(),
+    error: online.error ?? null,
   }),
   // あそびかたデモ(E2E用)
   startDemo: (id) => startDemo(id),

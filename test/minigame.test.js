@@ -112,7 +112,10 @@ test('walk: 散策部屋の開始地点は席ごとに離れていて、どれ�
       assert.ok(g(p.x, p.y).ok, `${mode}: 席 ${seat} の開始地点が陸でない`);
       for (const q of seen) {
         const d = Math.hypot(p.x - q.x, p.y - q.y);
-        assert.ok(d > 0.3, `${mode}: 席が近すぎる(${d.toFixed(2)})`);
+        // 「離れている」は棒人間の太さに対しての話。絶対値で書くと、
+        // 縮尺(scale.js)を変えたときに中身は正しいのにここだけ落ちる。
+        const min = WALKER_RADIUS * 3;
+        assert.ok(d > min, `${mode}: 席が近すぎる(${d.toFixed(2)} ≦ ${min.toFixed(2)})`);
       }
       seen.push(p);
     }
@@ -290,20 +293,22 @@ test('walk: 低い物は跳び越えられ、高い物は跳んでも越えら�
   const ground = makeGround(s);
   const start = spawnPoint(s);
 
+  // 距離も高さも「跳べる高さ・自分の太さ」に対しての比で書く。
+  // 絶対値で書くと、縮尺(scale.js)を変えたときに中身は正しいのに落ちる。
   const tryPass = (h) => {
-    const o = { x: start.x, z: start.y + 0.8, r: 0.2, h };
+    const o = { x: start.x, z: start.y + JUMP_HEIGHT * 1.6, r: WALKER_RADIUS * 2, h };
     const w = new WalkerMotion(ground, makeBlocker([o]));
     w.setPosition(start.x, start.y);
     for (let i = 0; i < 200; i++) {
       // 障害物の手前で踏み切る
-      if (Math.abs(w.pos.z - (o.z - 0.55)) < 0.03 && w.grounded) w.jump();
+      if (Math.abs(w.pos.z - (o.z - JUMP_HEIGHT * 1.1)) < 0.03 && w.grounded) w.jump();
       w.update(1 / 60, { x: 0, y: 1 }, 0);
     }
     return w.pos.z > o.z + o.r; // 向こう側へ抜けたか
   };
 
-  assert.equal(tryPass(0.2), true, '低い物を跳び越えられない');
-  assert.equal(tryPass(1.2), false, '高い物を跳んで通り抜けてしまう');
+  assert.equal(tryPass(JUMP_HEIGHT * 0.4), true, '低い物を跳び越えられない');
+  assert.equal(tryPass(JUMP_HEIGHT * 2.4), false, '高い物を跳んで通り抜けてしまう');
 });
 
 // フレームが出ない端末でも同じ速さで動くこと。
