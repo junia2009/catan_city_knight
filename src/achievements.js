@@ -234,6 +234,21 @@ export const ACHIEVEMENTS = [
     icon: '⛵', tier: 'gold', mode: 'sea',
     mark: 'ships', goal: 13,
   },
+
+  // ---- 散策部屋(釣り大会)----
+  //
+  // 対戦の実績と違って、解除の合図は終局ではなく大会の結果発表。判定材料も
+  // marks ではないので、checkMeet を持たせて別の入口(unlockedByMeet)で見る。
+  // ここに check も mark も書かないので、対戦の締めでは passes() が false に
+  // なって外れる ── 対戦を1戦終えたら釣り大会の実績が付いた、を防ぐ。
+  {
+    id: 'meet-win',
+    name: '大会を制す',
+    desc: '散策部屋の釣り大会で優勝する',
+    title: '釣り名人',
+    icon: '🎣', tier: 'silver', scope: '散策部屋',
+    checkMeet: ({ meet }) => meet.won > 0,
+  },
 ];
 
 // 数値ものの判定は共通(check を書かなくてよい)
@@ -256,6 +271,27 @@ export function unlockedBy(ctx) {
     }
   }
   return out;
+}
+
+// 釣り大会のほうの判定。対戦の締めとは別の入口にしてある(上のコメント参照)。
+// ctx は { meet } ── 大会の累計( played / won / bestCm )。
+export function unlockedByMeet(ctx) {
+  const out = [];
+  for (const a of ACHIEVEMENTS) {
+    if (!a.checkMeet) continue;
+    try {
+      if (a.checkMeet(ctx)) out.push(a.id);
+    } catch {
+      // この実績だけ見送る
+    }
+  }
+  return out;
+}
+
+// 実績の「どこで取るものか」。モードに紐づかないものは scope に書く。
+export function scopeOf(a) {
+  if (a.scope) return a.scope;
+  return a.mode ? MODE_JP[a.mode] : 'すべてのルール';
 }
 
 // 戦績画面で出す進捗。{ now, goal, unit } | null

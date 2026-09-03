@@ -10,9 +10,10 @@ import {
   pieceForEdge, roadBuildingCount, roadBuildingSpots,
 } from './rules/road-building.js';
 import {
-  addCatch, addResult, clearProgress, currentTitle, loadProgress, resultOf,
+  addCatch, addContestResult, addResult, clearProgress, currentTitle, loadProgress, resultOf,
   saveProgress, setTitle,
 } from './progress.js';
+import { achievementById } from './achievements.js';
 import { fishbookHtml, recordsHtml } from './render/records.js';
 import {
   legalCityVertices,
@@ -38,6 +39,7 @@ import { rulesHtml } from './render/rules-content.js';
 import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
+import { contestOutcome } from './minigame/contest.js';
 import { EMOTES } from './minigame/emote.js';
 import { WALK_SEATS } from './minigame/remote-st.js';
 import { SPECIES, speciesById, cleanSpecies, DEFAULT_SPECIES } from './minigame/species.js';
@@ -407,7 +409,7 @@ function startNet(code, name, kind = 'game') {
     // 散策部屋: 全員ぶんの位置が 10 回/秒で届く
     onWalkers: (people) => walk?.putWalkers(people),
     // 釣り大会。進行はサーバー持ちなので、届いた表をそのまま描く
-    onContest: (c) => { contest = c; renderContest(); },
+    onContest: (c) => { contest = c; noteContestResult(c); renderContest(); },
     onError: (msg, fatal) => {
       online.error = msg;
       if (fatal) {
@@ -682,6 +684,9 @@ function exitWalk() {
   setWalkEmotes(false);
   atDesk = false;
   contest = null;
+  // 次に入った部屋は回数が 1 から始まる。持ち越すと初回を数え損ねる
+  meetRound = null;
+  meetUnlocked = [];
   renderContest();
   walk?.dispose();
   walk = null;
@@ -892,6 +897,8 @@ function setWalkBook(on) {
 // 数え始めると、端末ごとに違う残り時間が出て揉める。
 let contest = null;     // サーバーから届いた view
 let atDesk = false;     // 受付のそばに立っているか
+let meetRound = null;   // 実績を数え終わった回(結果は毎秒届くので1回だけ見る)
+let meetUnlocked = [];  // その回で解除した実績(結果のパネルに出す)
 
 function mySeat() { return net?.seat ?? null; }
 function seatName(seat) {
@@ -906,6 +913,26 @@ const mmss = (ms) => {
   const t = Math.ceil(ms / 1000);
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 };
+
+// 結果が出たら通算に足して、優勝なら実績を解除する。
+//
+// 「結果」は25秒のあいだ毎秒配られるので、回(round)ごとに1度だけ見る。
+// 数えるのは自分が出ていた回だけ ── 途中から入って結果だけ見た人は数えない。
+function noteContestResult(c) {
+  if (!c || c.phase !== 'result') return;
+  if (c.round === meetRound) return;
+  meetRound = c.round;
+  meetUnlocked = [];
+  const { entered, won, cm } = contestOutcome(c, mySeat());
+  if (!entered) return; // 見ていただけ
+  const r = addContestResult(progress, {
+    won, cm, key: `${net?.code ?? '?'}#${c.round}`,
+  });
+  progress = r.progress;
+  saveProgress(progress);
+  meetUnlocked = r.unlocked;
+  if (r.unlocked.length) sfx.play('win');
+}
 
 // 大会中ずっと出る細いバー(残り時間と自分の記録)
 function renderMeetBar() {
@@ -948,7 +975,11 @@ function renderContestPanel() {
           <span>${['🥇', '🥈', '🥉'][i] ?? `${i + 1}.`} ${seatIcon(r.seat)} ${seatName(r.seat)}</span>
           <b>${r.cm}cm <small>(${r.count}匹)</small></b></div>`).join('')
       : '<div>だれも釣れませんでした</div>';
-    el.innerHTML = `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>
+    // 新しく取った実績。ここで出さないと、戦績画面を開くまで気づけない
+    const got = meetUnlocked.map(achievementById).filter(Boolean)
+      .map((a) => `<div class="meet-ach">🎉 実績を解除しました
+        <b>${a.icon} ${a.name}</b><small>称号「${a.title}」</small></div>`).join('');
+    el.innerHTML = `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>${got}
       <div class="note">受付でもう一度エントリーできます</div>`;
     return;
   }

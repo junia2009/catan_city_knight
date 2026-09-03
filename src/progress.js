@@ -6,7 +6,7 @@
 
 import { lsGet, lsSet, lsRemove } from './storage.js';
 import { computePoints } from './rules/victory.js';
-import { ACHIEVEMENTS, marksOf, titleOf, unlockedBy } from './achievements.js';
+import { ACHIEVEMENTS, marksOf, titleOf, unlockedBy, unlockedByMeet } from './achievements.js';
 
 const KEY = 'progress';
 export const PROGRESS_VERSION = 1;
@@ -15,8 +15,13 @@ export const MODES = ['base', 'cak', 'dragon', 'fish', 'sea'];
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 
 export function emptyProgress() {
-  return { v: PROGRESS_VERSION, games: [], achievements: {}, title: null, fish: {} };
+  return {
+    v: PROGRESS_VERSION, games: [], achievements: {}, title: null, fish: {}, meet: emptyMeet(),
+  };
 }
+
+// 釣り大会の通算。last は「最後に数えた回」の目印(addContestResult 参照)。
+export const emptyMeet = () => ({ played: 0, won: 0, bestCm: 0, last: null });
 
 // 対戦1回ぶんの記録。state をそのまま持つと重いので、要点だけ取り出す。
 // (盤面を再現したいときのために seed は残す)
@@ -121,6 +126,34 @@ export function addCatch(progress, fishId, cm, now = Date.now()) {
   return { progress: next, isNew, isRecord };
 }
 
+// ---- 釣り大会 ----
+//
+// 散策部屋のミニゲーム。進行はサーバーが持っていて(server/fishing-contest.js)、
+// ここに残すのは「この端末の人が何回出て何回勝ったか」だけ。
+//
+// key は「部屋のコード + 何回目の大会か」。結果は25秒のあいだ毎秒配られるし、
+// その最中に再読み込みすると同じ回がもう一度届く。同じ key は数えない。
+export function addContestResult(progress, { won, cm = 0, key = null, at = Date.now() }) {
+  const prev = progress.meet ?? emptyMeet();
+  if (key != null && prev.last === key) return { progress, unlocked: [] };
+  const meet = {
+    played: prev.played + 1,
+    won: prev.won + (won ? 1 : 0),
+    bestCm: Math.max(prev.bestCm ?? 0, cm),
+    last: key,
+  };
+  const next = { ...progress, meet, achievements: { ...progress.achievements } };
+  const unlocked = [];
+  for (const id of unlockedByMeet({ meet })) {
+    if (next.achievements[id]) continue; // すでに持っている
+    next.achievements[id] = { at, mode: null };
+    unlocked.push(id);
+  }
+  // 対戦のほうと同じで、初めて取ったらその称号を自動で名乗らせる
+  if (next.title == null && unlocked.length) next.title = unlocked[0];
+  return { progress: next, unlocked };
+}
+
 // 図鑑の埋まり具合。total は魚の総数(呼ぶ側が fish.js から渡す)。
 export function fishbookCount(progress, total) {
   const book = progress.fish ?? {};
@@ -163,10 +196,24 @@ export function parseProgress(raw) {
       title: typeof p.title === 'string' ? p.title : null,
       // 釣り図鑑は後から足した。古い保存には無いので、無ければ空で始める
       fish: p.fish && typeof p.fish === 'object' ? p.fish : {},
+      meet: sanitizeMeet(p.meet),
     };
   } catch {
     return emptyProgress();
   }
+}
+
+// 釣り大会の通算も後から足した。数でないものが入っていたら 0 に倒す
+// (壊れた値のまま足すと NaN が保存に焼き付いて、以後ずっと NaN になる)。
+function sanitizeMeet(m) {
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+  if (!m || typeof m !== 'object') return emptyMeet();
+  return {
+    played: n(m.played),
+    won: n(m.won),
+    bestCm: n(m.bestCm),
+    last: typeof m.last === 'string' ? m.last : null,
+  };
 }
 
 export function loadProgress() {

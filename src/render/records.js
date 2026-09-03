@@ -1,13 +1,13 @@
 // 戦績と実績の画面(設計書 §11)
 //
 // progress.js の集計を描くだけ。state は読まない。
-// 実績が22個あるので、縦に並べると3画面ぶんスクロールすることになる。
+// 実績が20個以上あるので、縦に並べると3画面ぶんスクロールすることになる。
 // タブで戦績と分け、実績はバッジのグリッドにして1画面に収める
 // (詳細は選んだ1つだけ下に出す)。
 
 import {
   ACHIEVEMENTS, MODE_JP, TIERS, TIER_ICON, TIER_JP,
-  achievementById, progressOf,
+  achievementById, progressOf, scopeOf,
 } from '../achievements.js';
 import { MODES, achievementCount, fishbookCount, summarize, winRate } from '../progress.js';
 import { FISH } from '../minigame/fish.js';
@@ -35,7 +35,14 @@ export function fishbookHtml(progress, { walk = false } = {}) {
       <small>${got ? `${got.best} cm ・ ${got.n}匹` : TIER_LABEL[f.tier]}</small>
     </div>`;
   }).join('');
+  // 釣り大会の通算。一度も出ていないうちは出さない(空の行が増えるだけ)
+  const m = progress.meet ?? {};
+  const meet = m.played
+    ? `<p class="fbook-head">🏆 釣り大会 優勝 <b>${m.won}</b>/${m.played} 回
+       ・ 自己最高 <b>${m.bestCm}</b> cm</p>`
+    : '';
   return `<p class="fbook-head">図鑑 <b>${c.got}/${c.total}</b> 種類 ・ ぜんぶで <b>${c.caught}</b> 匹</p>
+    ${meet}
     <div class="fbook">${rows}</div>
     <p><small>${walk
       ? '「港のぬし」はその港でしか釣れません。ほかの港もまわってみましょう。'
@@ -130,7 +137,7 @@ function badgeDetail(progress, stats, selected) {
     <div class="ach-dhead">
       <span class="bicon">${has ? a.icon : '🔒'}</span>
       <span><b>${a.name}</b>
-        <small>${TIER_ICON[a.tier]} ${a.mode ? MODE_JP[a.mode] : 'すべてのルール'}</small></span>
+        <small>${TIER_ICON[a.tier]} ${scopeOf(a)}</small></span>
     </div>
     <p>${a.desc}</p>
     ${bar}
