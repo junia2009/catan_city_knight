@@ -8,9 +8,9 @@
 import * as THREE from 'three';
 import {
   makeGround, spawnPoint, fishingSpots, spotNear, hexCenter,
-  DESK_RADIUS, DESK_REACH,
+  DESK_RADIUS, DESK_REACH, DESK_CLEAR,
 } from './ground.js';
-import { makeBlocker } from './obstacles.js';
+import { makeBlocker, clearAround } from './obstacles.js';
 import { MAX_DT, SINK_DEPTH, WATER_Y } from './motion.js';
 import { Walker, WALK_SPEED } from './walker.js';
 import { WaterFx } from './water-fx.js';
@@ -92,8 +92,9 @@ function collectObstacles(b) {
     const h = box.max.y - TILE_TOP;
     if (h < BLOCK_MIN_HEIGHT) return;
     if (r > BLOCK_MAX_RADIUS) return;
-    // h も持たせる。跳んで足が越えていれば、その物は当たらなくなる
-    list.push({ x: center.x, z: center.z, r, h });
+    // h も持たせる。跳んで足が越えていれば、その物は当たらなくなる。
+    // obj は受付のまわりを片付けるときに隠すのに使う(clearAround)
+    list.push({ x: center.x, z: center.z, r, h, obj });
   };
 
   for (const c of b.staticGroup.children) scan(c);   // 木・山・サボテン・港の看板
@@ -115,6 +116,7 @@ export class WalkMode {
     // 棒人間を縮めたぶんカメラも寄るので、そのままだと隣に立った看板が
     // 画面を埋めて、竿も浮きも見えなくなる。歩いている間だけ小さくする。
     // 障害物を拾う前に縮めるので、ぶつかる大きさも一緒に小さくなる。
+    this.clearedObjs = [];   // 受付の広場のために隠した木や岩
     this.signs = [];
     board3d.staticGroup.traverse((o) => {
       if (!o.userData?.portSign) return;
@@ -134,6 +136,14 @@ export class WalkMode {
       // 席ごとの立ち位置は中心から輪の上へずらしてあるので、台とは重ならない
       const home = spawnPoint(state);
       this.deskAt = { x: home.x, z: home.y };
+      // まわりの木や岩を片付けて広場にする。木は盤の寸法で棒人間より大きく、
+      // 受付の手の届く範囲をまるごと塞いでしまう(obstacles.js の説明を参照)。
+      const { kept, cleared } = clearAround(this.obstacles, this.deskAt, DESK_CLEAR);
+      this.obstacles = kept;
+      // ぶつからないものが見えていると「すり抜けた」に見えるので、隠す
+      this.clearedObjs = cleared.map((o) => ({ o: o.obj, vis: o.obj?.visible }))
+        .filter((e) => e.o);
+      for (const e of this.clearedObjs) e.o.visible = false;
       this.desk = makeDesk(board3d.scene, home.x, home.y, this.ground(home.x, home.y).y, this.meet);
       // 台にもぶつかるようにする。collectObstacles はシーンを見て集めるので、
       // あとから足したものは自分で入れる必要がある。
@@ -653,6 +663,7 @@ export class WalkMode {
   dispose() {
     this.b.onFrame = null;
     for (const { o, scale } of this.signs) o.scale.copy(scale);  // 港の看板を戻す
+    for (const { o, vis } of this.clearedObjs) o.visible = vis;  // 片付けた木を戻す
     this.setDragon(null);
     this.desk?.dispose();
     this.walker.dispose();

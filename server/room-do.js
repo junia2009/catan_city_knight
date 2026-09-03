@@ -63,6 +63,9 @@ export class RoomDO {
   makeMeet(mode) {
     const m = meetFor(mode);
     const Engine = m && ENGINES[m.id];
+    // **必ず入れ替える。** 受付の無い島に変えたとき、ここで戻るだけにすると
+    // 前の島の大会が走ったまま残って、誰も居ない島の順位が配られ続ける。
+    this.contest = null;
     if (!Engine) return null;
     const e = new Engine();
     this.contest = e;
@@ -294,8 +297,9 @@ export class RoomDO {
   }
 
   broadcastContest() {
-    if (!this.contest) return;
-    const line = JSON.stringify({ t: 'contest', contest: this.contest.view() });
+    // 受付の無い島に変わったときは **null を配る**。黙っていると、
+    // 前の島の大会が走ったままの表がクライアントに残り続ける。
+    const line = JSON.stringify({ t: 'contest', contest: this.contest?.view() ?? null });
     for (const ws of this.sockets.keys()) {
       try { ws.send(line); } catch { /* 切断済みは close で片付く */ }
     }
