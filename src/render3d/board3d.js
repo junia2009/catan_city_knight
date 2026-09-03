@@ -1193,13 +1193,28 @@ export function makeDragon() {
     bone.rotation.z = Math.atan2(dir.y, dir.x) - Math.PI / 2;
     return bone;
   };
+  // 翼は**肩と手首の2関節**で作る。膜と指の骨は手首から先(hand)に載せて、
+  // 手首を畳めば膜ごと折り返せるようにしてある ── 1枚の板のままだと、
+  // どう回しても「広げた翼を傾けた」ようにしか見えず、畳んだことが伝わらない。
+  // 膜は全部 hand 側に置く(肩側にも膜を残すと、折るたびに継ぎ目が裂ける)。
+  // hand の角度が 0 のときは、1枚板だったころと寸分たがわぬ形になる。
+  const WRIST = [0.32, 0.30];
   const makeWing = (side) => {
-    const w = new THREE.Group();
+    const w = new THREE.Group();          // 肩の関節(上腕)
+    w.add(boneBar([0, 0], WRIST));        // 上腕
+    const hand = new THREE.Group();       // 手首の関節
+    hand.position.set(WRIST[0], WRIST[1], 0);
     const membrane = new THREE.Mesh(wingGeo, wingMat);
-    w.add(membrane);
-    w.add(boneBar([0, 0], [0.32, 0.30])); // 上腕
-    w.add(boneBar([0.32, 0.30], [0.82, 0.36])); // 第1指
-    w.add(boneBar([0.32, 0.30], [0.84, 0.04])); // 第2指
+    membrane.position.set(-WRIST[0], -WRIST[1], 0); // 形は肩基準のまま、手首基準へ寄せる
+    hand.add(membrane);
+    for (const tip of [[0.82, 0.36], [0.84, 0.04]]) { // 第1指・第2指
+      const bone = boneBar(WRIST, tip);
+      bone.position.x -= WRIST[0];
+      bone.position.y -= WRIST[1];
+      hand.add(bone);
+    }
+    w.add(hand);
+    w.userData.hand = hand;
     if (side < 0) w.scale.x = -1;
     w.position.set(side * 0.07, 0.52, 0.16);
     // 膜面をほぼ水平に広げ、少し後退角をつける
@@ -1212,6 +1227,7 @@ export function makeDragon() {
   const wingR = makeWing(-1);
   g.add(wingL, wingR);
   g.userData.wings = [wingL, wingR];
+  g.userData.wingHands = [wingL.userData.hand, wingR.userData.hand];
   // 首から上も外から動かせるようにしておく。島を歩いていると竜を**下から**
   // 見ることになり、そのときは翼より頭の向きのほうが「生きている」を作る
   // (眠る・目を覚ます・こちらを見る)。基準の姿勢も一緒に覚えておく。

@@ -53,6 +53,18 @@ function sinkVeil(depth) {
 const TILE_TOP = 0.26;      // board3d.js と同じタイル上面の高さ
 const SEA_Y = 0.02;         // board3d.js と同じ水面の高さ
 
+const lerp = (a, b, k) => a + (b - a) * k;
+
+// 巣で眠る竜の翼(makeDragon の肩と手首。左右対称なので y と z は片側ぶん)。
+//   x    … 膜面のひねり(-π/2 で水平に広がる)
+//   y    … 後退角。畳むときは大きく引いて、翼を頭より後ろへ回す
+//          (前に残ると、下から見上げたときに顔が翼で隠れる)
+//   z    … 肩の上げ下げ
+//   hand … 手首。ここを折らないと、いくら肩を動かしても
+//          「広げた翼を傾けた」ようにしか見えない ── 畳んだと分かるのはこの角度
+const WING_FOLD = { x: -0.15, y: 1.9, z: 0.25, hand: -2.9 };
+const WING_OPEN = { x: -Math.PI * 0.30, y: 0.35, z: 0.31, hand: 0 };
+
 // 釣っている間のカメラ。竿は右手(モデルの +X 側)なので、そちらへ回り込むと
 // 竿と糸が本人に重ならない。
 const FISH_YAW = -0.75;     // 本人の向きからどれだけ横へ回り込むか
@@ -174,7 +186,9 @@ export class WalkMode {
       rotY: this.nestMesh.rotation.y,
       head: { ...(this.nestMesh.userData.headRest ?? { x: 0, y: 0 }) },
       wingX: (this.nestMesh.userData.wings ?? []).map((w) => w.rotation.x),
+      wingY: (this.nestMesh.userData.wings ?? []).map((w) => w.rotation.y),
       wingZ: (this.nestMesh.userData.wings ?? []).map((w) => w.rotation.z),
+      handZ: (this.nestMesh.userData.wingHands ?? []).map((h) => h.rotation.z),
     } : null;
     this.species = speciesById(look);
     this.walker = new Walker(
@@ -350,13 +364,17 @@ export class WalkMode {
     // **z(羽ばたき)も必ず書く。** 盤の _tickRobber は毎フレーム z を
     // 動かしていて、書かずにおくと**寝ている竜が羽ばたき続ける**
     // ── 畳んだ x と合わさって、翼を広げているように見えていた。
+    const hands = m.userData.wingHands ?? [];
     for (const [i, wing] of (m.userData.wings ?? []).entries()) {
       const side = i === 0 ? 1 : -1;
-      const folded = -0.24;
-      const open = -Math.PI * 0.30 + Math.sin(t / 900 + i * Math.PI) * 0.05;
-      wing.rotation.x = folded + (open - folded) * k;
+      const breathe = Math.sin(t / 900 + i * Math.PI);
+      wing.rotation.x = lerp(WING_FOLD.x, WING_OPEN.x + breathe * 0.05, k);
+      wing.rotation.y = side * lerp(WING_FOLD.y, WING_OPEN.y, k);
       // 眠っている間は閉じたまま。起きたら、ゆっくりとした呼吸ぶんだけ動く
-      wing.rotation.z = side * (0.04 + k * (0.31 + Math.sin(t / 700 + i * Math.PI) * 0.06));
+      wing.rotation.z = side * lerp(WING_FOLD.z, WING_OPEN.z + breathe * 0.06, k);
+      // 手首。畳むのはここで、肩だけ動かしても「広げた翼を傾けた」ようにしか
+      // 見えない ── 膜ごと折り返して初めて畳んだと分かる
+      if (hands[i]) hands[i].rotation.z = lerp(WING_FOLD.hand, WING_OPEN.hand, k);
     }
 
     // 起きたら体ごとこちらへ向き直る。
@@ -400,7 +418,12 @@ export class WalkMode {
     m.rotation.y = this.nestRest.rotY;
     for (const [i, wing] of (m.userData.wings ?? []).entries()) {
       wing.rotation.x = this.nestRest.wingX[i] ?? wing.rotation.x;
+      wing.rotation.y = this.nestRest.wingY[i] ?? wing.rotation.y;
       wing.rotation.z = this.nestRest.wingZ[i] ?? wing.rotation.z;
+    }
+    // 手首は盤側が触らない ── 戻し忘れると、対戦の画面に翼を畳んだ竜が残る
+    for (const [i, hand] of (m.userData.wingHands ?? []).entries()) {
+      hand.rotation.z = this.nestRest.handZ[i] ?? hand.rotation.z;
     }
     const head = m.userData.head;
     if (head) {
