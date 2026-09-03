@@ -11,7 +11,7 @@ import { dispatch } from '../src/actions.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 import { computePoints } from '../src/rules/victory.js';
 import {
-  MODES, addContestResult, addResult, emptyMeet, emptyProgress, parseProgress, resultOf,
+  MODES, addContestResult, addResult, emptyMeet, emptyProgress, noteSeen, parseProgress, resultOf,
   summarize, winRate, achievementCount, currentTitle, setTitle,
 } from '../src/progress.js';
 import {
@@ -103,7 +103,8 @@ test('achievements: 定義がそろっている(id 重複なし・称号・難�
     assert.ok(a.name && a.desc && a.icon, `${a.id}: 名前・説明・アイコンがない`);
     assert.ok(a.title, `${a.id}: 称号がない`);
     assert.ok(TIERS.includes(a.tier), `${a.id}: 難度(tier)が不正 ${a.tier}`);
-    assert.ok(a.check || a.mark || a.checkMeet, `${a.id}: check も mark も checkMeet もない`);
+    assert.ok(a.check || a.mark || a.checkMeet || a.checkSeen,
+      `${a.id}: 解除の判定(check / mark / checkMeet / checkSeen)がない`);
     if (a.mark) assert.equal(typeof a.goal, 'number', `${a.id}: goal がない`);
   }
 });
@@ -339,6 +340,49 @@ test('大会: まったく同じ釣果なら同率優勝(2人とも実績が付�
     const { unlocked } = addContestResult(emptyProgress(), { won, score: 200, key: `A#${s}` });
     assert.deepEqual(unlocked, ['meet-win'], `席${s} に実績が付かない`);
   }
+});
+
+// ---- 島で見つけたもの(竜の巣)----
+
+test('巣: 登ると実績と称号が付く', () => {
+  const { progress: p, unlocked } = noteSeen(emptyProgress(), 'nest', 1234);
+  assert.deepEqual(unlocked, ['nest-visit']);
+  assert.ok(p.achievements['nest-visit'], '実績が入っていない');
+  assert.equal(p.title, 'nest-visit', '初めての実績は自動で名乗る');
+  assert.equal(p.seen.nest, 1234, '行ったことが残っていない');
+});
+
+test('巣: 2度目は何も起きない(元の progress をそのまま返す)', () => {
+  const { progress: p } = noteSeen(emptyProgress(), 'nest', 1234);
+  const again = noteSeen(p, 'nest', 9999);
+  assert.deepEqual(again.unlocked, []);
+  assert.equal(again.progress, p, '同じものを返していない(保存が毎回走る)');
+  assert.equal(again.progress.seen.nest, 1234, '行った時刻が上書きされた');
+});
+
+test('巣: 行っていなければ付かない', () => {
+  const p = emptyProgress();
+  assert.equal(p.achievements['nest-visit'], undefined);
+  // 別の場所へ行っただけでは付かない
+  const { unlocked } = noteSeen(p, 'somewhere-else');
+  assert.deepEqual(unlocked, []);
+});
+
+// 対戦の締めで散策の実績が付いてしまうと、1戦終えるだけで巣に行ったことになる
+test('巣: 対戦の締めでは付かない', () => {
+  const r = { mode: 'dragon', won: true, points: 10, difficulty: 'hard', players: 4, turns: 40 };
+  assert.equal(unlockedBy({ result: r, marks: {}, stats: summarize(emptyProgress()) })
+    .includes('nest-visit'), false);
+});
+
+// 古い保存には seen が無い。読めなくても遊べなくならないこと
+test('巣: 古い保存・壊れた保存でも読める', () => {
+  assert.deepEqual(parseProgress(JSON.stringify({ games: [] })).seen, {});
+  assert.deepEqual(parseProgress(JSON.stringify({ seen: 'いいえ' })).seen, {});
+  assert.deepEqual(parseProgress(JSON.stringify({ seen: { nest: 5 } })).seen, { nest: 5 });
+  // 壊れた値でも「行ったこと」は残す(実績を取り消すほうが害が大きい)
+  assert.deepEqual(parseProgress(JSON.stringify({ seen: { nest: 'えっ' } })).seen, { nest: 1 });
+  assert.deepEqual(parseProgress(JSON.stringify({ seen: { nest: false } })).seen, {});
 });
 
 // 合計が並んでも「いちばん大きい1匹」で決着が付くなら同率ではない

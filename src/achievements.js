@@ -257,6 +257,19 @@ export const ACHIEVEMENTS = [
     icon: '🐉', tier: 'silver', scope: '散策部屋',
     checkMeet: ({ meets }) => (meets.dragonhunt?.won ?? 0) > 0,
   },
+
+  // ---- 散策部屋(島で見つけたもの)----
+  //
+  // 勝ち負けではなく「そこへ行った」で付く。大会の結果とも別の入口なので
+  // checkSeen を持たせて unlockedBySeen で見る(checkMeet と同じ考え方)。
+  {
+    id: 'nest-visit',
+    name: '竜の巣',
+    desc: '眠っている竜のそばまで登る',
+    title: '竜の見張り',
+    icon: '🏔', tier: 'bronze', scope: '散策部屋',
+    checkSeen: ({ seen }) => !!seen.nest,
+  },
 ];
 
 // 数値ものの判定は共通(check を書かなくてよい)
@@ -289,6 +302,20 @@ export function unlockedByMeet(ctx) {
     if (!a.checkMeet) continue;
     try {
       if (a.checkMeet(ctx)) out.push(a.id);
+    } catch {
+      // この実績だけ見送る
+    }
+  }
+  return out;
+}
+
+// 島で見つけたもののほう。ctx は { seen } ── 行った場所の一覧。
+export function unlockedBySeen(ctx) {
+  const out = [];
+  for (const a of ACHIEVEMENTS) {
+    if (!a.checkSeen) continue;
+    try {
+      if (a.checkSeen(ctx)) out.push(a.id);
     } catch {
       // この実績だけ見送る
     }

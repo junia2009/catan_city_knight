@@ -6,7 +6,9 @@
 
 import { lsGet, lsSet, lsRemove } from './storage.js';
 import { computePoints } from './rules/victory.js';
-import { ACHIEVEMENTS, marksOf, titleOf, unlockedBy, unlockedByMeet } from './achievements.js';
+import {
+  ACHIEVEMENTS, marksOf, titleOf, unlockedBy, unlockedByMeet, unlockedBySeen,
+} from './achievements.js';
 
 const KEY = 'progress';
 export const PROGRESS_VERSION = 1;
@@ -16,7 +18,13 @@ export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 
 export function emptyProgress() {
   return {
-    v: PROGRESS_VERSION, games: [], achievements: {}, title: null, fish: {}, meets: {},
+    v: PROGRESS_VERSION,
+    games: [],
+    achievements: {},
+    title: null,
+    fish: {},
+    meets: {},
+    seen: {},
   };
 }
 
@@ -158,6 +166,25 @@ export function addContestResult(
   return { progress: next, unlocked };
 }
 
+// ---- 島で見つけたもの ----
+//
+// 勝ち負けではなく「そこへ行った」で付くもの(いまは竜の巣だけ)。
+// 大会の通算とは別枠 ── あちらは回ごとに数えるが、こちらは一度きり。
+export function noteSeen(progress, id, at = Date.now()) {
+  if (progress.seen?.[id]) return { progress, unlocked: [] };  // もう行っている
+  const seen = { ...(progress.seen ?? {}), [id]: at };
+  const next = { ...progress, seen, achievements: { ...progress.achievements } };
+  const unlocked = [];
+  for (const a of unlockedBySeen({ seen })) {
+    if (next.achievements[a]) continue;
+    next.achievements[a] = { at, mode: null };
+    unlocked.push(a);
+  }
+  // 対戦・大会と同じで、初めて取ったらその称号を自動で名乗らせる
+  if (next.title == null && unlocked.length) next.title = unlocked[0];
+  return { progress: next, unlocked };
+}
+
 // 図鑑の埋まり具合。total は魚の総数(呼ぶ側が fish.js から渡す)。
 export function fishbookCount(progress, total) {
   const book = progress.fish ?? {};
@@ -201,10 +228,24 @@ export function parseProgress(raw) {
       // 釣り図鑑は後から足した。古い保存には無いので、無ければ空で始める
       fish: p.fish && typeof p.fish === 'object' ? p.fish : {},
       meets: sanitizeMeets(p),
+      // 島で見つけたもの。あとから足したので、無ければ空で始める
+      seen: sanitizeSeen(p?.seen),
     };
   } catch {
     return emptyProgress();
   }
+}
+
+// 行った場所。値は「いつ行ったか」なので、数でないものは落とす
+// (壊れた値でも「行ったこと」は残す ── 実績を取り消すほうが害が大きい)。
+function sanitizeSeen(src) {
+  if (!src || typeof src !== 'object') return {};
+  const out = {};
+  for (const [id, at] of Object.entries(src)) {
+    if (!at) continue;
+    out[id] = typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : 1;
+  }
+  return out;
 }
 
 // 集まりの通算。もとは釣り大会1つぶんだけを meet に持っていたので、
