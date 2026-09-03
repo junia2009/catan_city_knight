@@ -2894,6 +2894,10 @@ window.hexDebug = {
     spot: walk.spot,
   } : null),
   walkStick: (x, y) => walk?.setStick(x, y),
+  // 向きを直接決める(E2E 用)。スティックを倒して向き直らせると、
+  // 木や岩に阻まれて狙ったほうを向けないことがある ── 見た目の確認で
+  // 「竜のほうを向いた絵」が欲しいだけのときはこちらを使う
+  walkFace: (yaw) => { if (walk) { walk.camYaw = yaw; walk.walker.motion.facing = yaw; } },
   walkJump: () => walk?.jump(),
   walkEmote: (id) => walk?.playEmote(id) ?? false,
   // すがた(E2E 用)。選び直すと次に島へ入ったときに反映される
