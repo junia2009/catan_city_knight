@@ -123,6 +123,13 @@ export class Walker {
     this._apply(aimPose(t, this.motion.facing, draw), g.y);
   }
 
+  // 自分の体を出す/隠す。一人称のカメラ(円卓)で使う ──
+  // 目の位置から見ると自分の頭が視界を埋めるので、そのときだけ消す。
+  // 相手の画面には位置が中継されて別に描かれるので、消えるのは自分だけ。
+  setVisible(on) {
+    this.parts.group.visible = !!on;
+  }
+
   // 円卓に着いて座る。歩きと同じで、座っている間は動かさない
   sit(t) {
     this.phase = 0;
