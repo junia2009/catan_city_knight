@@ -302,6 +302,7 @@
   .dialog p { font-size: 12px; color: var(--dim); }
   .row { display: flex; gap: 7px; flex-wrap: wrap; }
   .row.end { justify-content: flex-end; margin-top: 6px; }
+  .row.center { justify-content: center; }
   .pick {
     display: flex; flex-direction: column; align-items: center; gap: 2px;
     min-width: 66px; padding: 8px 6px;
@@ -779,6 +780,17 @@
   }
   #walk-book.on { display: flex; }
   #walk-book .select-panel { max-height: 88dvh; }
+  /* あそびかた(島を歩く中から開く)。図鑑と同じ扱い。
+     **pointer-events: auto を忘れない** ── #walk-hud は none なので、
+     付けないと「見えるのに押せない・スクロールもできない」板になる。 */
+  #walk-guide {
+    position: absolute; inset: 0; z-index: 4; pointer-events: auto;
+    display: none; align-items: center; justify-content: center;
+    padding: 12px;
+    background: rgba(6, 18, 32, 0.72);
+  }
+  #walk-guide.on { display: flex; }
+  #walk-guide .select-panel { max-height: 88dvh; }
   /* 操作の案内。右下はボタンが縦に2つ並ぶので、そこへは伸ばさない。
      中央寄せの1行にすると、幅の狭い端末で画面からはみ出して読めなくなる。 */
   .walk-hint {
@@ -1164,7 +1176,7 @@
     gap: 10px;
     -webkit-overflow-scrolling: touch;
   }
-  /* タブは5つあるので、狭い画面では折り返す(折り返した1つが横幅いっぱいに
+  /* タブは8つあるので、狭い画面では折り返す(折り返した1つが横幅いっぱいに
      伸びないよう、タブだけは内容幅にする) */
   /* 2段になっても本文が透けないよう、タブ帯は不透明にする */
   .rules-tabs { position: sticky; top: -6px; z-index: 2; padding: 6px 0 8px; flex-wrap: wrap;
@@ -1197,7 +1209,28 @@
   .rcard .ricon { font-size: 22px; margin-top: 2px; }
   .rcard small { color: var(--dim); margin-left: 8px; }
   .rcard p { margin-top: 2px; font-size: 12.5px; }
+  /* あそびかた(集まり)。箇条書きと、大富豪の「入れるルール」の一覧 */
+  .mg-list { padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+  .mg-note {
+    background: rgba(120,200,255,0.09); border-left: 3px solid rgba(120,200,255,0.45);
+    border-radius: 0 8px 8px 0; padding: 7px 10px; font-size: 12.5px;
+  }
+  .mg-hr { border: none; border-top: 1px solid rgba(130,180,230,0.25); margin: 6px 0 0; }
+  /* ルールの行と、その説明。行は詰めて、説明を1段落ぶら下げる */
+  .rrow.mg-rule { padding: 5px 10px; margin-top: 4px; }
+  .rrow.mg-rule.on { background: rgba(120,200,255,0.14); }
+  .mg-on { color: var(--accent2); font-size: 11.5px; }
+  .mg-off { color: var(--dim); font-size: 11.5px; }
+  .rules-body .mg-desc { font-size: 12px; color: var(--dim); padding: 0 10px; line-height: 1.6; }
   .rules-close { margin-top: 8px; }
+  /* 「とじる」「もどる」は下に貼りつける。集まりのタブは画面数枚ぶんあるので、
+     いちばん下まで送らないと閉じられないのでは戻れなくなる。
+     パネルの padding(22px)に食い込ませて、下辺にぴたりと付ける。 */
+  .rules-panel .rules-close {
+    position: sticky; bottom: -22px; z-index: 2;
+    margin-top: auto; padding: 10px 0 22px;
+    background: linear-gradient(to top, #0f2439 74%, rgba(15, 36, 57, 0));
+  }
   /* ダイアログ内で開いたとき */
   .dialog .rules-body { max-height: 52dvh; overflow-y: auto; padding-right: 4px; }
   body:not([data-screen="game"]) #topbar,
@@ -1702,6 +1735,7 @@
       <button data-act="walk-look" aria-label="すがた">🧍</button>
       <button data-act="walk-emote" aria-label="エモート">😀</button>
       <button data-act="walk-book" aria-label="釣り図鑑">📖</button>
+      <button data-act="walk-guide" aria-label="あそびかた">❓</button>
       <button data-act="walk-exit">✕ もどる</button>
     </div>
     <div id="walk-emotes"></div>
@@ -1749,6 +1783,16 @@
         <div id="walk-book-body"></div>
         <div class="row end rules-close">
           <button class="primary" data-act="walk-book-close">とじる</button>
+        </div>
+      </div>
+    </div>
+    <!-- あそびかた。この島の集まりのぶんだけを出す(全部は説明書の「🎪集まり」) -->
+    <div id="walk-guide">
+      <div class="select-panel rules-panel">
+        <h3>❓ あそびかた</h3>
+        <div id="walk-guide-body" class="rules-body"></div>
+        <div class="row end rules-close">
+          <button class="primary" data-act="walk-guide-close">とじる</button>
         </div>
       </div>
     </div>
