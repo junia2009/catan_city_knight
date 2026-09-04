@@ -15,6 +15,13 @@
 // を1セットで用意する。
 
 export const MEETS = {
+  base: {
+    id: 'daifugo',
+    name: '大富豪',
+    sign: ['大富豪', '受付'],
+    title: '🃏 大富豪',
+    hint: '円卓を囲んで札を出し合います。入れるルールはホストが決めます。',
+  },
   fish: {
     id: 'fishing',
     name: 'つり大会',

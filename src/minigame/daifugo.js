@@ -578,6 +578,39 @@ function finish(st) {
   st.log.push({ t: 'end', order });
 }
 
+// 席を立った人。手札は捨てて、いちばん下へ回す。
+//
+// **卓の途中で抜けられても回が壊れないようにする。** 抜けた人を残すと
+// その人の番で永久に止まるし、消してしまうと順位が人数ぶん揃わない。
+export function retire(st, pid) {
+  if (!st || st.result) return st;
+  if (!st.players.includes(pid)) return st;
+  if (st.out.includes(pid) || st.demoted.some((d) => d.player === pid)) return st;
+  const wasTurn = st.players[st.turn] === pid;
+  const wasAwaited = st.awaiting?.player === pid;
+  // 出したあとの 7渡し/10捨てを待っていたなら、そこは飛ばす
+  // (選ぶ人がもう居ない)。8切りだけは効かせる。
+  if (wasAwaited) st.awaiting = null;
+  st.passed[pid] = true;
+  demote(st, pid, 'left');
+  if (st.result) return st;
+  if (st.pendingClear) {
+    st.pendingClear = false;
+    clearField(st, null);
+    return st;
+  }
+  // 抜けたことで「残り全員パス」になっていれば場を流す
+  if (st.field) {
+    const others = activePlayers(st).filter((p) => p !== st.lead);
+    if (!others.length || others.every((p) => st.passed[p])) {
+      clearField(st);
+      return st;
+    }
+  }
+  if (wasTurn || wasAwaited) advance(st, 1);
+  return st;
+}
+
 // ---- 出せる手 ----
 
 // 空でない部分集合(1つの数字は多くても4枚なので数え上げてよい)
