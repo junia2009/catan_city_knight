@@ -105,24 +105,30 @@ function makeRange(post) {
   const plank = new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 0.9 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x5d442a, roughness: 0.9 });
 
-  const deck = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.5, 0.035, 12), plank);
+  // 斜め上から見下ろすようにしたぶん、台は小ぶりにする ── 大きいままだと
+  // 手前の板が画面の半分を占めて、せっかく広げた海が狭くなる。
+  const deck = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.035, 12), plank);
   deck.position.y = 0.017;
   deck.receiveShadow = true;
   g.add(deck);
-  // 板の目。1枚板だと「土を塗った」ようにしか見えない
+  // 板の目。1枚板だと「土を塗った」ようにしか見えない。
+  // 長さは円の弦に合わせる ── 全部同じ長さにすると、端の目が台からはみ出す
+  const R = 0.36;
   for (let i = -2; i <= 2; i++) {
-    const line = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.004, 0.012), dark);
-    line.position.set(0, 0.036, i * 0.17);
+    const z = i * 0.13;
+    const half = Math.sqrt(Math.max(0, R * R - z * z));
+    const line = new THREE.Mesh(new THREE.BoxGeometry(half * 2, 0.004, 0.012), dark);
+    line.position.set(0, 0.036, z);
     g.add(line);
   }
   // 脇の樽と杭。左右にだけ置く(前は射線、後ろは櫓)
   for (const sx of [-1, 1]) {
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.15, 8), dark);
-    barrel.position.set(sx * 0.44, 0.075, -0.1);
+    barrel.position.set(sx * 0.36, 0.075, -0.08);
     barrel.castShadow = true;
     g.add(barrel);
     const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.026, 0.3, 5), plank);
-    stake.position.set(sx * 0.5, 0.15, 0.18);
+    stake.position.set(sx * 0.40, 0.15, 0.14);
     stake.rotation.z = sx * 0.12;
     stake.castShadow = true;
     g.add(stake);
