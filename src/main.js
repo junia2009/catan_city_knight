@@ -10,8 +10,8 @@ import {
   pieceForEdge, roadBuildingCount, roadBuildingSpots,
 } from './rules/road-building.js';
 import {
-  addCatch, addContestResult, addResult, clearProgress, currentTitle, loadProgress, noteSeen,
-  resultOf, saveProgress, setTitle,
+  addCatch, addContestResult, addRaidRun, addResult, clearProgress, currentTitle, loadProgress,
+  noteSeen, resultOf, saveProgress, setTitle,
 } from './progress.js';
 import { achievementById } from './achievements.js';
 import { fishbookHtml, recordsHtml } from './render/records.js';
@@ -41,7 +41,7 @@ import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
 import { contestOutcome } from './minigame/contest.js';
-import { DESK_REACH } from './minigame/ground.js';
+import { DESK_REACH, POST_RADIUS } from './minigame/ground.js';
 import { meetFor } from './minigame/meets.js';
 import { EMOTES } from './minigame/emote.js';
 import { WALK_SEATS } from './minigame/remote-st.js';
@@ -428,6 +428,7 @@ function startNet(code, name, kind = 'game') {
       // 竜の居場所はサーバーが決めている。走っている間だけ出す
       walk?.setDragon(c?.phase === 'running' && c.dragon ? c.dragon : null);
       noteContestResult(c);
+      syncRaidContest(c);
       renderContest();
     },
     onError: (msg, fatal) => {
@@ -697,7 +698,15 @@ async function startWalk() {
   walk.onPost = onWatchPost;
   walk.onRaidEvent = (e) => {
     if (e.type === 'sink' || e.type === 'down') sfx.play('ui');
-    if (e.type === 'over') { showRaidResult(walk.raid); setBowButton('done'); }
+    if (e.type === 'over') {
+      showRaidResult(walk.raid);
+      setBowButton('done');
+      noteRaidRun(walk.raid);
+      // 大会では、力尽きたらその回は終わり。構え直せると同じ波をもう一度
+      // 撃ててしまう(サーバーは点を凍結するが、櫓に立ち続ける意味がない)
+      if (raidNet) raidOver = true;
+    }
+    reportRaid(walk.raid, e.type === 'over');
     if (e.type === 'cleared') {
       showRaidFx(`${e.wave}波 を凌いだ`, `撃退 ${e.score} ・ まもなく次の波`);
       sfx.play('ui');
@@ -723,6 +732,8 @@ function exitWalk() {
   setWalkLooks(false);
   atDesk = false;
   contest = null;
+  raidNet = false;
+  raidOver = false;
   // 次に入った部屋は回数が 1 から始まる。持ち越すと初回を数え損ねる
   meetRound = null;
   meetUnlocked = [];
@@ -790,6 +801,61 @@ function resetFishHud() {
 const bowEl = () => document.getElementById('walk-bow');
 const on = (id, v) => document.getElementById(id)?.classList.toggle('on', !!v);
 
+// 大会として構えているか。立っているのは同じ櫓でも、種と点の行き先が変わる
+let raidNet = false;
+let raidCounted = false;  // この回をもう記録に足したか
+let raidSent = -1;        // サーバーへ最後に送った点
+let raidOver = false;     // 大会中に力尽きたか(その回はもう構えられない)
+
+// 1回ぶんを端末の記録に足す。実績はここで解除される。
+//
+// **数えるのは1回につき1度だけ。** 力尽きた時点('over')で数え、そのあと
+// 弓をおろしても二重には数えない ── 自己最高は伸びないが、遊んだ回数が
+// 2回増える。
+function noteRaidRun(r) {
+  if (!r || raidCounted) return;
+  raidCounted = true;
+  // 1本も射たずにおろした回は数えない(記録にならないのに回数だけ増える)
+  if (!r.shots) return;
+  const res = addRaidRun(progress, {
+    score: r.score, wave: r.wave, shots: r.shots, hits: r.hits,
+  });
+  progress = res.progress;
+  saveProgress(progress);
+  if (!res.unlocked.length) return;
+  sfx.play('win');
+  const a = achievementById(res.unlocked[0]);
+  walkNote(`🎉 実績を解除: ${a?.icon ?? ''} ${a?.name ?? ''}`);
+}
+
+// 大会中の点をサーバーへ。合計を送るので、1通落ちても次で追いつく。
+// 変わっていないときは送らない(矢が外れるたびに送っても意味がない)。
+function reportRaid(r, over = false) {
+  if (!raidNet || !r) return;
+  if (contest?.kind !== 'raid' || contest.phase !== 'running') return;
+  if (!over && r.score === raidSent) return;
+  raidSent = r.score;
+  net?.contest('report', { score: r.score, wave: r.wave, over });
+}
+
+// 大会の様子が届いたとき、こちらの弓を合わせる。
+//
+// 始まったら大会の波へ切り替え、終わったら弓をおろす ── 時間切れのあとも
+// 撃てるままだと、順位が出たあとに点が伸びているように見える。
+function syncRaidContest(c) {
+  if (!walk || c?.kind !== 'raid') return;
+  const seat = mySeat();
+  const running = c.phase === 'running' && seat != null && c.entries.includes(seat);
+  if (running === raidNet) return;
+  // ひとりで撃っていた回はここで締める(種が変わるので続けられない)
+  if (walk.isAiming) stopArchery();
+  raidNet = running;
+  raidOver = false;
+  if (!running) return;
+  if (walk.atPost) startArchery();
+  else walkNote('🏹 浜の櫓へ! そこで弓を構える');
+}
+
 // 櫓のそばに来た/離れた
 function onWatchPost(near) {
   if (walk?.isAiming) return;   // 射っている最中は触らない
@@ -799,8 +865,14 @@ function onWatchPost(near) {
 
 function startArchery() {
   if (!walk || walk.isAiming) return;
-  // 乱数は**この遊び専用**。対戦の state.rng は回さない
-  if (!walk.startArchery((Date.now() ^ 0x9e3779b9) >>> 0)) return;
+  if (raidNet && raidOver) { walkNote('🏹 この回はここまで'); return; }
+  // 乱数は**この遊び専用**。対戦の state.rng は回さない。
+  // 大会中はサーバーが配った種で撃つ ── 全員が同じ波を迎え撃たないと、
+  // 「そっちは楽な波だった」で腕前の比べようがなくなる。
+  const seed = raidNet && contest?.seed ? contest.seed : (Date.now() ^ 0x9e3779b9) >>> 0;
+  if (!walk.startArchery(seed)) return;
+  raidCounted = false;
+  raidSent = -1;
   // ボタンはそのまま残して「ひく」に変える ── 構えたとたんに消すと、
   // 弓を引く手だてが画面から無くなる(実際そうなっていた)。
   setBowButton('draw');
@@ -834,9 +906,13 @@ function setBowButton(kind) {
 
 function stopArchery() {
   if (!walk?.isAiming) return;
+  // 弓をおろした回も記録に残す(力尽きた回は 'over' で数え済み)
+  noteRaidRun(walk.raid);
   walk.stopArchery();
   setBowButton('ready');
-  for (const id of ['aim-mark', 'aim-draw', 'aim-bar']) on(id, false);
+  // 射終わりの札も一緒に片付ける。残しておくと、弓をおろして歩き出しても
+  // 「撃退 9」の札が島の上に浮かんだままになる
+  for (const id of ['aim-mark', 'aim-draw', 'aim-bar', 'aim-result']) on(id, false);
   document.getElementById('aim-marks')?.replaceChildren();
   document.getElementById('aim-fx')?.replaceChildren();
   jumpEl()?.style.removeProperty('display');
@@ -851,6 +927,8 @@ function renderAimBar() {
   const r = walk?.raid;
   const el = document.getElementById('aim-bar');
   if (!r || !el) return;
+  // 大会中は上に大会のバーが出ているので1段ずらす(同じ位置に置いてある)
+  el.classList.toggle('stacked', !!raidNet);
   const html = `<span>🌊 ${r.wave}波</span><span class="t">🏹 ${r.score}</span>`
     + `<span class="life">${'🛡'.repeat(r.lives)}${'·'.repeat(Math.max(0, 3 - r.lives))}</span>`;
   if (setHTML(el, html)) aimShown = html;
@@ -1153,12 +1231,22 @@ function dragonArrow(d) {
   return `${ARROWS[i]} ${dist.toFixed(1)}`;
 }
 
+// 誰も記録を残さずに終わった回の言い方。遊びごとに違う
+const MEET_EMPTY = {
+  fishing: 'だれも釣れませんでした',
+  dragonhunt: 'だれも出ませんでした',
+  raid: 'だれも撃てませんでした',
+};
+
 // 順位表に出す記録。遊びごとに単位が違う(釣りは cm、竜は生き残った時間)
 function meetScore(c, r) {
   if (c.kind === 'dragonhunt') {
     return r.alive
       ? '<b>逃げきり</b>'
       : `<b>${(r.ms / 1000).toFixed(1)}秒</b>`;
+  }
+  if (c.kind === 'raid') {
+    return `<b>撃退 ${r.score} <small>(${r.wave}波)</small></b>`;
   }
   return `<b>${r.cm}cm <small>(${r.count}匹)</small></b>`;
 }
@@ -1189,7 +1277,9 @@ function renderMeetBar() {
     ? (me?.alive
       ? ` 🐉 <b>${dragonArrow(c.dragon)}</b> のこり${alive}人`
       : ' 💀 つかまった')
-    : (me ? ` 🎣 ${me.cm}cm(${me.place}位/${c.rank.length}人)` : ' 観戦中');
+    : c.kind === 'raid'
+      ? (me ? ` 🏹 ${me.place}位/${c.rank.length}人` : ' 観戦中')
+      : (me ? ` 🎣 ${me.cm}cm(${me.place}位/${c.rank.length}人)` : ' 観戦中');
   setHTML(el, `<span class="t">⏱ ${mmss(c.remain)}</span>` + (me ? mine : ' 観戦中'));
 }
 
@@ -1213,7 +1303,7 @@ function renderContestPanel() {
       ? c.rank.map((r) => `<div class="${r.seat === seat ? 'me' : ''}">
           <span>${['🥇', '🥈', '🥉'][r.place - 1] ?? `${r.place}.`} ${seatIcon(r.seat)} ${seatName(r.seat)}</span>
           ${meetScore(c, r)}</div>`).join('')
-      : `<div>${c.kind === 'dragonhunt' ? 'だれも出ませんでした' : 'だれも釣れませんでした'}</div>`;
+      : `<div>${MEET_EMPTY[c.kind] ?? MEET_EMPTY.fishing}</div>`;
     // 新しく取った実績。ここで出さないと、戦績画面を開くまで気づけない
     const got = meetUnlocked.map(achievementById).filter(Boolean)
       .map((a) => `<div class="meet-ach">🎉 実績を解除しました
@@ -3128,6 +3218,9 @@ window.hexDebug = {
   getRaid: () => walk?.raid?.view() ?? null,
   getWalkMode: () => walk,
   atPost: () => !!walk?.atPost,
+  // 櫓の居場所。deskAt と同じで、どれだけ寄れば立てるかも返す
+  postAt: () => (walk?.postAt ? { ...walk.postAt, radius: POST_RADIUS } : null),
+  raidRecord: () => progress.raid ?? null,
   // 向きを直接決める(E2E 用)。スティックを倒して向き直らせると、
   // 木や岩に阻まれて狙ったほうを向けないことがある ── 見た目の確認で
   // 「竜のほうを向いた絵」が欲しいだけのときはこちらを使う

@@ -30,6 +30,12 @@ export function placeOf(rank) {
   return placeBy(rank, (r, o) => o.cm > r.cm || (o.cm === r.cm && o.best > r.best));
 }
 
+// 蛮族を射る大会の順位。撃退した点 → 凌いだ波。
+// 全員が同じ波を迎え撃つ(種はサーバーが配る)ので、点がそのまま腕前になる。
+// 同点なら「先の波まで凌いだ」ほうが上 ── 浜を破られずに長く立っていた側。
+export const raidAhead = (r, o) => o.score > r.score
+  || (o.score === r.score && o.wave > r.wave);
+
 // view は FishingContest#view() が返すもの。seat は自分の席。
 // 戻り値: { entered, won, score, place }
 //   entered … その回に出ていたか(途中から見ていただけなら false)
@@ -40,7 +46,11 @@ export function contestOutcome(view, seat) {
   const rank = view?.rank ?? [];
   // サーバーが place を入れて配っているが、ここでも数え直す ── 古い版の
   // サーバーが繋がっていても、優勝の判定だけは自前で決められるように。
-  const rows = view?.kind === 'dragonhunt' ? placeBy(rank, huntAhead) : placeOf(rank);
+  const rows = view?.kind === 'dragonhunt'
+    ? placeBy(rank, huntAhead)
+    : view?.kind === 'raid'
+      ? placeBy(rank, raidAhead)
+      : placeOf(rank);
   // 席が無い(まだ入っていない)なら find は空振りする。null を別に見なくてよい
   const me = rows.find((r) => r.seat === seat);
   if (!me) return { entered: false, won: false, score: 0, place: 0 };
@@ -52,6 +62,12 @@ export function contestOutcome(view, seat) {
     // 勝ちにすると、逃げきる実績が逃げきらなくても取れてしまう。
     return {
       entered: true, won: !!me.alive, score: Math.round(me.ms / 1000), place: me.place,
+    };
+  }
+  if (view?.kind === 'raid') {
+    // 1点も取れなかった回は優勝にしない(釣りと同じ考え方)
+    return {
+      entered: true, won: me.score > 0 && me.place === 1, score: me.score, place: me.place,
     };
   }
   // 誰も釣れなかった回も優勝にしない

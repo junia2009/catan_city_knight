@@ -926,6 +926,8 @@
     text-shadow: 0 1px 3px rgba(0,0,0,0.6); white-space: nowrap;
   }
   #aim-bar.on { display: flex; }
+  /* 大会中は #walk-meet が同じ位置に出るので、1段下げて重ねない */
+  #aim-bar.stacked { top: calc(78px + env(safe-area-inset-top)); }
   #aim-bar .t { color: var(--accent2); font-variant-numeric: tabular-nums; }
   #aim-bar .life { letter-spacing: 1px; }
 

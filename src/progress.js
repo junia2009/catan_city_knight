@@ -7,7 +7,7 @@
 import { lsGet, lsSet, lsRemove } from './storage.js';
 import { computePoints } from './rules/victory.js';
 import {
-  ACHIEVEMENTS, marksOf, titleOf, unlockedBy, unlockedByMeet, unlockedBySeen,
+  ACHIEVEMENTS, marksOf, titleOf, unlockedBy, unlockedByMeet, unlockedByRaid, unlockedBySeen,
 } from './achievements.js';
 
 const KEY = 'progress';
@@ -25,12 +25,16 @@ export function emptyProgress() {
     fish: {},
     meets: {},
     seen: {},
+    raid: emptyRaid(),
   };
 }
 
 // 集まり1つぶんの通算。best の単位は遊びによる(釣りは cm、竜は秒)。
 // last は「最後に数えた回」の目印(addContestResult 参照)。
 export const emptyMeet = () => ({ played: 0, won: 0, best: 0, last: null });
+
+// 蛮族を射る(ひとりの記録)の通算。best/wave/acc は自己最高。
+export const emptyRaid = () => ({ played: 0, best: 0, wave: 0, acc: 0, shots: 0, hits: 0 });
 
 // 対戦1回ぶんの記録。state をそのまま持つと重いので、要点だけ取り出す。
 // (盤面を再現したいときのために seed は残す)
@@ -81,6 +85,12 @@ export function summarize(progress) {
     if (g.points > m.bestPoints) m.bestPoints = g.points;
     if (g.points > total.bestPoints) total.bestPoints = g.points;
   }
+  // 蛮族を射るの自己最高も同じ棚に置く。戦績画面の進捗(progressOf)は
+  // bests しか見ないので、ここに入れておけば「3/6波」が出せる。
+  const raid = progress.raid ?? {};
+  bests.raidScore = raid.best ?? 0;
+  bests.raidWave = raid.wave ?? 0;
+  bests.raidAcc = raid.acc ?? 0;
   return { byMode, total, bests };
 }
 
@@ -166,6 +176,45 @@ export function addContestResult(
   return { progress: next, unlocked };
 }
 
+// ---- 蛮族を射る(ひとりの記録)----
+//
+// 大会(meets)と違って、ひとりで櫓に立った回も数える。大会に出た回も
+// ここに足す ── 同じ弓の腕前の記録なので、別々に持つと「自己最高」が
+// 2つできてどちらを出すか決められなくなる。
+//
+// 命中率だけは回ごとに見る。合計の射数で割ると、下手な回を数多く重ねた
+// 人ほど分母が育って、7割に届かなくなる(腕が上がっても記録が伸びない)。
+
+// 命中率を記録に残す最低の射数。3射して2本当たった回が自己最高として
+// 残ると、狙いの精度の記録として意味をなさない。
+export const ACC_MIN_SHOTS = 20;
+
+export function addRaidRun(progress, { score = 0, wave = 1, shots = 0, hits = 0 } = {}, at = Date.now()) {
+  const prev = progress.raid ?? emptyRaid();
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+  const s = n(shots);
+  const h = Math.min(s, n(hits));
+  const acc = s >= ACC_MIN_SHOTS ? Math.round((h / s) * 100) : 0;
+  const raid = {
+    played: prev.played + 1,
+    best: Math.max(prev.best, n(score)),
+    wave: Math.max(prev.wave, n(wave)),
+    acc: Math.max(prev.acc, acc),
+    shots: prev.shots + s,
+    hits: prev.hits + h,
+  };
+  const next = { ...progress, raid, achievements: { ...progress.achievements } };
+  const unlocked = [];
+  for (const id of unlockedByRaid({ raid })) {
+    if (next.achievements[id]) continue; // すでに持っている
+    next.achievements[id] = { at, mode: null };
+    unlocked.push(id);
+  }
+  // 対戦・大会と同じで、初めて取ったらその称号を自動で名乗らせる
+  if (next.title == null && unlocked.length) next.title = unlocked[0];
+  return { progress: next, unlocked };
+}
+
 // ---- 島で見つけたもの ----
 //
 // 勝ち負けではなく「そこへ行った」で付くもの(いまは竜の巣だけ)。
@@ -230,6 +279,8 @@ export function parseProgress(raw) {
       meets: sanitizeMeets(p),
       // 島で見つけたもの。あとから足したので、無ければ空で始める
       seen: sanitizeSeen(p?.seen),
+      // 蛮族を射るの記録。これもあとから足した
+      raid: sanitizeRaid(p?.raid),
     };
   } catch {
     return emptyProgress();
@@ -246,6 +297,19 @@ function sanitizeSeen(src) {
     out[id] = typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : 1;
   }
   return out;
+}
+
+// 蛮族を射るの通算。数でないものは 0 に倒す(sanitizeMeet と同じ理由 ──
+// NaN のまま足すと、以後ずっと NaN が保存に焼き付く)。
+function sanitizeRaid(m) {
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+  if (!m || typeof m !== 'object') return emptyRaid();
+  return {
+    played: n(m.played), best: n(m.best), wave: n(m.wave),
+    // 命中率は割合なので 100 で頭を打つ
+    acc: Math.min(100, n(m.acc)),
+    shots: n(m.shots), hits: n(m.hits),
+  };
 }
 
 // 集まりの通算。もとは釣り大会1つぶんだけを meet に持っていたので、

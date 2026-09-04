@@ -11,8 +11,9 @@ import { dispatch } from '../src/actions.js';
 import { chooseAction } from '../src/ai/cpu-player.js';
 import { computePoints } from '../src/rules/victory.js';
 import {
-  MODES, addContestResult, addResult, emptyMeet, emptyProgress, noteSeen, parseProgress, resultOf,
-  summarize, winRate, achievementCount, currentTitle, setTitle,
+  ACC_MIN_SHOTS, MODES, addContestResult, addRaidRun, addResult, emptyMeet, emptyProgress,
+  emptyRaid, noteSeen, parseProgress, resultOf, summarize, winRate, achievementCount,
+  currentTitle, setTitle,
 } from '../src/progress.js';
 import {
   ACHIEVEMENTS, TIERS, achievementById, marksOf, progressOf, titleOf, unlockedBy,
@@ -26,6 +27,10 @@ function game({
 }
 
 const noStats = () => summarize(emptyProgress());
+
+// 対戦の締め以外に入口を持つ実績の目印(src/achievements.js の OTHER_GATES と同じ)。
+// これが付いているものは mark を持っていても「対戦の数値もの」ではない。
+const OTHER_GATE_KEYS = ['checkMeet', 'checkSeen', 'checkRaid'];
 
 function playOut(mode, seed) {
   let s = createGame({ seed, playerCount: 4, humanIndex: 0, mode });
@@ -47,7 +52,8 @@ test('progress: 空の戦績でも全モードの枠が出る', () => {
   }
   assert.equal(s.total.played, 0);
   assert.equal(s.total.bestTurns, null);
-  assert.deepEqual(s.bests, {});
+  // 対戦の到達値は空。散策部屋の記録(蛮族を射る)は 0 から始まる
+  assert.deepEqual(s.bests, { raidScore: 0, raidWave: 0, raidAcc: 0 });
 });
 
 test('progress: モード別・難易度別に数える', () => {
@@ -103,16 +109,24 @@ test('achievements: 定義がそろっている(id 重複なし・称号・難�
     assert.ok(a.name && a.desc && a.icon, `${a.id}: 名前・説明・アイコンがない`);
     assert.ok(a.title, `${a.id}: 称号がない`);
     assert.ok(TIERS.includes(a.tier), `${a.id}: 難度(tier)が不正 ${a.tier}`);
-    assert.ok(a.check || a.mark || a.checkMeet || a.checkSeen,
-      `${a.id}: 解除の判定(check / mark / checkMeet / checkSeen)がない`);
+    assert.ok(a.check || a.mark || a.checkMeet || a.checkSeen || a.checkRaid,
+      `${a.id}: 解除の判定(check / mark / checkMeet / checkSeen / checkRaid)がない`);
     if (a.mark) assert.equal(typeof a.goal, 'number', `${a.id}: goal がない`);
   }
+  // アイコンはバッジの並びで実績を見分ける唯一の手がかり。
+  // 5モードの勝利だけは同じ 🏆 でよい(1列に並ぶので取り違えない)。
+  const modeWins = MODES.map((m) => `win-${m}`);
+  const icons = ACHIEVEMENTS.filter((a) => !modeWins.includes(a.id)).map((a) => a.icon);
+  const dup = icons.filter((x, i) => icons.indexOf(x) !== i);
+  assert.deepEqual(dup, [], `アイコンが重複している: ${dup.join(' ')}`);
 });
 
 // 数値ものは marks を積めば必ず解除できるはず。
 // フィールド名を1文字間違えても「静かに解除されないだけ」なので、ここで潰す。
 test('achievements: 数値ものは目標値に届けば必ず解除される', () => {
-  const numeric = ACHIEVEMENTS.filter((a) => a.mark);
+  // 散策部屋のものは mark を「進捗を出すため」だけに持っている。
+  // 解除の入口は別(checkRaid など)なので、ここでは見ない
+  const numeric = ACHIEVEMENTS.filter((a) => a.mark && !OTHER_GATE_KEYS.some((k) => a[k]));
   assert.ok(numeric.length >= 8, '数値ものが少なすぎる(設計が変わった?)');
   for (const a of numeric) {
     const marks = { [a.mark]: a.goal };
@@ -518,4 +532,124 @@ test('大会: 遊びごとに通算も実績も分かれている', () => {
   assert.ok(q.achievements['hunt-survive']);
   assert.equal(q.meets.fishing.played, 1, '別の遊びが釣りの通算を消した');
   assert.equal(q.meets.dragonhunt.played, 1);
+});
+
+// ---- 蛮族を射る(散策部屋)----
+//
+// 大会(meets)と違って、ひとりで櫓に立った回も数える。自己最高だけを
+// 持ち、実績はそこから解除される。
+
+test('射: 回ごとに自己最高が伸びる', () => {
+  let p = emptyProgress();
+  p = addRaidRun(p, { score: 40, wave: 3, shots: 30, hits: 12 }).progress;
+  p = addRaidRun(p, { score: 20, wave: 5, shots: 10, hits: 9 }).progress;
+  assert.equal(p.raid.played, 2);
+  assert.equal(p.raid.best, 40, '点の自己最高が伸びていない');
+  assert.equal(p.raid.wave, 5, '波の自己最高が伸びていない');
+  assert.equal(p.raid.shots, 40, '通算の射数が合わない');
+  assert.equal(p.raid.hits, 21);
+});
+
+// 命中率は「回ごと」に見る。通算の射数で割ると、下手な回を数多く重ねた人ほど
+// 分母が育って、腕が上がっても記録が伸びなくなる。
+test('射: 命中率は回ごとに見て、射数が足りない回は数えない', () => {
+  // 3射2中(67%)は射数が足りないので記録に残さない
+  let p = addRaidRun(emptyProgress(), { score: 5, wave: 1, shots: 3, hits: 2 }).progress;
+  assert.equal(p.raid.acc, 0, '数射の回が自己最高になっている');
+  // 射数を満たせば残る
+  p = addRaidRun(p, { score: 5, wave: 1, shots: ACC_MIN_SHOTS, hits: 15 }).progress;
+  assert.equal(p.raid.acc, 75);
+  // そのあと下手な回を重ねても、自己最高は下がらない
+  p = addRaidRun(p, { score: 5, wave: 1, shots: 100, hits: 10 }).progress;
+  assert.equal(p.raid.acc, 75);
+});
+
+test('射: 壊れた回でも記録が壊れない', () => {
+  const p = addRaidRun(emptyProgress(), {
+    score: NaN, wave: -3, shots: 'たくさん', hits: Infinity,
+  }).progress;
+  assert.deepEqual(p.raid, { ...emptyRaid(), played: 1 });
+  // 当たった数が射数を超えることはない(命中率が 100% を超えないように)
+  const q = addRaidRun(emptyProgress(), { score: 1, wave: 1, shots: 20, hits: 99 }).progress;
+  assert.equal(q.raid.acc, 100);
+});
+
+test('射: 目標に届くと実績と称号が付く', () => {
+  const wave3 = addRaidRun(emptyProgress(), { score: 10, wave: 3, shots: 5, hits: 3 });
+  assert.deepEqual(wave3.unlocked, ['raid-wave-3']);
+  assert.equal(wave3.progress.title, 'raid-wave-3', '初めての実績が称号にならない');
+
+  const score = addRaidRun(emptyProgress(), { score: 100, wave: 1, shots: 5, hits: 5 });
+  assert.ok(score.unlocked.includes('raid-score-100'));
+
+  const acc = addRaidRun(emptyProgress(), { score: 1, wave: 1, shots: 20, hits: 14 });
+  assert.ok(acc.unlocked.includes('raid-accuracy'), '命中7割で解除されない');
+
+  const wave6 = addRaidRun(emptyProgress(), { score: 10, wave: 6, shots: 5, hits: 3 });
+  assert.ok(wave6.unlocked.includes('raid-wave-6'));
+});
+
+test('射: 1 足りなければ解除されない', () => {
+  const near = addRaidRun(emptyProgress(), { score: 99, wave: 2, shots: 20, hits: 13 });
+  assert.deepEqual(near.unlocked, [], `届いていないのに解除された: ${near.unlocked}`);
+});
+
+test('射: 一度解除したものは二度数えない', () => {
+  const first = addRaidRun(emptyProgress(), { score: 10, wave: 3, shots: 5, hits: 3 });
+  const again = addRaidRun(first.progress, { score: 10, wave: 4, shots: 5, hits: 3 });
+  assert.deepEqual(again.unlocked, []);
+  assert.equal(again.progress.raid.played, 2, '回数は増える');
+});
+
+// 進捗(「3/6波」)は戦績画面が bests から出す。ここが繋がっていないと、
+// 実績の欄がいつまでも 0/6 のままになる。
+test('射: 自己最高が実績の進捗に出る', () => {
+  const p = addRaidRun(emptyProgress(), { score: 40, wave: 4, shots: 20, hits: 11 }).progress;
+  const stats = summarize(p);
+  assert.deepEqual(progressOf(achievementById('raid-wave-6'), stats),
+    { now: 4, goal: 6, unit: '波' });
+  assert.deepEqual(progressOf(achievementById('raid-score-100'), stats),
+    { now: 40, goal: 100, unit: '点' });
+  assert.deepEqual(progressOf(achievementById('raid-accuracy'), stats),
+    { now: 55, goal: 70, unit: '%' });
+});
+
+// 散策部屋の実績は mark を「進捗を出すため」だけに持っている。
+// 対戦の締めで marks に同じ名前が入っても、そちらでは付かない。
+test('射: 対戦の締めでは付かない', () => {
+  const result = { mode: 'cak', won: true, points: 13, difficulty: 'hard', players: 4, turns: 40 };
+  const ids = unlockedBy({
+    result,
+    marks: { raidWave: 9, raidScore: 999, raidAcc: 100 },
+    stats: noStats(),
+  });
+  for (const id of ['raid-wave-3', 'raid-wave-6', 'raid-score-100', 'raid-accuracy']) {
+    assert.equal(ids.includes(id), false, `${id}: 対戦を終えただけで付いた`);
+  }
+});
+
+test('射: 大会で優勝すると別の実績が付く', () => {
+  const r = addContestResult(emptyProgress(), {
+    kind: 'raid', won: true, score: 60, key: 'A#1',
+  });
+  assert.ok(r.unlocked.includes('raid-meet-win'));
+  assert.equal(r.progress.meets.raid.best, 60);
+  // ひとりの記録のほうは動かない(入口が別)
+  assert.deepEqual(r.progress.raid, emptyRaid());
+});
+
+test('射: 古い保存・壊れた保存でも 0 から始まる', () => {
+  assert.deepEqual(parseProgress(JSON.stringify({ games: [] })).raid, emptyRaid());
+  assert.deepEqual(parseProgress(JSON.stringify({ raid: 'いっぱい' })).raid, emptyRaid());
+  const bad = parseProgress(JSON.stringify({
+    raid: { played: NaN, best: -1, wave: 2.7, acc: 999, shots: null, hits: 4 },
+  })).raid;
+  assert.deepEqual(bad, { played: 0, best: 0, wave: 2, acc: 100, shots: 0, hits: 4 });
+});
+
+test('射: addRaidRun は元の戦績を書き換えない', () => {
+  const p = emptyProgress();
+  addRaidRun(p, { score: 100, wave: 6, shots: 20, hits: 20 });
+  assert.deepEqual(p.raid, emptyRaid());
+  assert.deepEqual(p.achievements, {});
 });
