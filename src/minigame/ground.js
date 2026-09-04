@@ -86,6 +86,32 @@ export const DESK_REACH = sc(0.5);
 // そこに降りた人が最初から木に埋まる。
 export const DESK_CLEAR = sc(0.95);
 
+// ---- 円卓(大富豪の島)----
+//
+// 受付の台の代わりに、島の中心へ円卓を据える島がある。台と同じ扱いに
+// してあるので(近づくとパネルが開く)、寸法もここに並べておく。
+//
+// **腰かけの輪は、降り立つ輪(SPAWN_RING)より内側**に置くこと。
+// 外に出すと、島に降りた人がいきなり誰かの席に立っていることになる。
+export const TABLE_RADIUS = sc(0.30);   // 天板の半径(ぶつかる大きさでもある)
+export const SEAT_R = sc(0.50);         // 腰かけを並べる輪の半径
+export const TABLE_CLEAR = sc(1.35);    // 卓のまわりを片付ける広さ
+
+// 円卓を囲む席。n 人を輪の上に等間隔で並べ、それぞれ卓のほうを向かせる。
+// **席0は手前(-z)**。島の中心から見て正面に人が座る。
+export function tableSeats(center, n) {
+  const out = [];
+  const total = Math.max(1, n);
+  for (let i = 0; i < total; i++) {
+    const a = Math.PI + (i / total) * Math.PI * 2;
+    const x = center.x + Math.sin(a) * SEAT_R;
+    const z = center.z + Math.cos(a) * SEAT_R;
+    // 卓の中心を向く。walker の facing と同じ atan2(dx, dz)
+    out.push({ x, z, face: Math.atan2(center.x - x, center.z - z), angle: a });
+  }
+  return out;
+}
+
 // 席ごとに散らす輪の半径。人まわりの長さなので縮尺を掛ける(scale.js)。
 // **受付の手の届く範囲(DESK_REACH)より外に出すこと** ── でないと、
 // 島に降りた瞬間から受付のパネルが開きっぱなしになる。

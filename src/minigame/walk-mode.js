@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import {
   makeGround, spawnPoint, fishingSpots, spotNear, hexCenter, nestPoint, nestHexOf,
   watchPost, POST_RADIUS, POST_CLEAR, DESK_RADIUS, DESK_REACH, DESK_CLEAR,
+  TABLE_RADIUS, TABLE_CLEAR, tableSeats,
 } from './ground.js';
 import { Raid, ARCHERY_MODES, BOW_Y, reach as arrowReach } from './archery.js';
 import { ArcheryFx } from './archery-fx.js';
@@ -20,11 +21,12 @@ import { Fishing, CAST_TIME } from './fishing.js';
 import { FishingFx } from './fishing-fx.js';
 import { RemoteWalkers } from './remote.js';
 import { RemoteView, WALK_COLORS } from './remote-view.js';
-import { ST } from './remote-st.js';
+import { ST, WALK_SEATS } from './remote-st.js';
 import { emoteById } from './emote.js';
 import { speciesById, DEFAULT_SPECIES } from './species.js';
 import { makeDesk } from './desk.js';
 import { meetFor } from './meets.js';
+import { makeTable } from './table.js';
 import { makeDragon } from '../render3d/board3d.js';
 import { WALK_SCALE, s as sc } from './scale.js';
 
@@ -102,6 +104,12 @@ const AIM_CLOSER = 0.10;
 // 構えている間だけ画角を広げる。歩きの 45° だと海がほとんど映らず、
 // どこから船が来ているのか分からない。広げすぎると的が小さくなる。
 const AIM_FOV = 64;
+// 円卓に着いている間のカメラ。
+// **少し引いて、上から見下ろす。** 歩きのカメラは本人の背中越しに低く
+// 構えているので、そのまま座ると自分の後頭部で卓が埋まる。卓と向かいの人が
+// 収まるところまで引き、天板が面として見える角度まで起こす。
+const TABLE_CLOSER = -0.6;   // 負で遠ざかる(_placeCamera の closer)
+const TABLE_PITCH = 0.62;
 // 画面の端に出す「敵はあちら」の三角を、縁からどれだけ内側に置くか(画素)
 const MARK_INSET = 26;
 
@@ -184,22 +192,33 @@ export class WalkMode {
     this.meet = meetFor(state.mode);
     this.deskAt = null;
     this.desk = null;
+    // 円卓を囲んで遊ぶ島(大富豪)だけ、受付の台の代わりに卓を据える。
+    // 近づくとパネルが開くところは台と同じなので、deskAt はどちらでも使う。
+    this.roundTable = this.meet?.id === 'daifugo';
+    this.tableSeatAt = null;   // 座っている席の場所(座っている間だけ)
     if (this.meet) {
-      // 席ごとの立ち位置は中心から輪の上へずらしてあるので、台とは重ならない
+      // 席ごとの立ち位置は中心から輪の上へずらしてあるので、卓とは重ならない
       const home = spawnPoint(state);
       this.deskAt = { x: home.x, z: home.y };
       // まわりの木や岩を片付けて広場にする。木は盤の寸法で棒人間より大きく、
       // 受付の手の届く範囲をまるごと塞いでしまう(obstacles.js の説明を参照)。
-      const { kept, cleared } = clearAround(this.obstacles, this.deskAt, DESK_CLEAR);
+      // 円卓は席を囲むぶん広い場所が要る。
+      const clearR = this.roundTable ? TABLE_CLEAR : DESK_CLEAR;
+      const { kept, cleared } = clearAround(this.obstacles, this.deskAt, clearR);
       this.obstacles = kept;
       // ぶつからないものが見えていると「すり抜けた」に見えるので、隠す
       this.clearedObjs = cleared.map((o) => ({ o: o.obj, vis: o.obj?.visible }))
         .filter((e) => e.o);
       for (const e of this.clearedObjs) e.o.visible = false;
-      this.desk = makeDesk(board3d.scene, home.x, home.y, this.ground(home.x, home.y).y, this.meet);
-      // 台にもぶつかるようにする。collectObstacles はシーンを見て集めるので、
-      // あとから足したものは自分で入れる必要がある。
-      this.obstacles.push({ x: home.x, z: home.y, r: DESK_RADIUS, h: sc(0.62) });
+      const groundY = this.ground(home.x, home.y).y;
+      this.desk = this.roundTable
+        ? makeTable(board3d.scene, home.x, home.y, groundY, this.meet, WALK_SEATS)
+        : makeDesk(board3d.scene, home.x, home.y, groundY, this.meet);
+      // 台(卓)にもぶつかるようにする。collectObstacles はシーンを見て
+      // 集めるので、あとから足したものは自分で入れる必要がある。
+      this.obstacles.push({
+        x: home.x, z: home.y, r: this.roundTable ? TABLE_RADIUS : DESK_RADIUS, h: sc(0.62),
+      });
     }
     this.atDesk = false;
     this.onDesk = null;      // 受付に入った/出た
@@ -243,6 +262,7 @@ export class WalkMode {
     this.drawT = 0;           // 弓を引き始めてからの秒数
     this.drawing = false;
     this.aimT = 0;
+    this.sitT = 0;            // 円卓に着いてからの秒数(座り姿勢のゆらぎ)
     if (ARCHERY_MODES.includes(state.mode)) {
       const p = watchPost(state);
       if (p) {
@@ -710,6 +730,10 @@ export class WalkMode {
       this._archeryFrame(dt, t);
       return;
     }
+    if (this.tableSeatAt) {
+      this._sitFrame(dt, t);
+      return;
+    }
     // 櫓は撃っていない間も動かす(船は湧かないが、旗と塔はそこにある)
 
     const kb = this._keyInput();
@@ -780,6 +804,47 @@ export class WalkMode {
       WaterFx.submersion(this.b.camera.position.y),
       r?.depth ?? 0, this.savedFog,
     );
+  }
+
+  // ---- 円卓に着く ----
+
+  get isSeated() { return !!this.tableSeatAt; }
+
+  // 円卓の i 番目の席へ座る。**位置と向きはみんな同じ式で決める**ので、
+  // 各自が自分を座らせるだけで、相手の画面にも同じ場所に座って見える
+  // (位置は散策部屋の中継でそのまま流れる)。
+  sitAtTable(index, total) {
+    if (!this.deskAt || !this.roundTable) return false;
+    const spot = tableSeats(this.deskAt, total)[Math.max(0, index) % Math.max(1, total)];
+    if (!spot) return false;
+    this.walker.setPosition(spot.x, spot.z);
+    this.walker.motion.facing = spot.face;
+    this.camYaw = spot.face;
+    this.tableSeatAt = spot;
+    this.sitT = 0;
+    this.emote = null;
+    this.setStick(0, 0);
+    // 見下ろす角度は戻せるように覚えておく(弓と同じ作法)
+    this.camPitchSaved = this.camPitch;
+    this.camPitch = TABLE_PITCH;
+    this._placeCamera(0, true, TABLE_CLOSER);
+    return true;
+  }
+
+  standUp() {
+    if (!this.tableSeatAt) return;
+    this.tableSeatAt = null;
+    if (this.camPitchSaved != null) {
+      this.camPitch = this.camPitchSaved;
+      this.camPitchSaved = null;
+    }
+  }
+
+  // 座っている間のフレーム。歩きの計算はしない(その場に腰かけたまま)
+  _sitFrame(dt, t) {
+    this.sitT += dt;
+    this.walker.sit(this.sitT);
+    this._placeCamera(dt, false, TABLE_CLOSER);
   }
 
   // ---- 蛮族を射る ----

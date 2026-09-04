@@ -25,7 +25,7 @@ const DEPTH = 0.10;
 // 文言は島ごとに違う(minigame/meets.js の sign)ので、外から受け取る。
 // BoxGeometry の UV は面ごとに「外から見て正しい向き」に張られているので、
 // 表裏どちらの面に貼っても鏡文字にはならない(自前で反転すると逆に鏡になる)。
-function makeSignFace([big, small]) {
+export function makeSignFace([big, small]) {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 128;
