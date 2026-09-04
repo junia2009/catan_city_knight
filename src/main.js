@@ -328,6 +328,14 @@ let myLook = cleanSpecies(lsGet('look') ?? DEFAULT_SPECIES);
 function setMyLook(id) {
   myLook = cleanSpecies(id);
   lsSet('look', myLook);
+  syncLookButton();
+}
+
+// 歩く画面のボタンは「いまのすがた」を出す。固定の絵にすると、
+// 押すまで自分が何になっているか分からない
+function syncLookButton() {
+  const b = document.querySelector('[data-act="walk-look"]');
+  if (b) b.textContent = speciesById(myLook).icon;
 }
 
 // 散策部屋の席の色。3D 側(remote-view.js)と揃える
@@ -669,6 +677,7 @@ async function startWalk() {
     walk.onDesk = (near) => { atDesk = near; renderContest(); };
   }
   atDesk = false;
+  syncLookButton();
   renderContest();
   // 竜の巣まで登った。ひとりで歩いていても付く ── 大会と違って
   // 勝ち負けではなく「そこへ行った」ことなので、部屋に居るかは関係ない。
@@ -697,6 +706,7 @@ async function startWalk() {
 function exitWalk() {
   setWalkBook(false);
   setWalkEmotes(false);
+  setWalkLooks(false);
   atDesk = false;
   contest = null;
   // 次に入った部屋は回数が 1 から始まる。持ち越すと初回を数え損ねる
@@ -869,7 +879,12 @@ function showFishResult(html, miss) {
 function fishPress() {
   if (!walk || walkBookOpen) return;
   const f = walk.fishing;
-  if (!f) { setWalkEmotes(false); if (walk.startFishing()) sfx.play('cast'); return; }
+  if (!f) {
+    setWalkEmotes(false);
+    setWalkLooks(false);
+    if (walk.startFishing()) sfx.play('cast');
+    return;
+  }
   if (f.phase === 'fight') { walk.setReeling(true); return; }
   if (f.phase === 'bite' || f.phase === 'wait' || f.phase === 'cast') {
     // アタリなら合わせ成功、早ければ逃げられる(どちらも hookFish が判定する)
@@ -901,7 +916,7 @@ function setWalkBook(on) {
     document.getElementById('walk-book-body').innerHTML = fishbookHtml(progress, { walk: true });
   }
   el?.classList.toggle('on', walkBookOpen);
-  if (walkBookOpen) setWalkEmotes(false);
+  if (walkBookOpen) { setWalkEmotes(false); setWalkLooks(false); }
   walk.setPaused(walkBookOpen);
   // 移動スティックが出たままにならないように
   if (walkBookOpen) walkStickHide();
@@ -1098,8 +1113,28 @@ function setWalkEmotes(on) {
       `<button type="button" data-act="walk-emote-do:${e.id}">`
       + `<b>${e.icon}</b>${e.label}</button>`).join('');
   }
+  if (walkEmoteOpen) setWalkLooks(false);
   el.classList.toggle('on', walkEmoteOpen);
   document.querySelector('[data-act="walk-emote"]')?.classList.toggle('on', walkEmoteOpen);
+}
+
+// すがた選び。**ひとりで歩くときにも選べるようにする**ため、部屋のロビーだけで
+// なく歩いている画面から開けるようにした(ロビーは散策部屋にしか無い)。
+// 中身は SPECIES から作る ── ここに名前を書くと species.js とずれる。
+let walkLookOpen = false;
+function setWalkLooks(on) {
+  const el = document.getElementById('walk-looks');
+  if (!el) return;
+  walkLookOpen = !!on && !!walk && !walk.isFishing;
+  if (walkLookOpen) {
+    setWalkEmotes(false);
+    // 選んだものに印が付くので、開くたびに作り直す
+    el.innerHTML = SPECIES.map((sp) =>
+      `<button type="button" class="${sp.id === myLook ? 'sel' : ''}" `
+      + `data-act="walk-look-do:${sp.id}"><b>${sp.icon}</b>${sp.label}</button>`).join('');
+  }
+  el.classList.toggle('on', walkLookOpen);
+  document.querySelector('[data-act="walk-look"]')?.classList.toggle('on', walkLookOpen);
 }
 
 // 釣りをやめて歩きに戻る(「もどる」ではなく、竿だけしまう)
@@ -2243,6 +2278,7 @@ function walkPointerDown(e) {
   if (e.target.closest('button')) return;
   // 画面に触れたら一覧は引っ込める(選ばずに動き出したとき、出しっぱなしにしない)
   if (walkEmoteOpen) setWalkEmotes(false);
+  if (walkLookOpen) setWalkLooks(false);
   const left = e.clientX < window.innerWidth / 2;
   // 釣っている間は動けない。視点だけは回せる
   if (left && walk.isFishing) return;
@@ -2378,6 +2414,14 @@ document.addEventListener('click', (e) => {
       enterWalk();
       return;
     case 'walk-emote': setWalkEmotes(!walkEmoteOpen); return;
+    case 'walk-look': setWalkLooks(!walkLookOpen); return;
+    case 'walk-look-do':   // 歩きながらすがたを替えた
+      setMyLook(arg);
+      walk?.setLook(myLook);
+      net?.setLook(myLook);  // 散策部屋なら、他の人の画面も替わる
+      setWalkLooks(false);
+      sfx.play('ui');
+      return;
     case 'walk-emote-do':
       walk?.playEmote(Number(arg));
       setWalkEmotes(false);
@@ -2385,8 +2429,9 @@ document.addEventListener('click', (e) => {
     case 'walk-exit':
       // 図鑑を開いていたら、まずそれを閉じる
       if (walkBookOpen) { setWalkBook(false); return; }
-      // エモートを開いていたら、まずそれを閉じる
+      // エモートやすがた選びを開いていたら、まずそれを閉じる
       if (walkEmoteOpen) { setWalkEmotes(false); return; }
+      if (walkLookOpen) { setWalkLooks(false); return; }
       // 釣っている途中なら、まず竿をしまう(押し間違いで島から出さない)
       if (!fishQuit()) exitWalk();
       return;
