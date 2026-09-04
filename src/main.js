@@ -698,7 +698,11 @@ async function startWalk() {
   walk.onRaidEvent = (e) => {
     if (e.type === 'sink' || e.type === 'down') sfx.play('ui');
     if (e.type === 'over') { showRaidResult(walk.raid); setBowButton('done'); }
-    if (e.type === 'wave') walkNote(`🌊 ${e.wave}波目`);
+    if (e.type === 'cleared') {
+      showRaidFx(`${e.wave}波 を凌いだ`, `撃退 ${e.score} ・ まもなく次の波`);
+      sfx.play('ui');
+    }
+    if (e.type === 'wave') showRaidFx(`${e.wave}波 が来る`, `船が ${e.wave === 1 ? '' : 'さらに'}増える`);
     renderAimBar();
   };
   walk.onRaidHurt = () => { renderAimBar(); walkNote('🛡 浜を破られた!'); };
@@ -810,6 +814,7 @@ function startArchery() {
   if (el) el.textContent = '✕ 弓をおろす';
   document.getElementById('walk-hud')?.classList.add('fishing');
   renderAimBar();
+  showRaidFx('1波 が来る', '沖から蛮族船が寄せてくる');
   sfx.play('ui');
 }
 
@@ -832,6 +837,8 @@ function stopArchery() {
   walk.stopArchery();
   setBowButton('ready');
   for (const id of ['aim-mark', 'aim-draw', 'aim-bar']) on(id, false);
+  document.getElementById('aim-marks')?.replaceChildren();
+  document.getElementById('aim-fx')?.replaceChildren();
   jumpEl()?.style.removeProperty('display');
   setWalkExitLabel(false);
   document.getElementById('walk-hud')?.classList.remove('fishing');
@@ -860,6 +867,47 @@ function bowPress() {
 function bowRelease() {
   bowEl()?.classList.remove('press');
   if (walk?.isAiming) walk.setDrawing(false);
+}
+
+// 波の合図。**本筋のターン開始(showTurnFx)と同じ見せ方を借りる。**
+// 帯が走って札が出る、あの形をそのまま使うと「区切りがついた」が一目で伝わる
+// ── 見せ方を2つに分けても覚えることが増えるだけ。
+function showRaidFx(title, sub, tone = 'me') {
+  const host = document.getElementById('aim-fx');
+  if (!host) return;
+  host.querySelector('.turnfx')?.remove();   // 続けて出たら前のは捨てる
+  const div = document.createElement('div');
+  div.className = `turnfx ${tone}`;
+  div.style.setProperty('--pc', '#ffd97d');
+  div.innerHTML = `
+    <span class="turnfx-band"></span>
+    <span class="turnfx-card">
+      <span class="chip">🏹</span>
+      <span class="turnfx-text"><b>${title}</b><small>${sub}</small></span>
+    </span>`;
+  host.appendChild(div);
+  setTimeout(() => div.classList.add('out'), 1700);
+  setTimeout(() => div.remove(), 2120);
+}
+
+// 画面の外にいる敵を、端の三角で知らせる。
+// 構えているカメラは狭いので、視界の外から寄せてきた船に気づけない。
+const aimMark = { at: 0 };
+function renderAimMarks() {
+  const host = document.getElementById('aim-marks');
+  const w = walk;
+  if (!host || !w?.raid) return;
+  const marks = w.offScreenTargets();
+  // 数が変わったときだけ作り直す(毎回 innerHTML を書くと押せなくなる ── dom.js)
+  while (host.childElementCount > marks.length) host.lastElementChild.remove();
+  while (host.childElementCount < marks.length) host.appendChild(document.createElement('i'));
+  marks.forEach((m, i) => {
+    const el = host.children[i];
+    el.className = m.kind === 'foe' ? 'foe' : '';
+    el.style.left = `${m.x}px`;
+    el.style.top = `${m.y}px`;
+    el.style.transform = `rotate(${m.deg}deg)`;
+  });
 }
 
 // 射終わり。結果を出して、少し置いてから弓をおろす
@@ -2382,6 +2430,16 @@ function walkPointerDown(e) {
   if (walkEmoteOpen) setWalkEmotes(false);
   if (walkLookOpen) setWalkLooks(false);
   const left = e.clientX < window.innerWidth / 2;
+  // **弓を構えている間は、左半分で狙う。** 撃つボタンは右下にあるので、
+  // 狙いも右半分だと、狙っている指と撃つ指が同じ側で取り合いになる
+  // (親指1本で「向けて、引いて、離す」ができない)。
+  // 構えている間は歩けないので、移動に使っていた左半分がそのまま空く。
+  if (walk.isAiming) {
+    if (left && walkTouch.look == null) {
+      walkTouch.look = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    }
+    return;
+  }
   // 釣っている間は動けない。視点だけは回せる
   if (left && walk.isFishing) return;
   if (left && walkTouch.move == null) {
@@ -2492,6 +2550,7 @@ setInterval(() => {
   const fill = bar?.firstElementChild;
   if (fill) fill.style.width = `${Math.round(k * 100)}%`;
   bar?.classList.toggle('full', k >= 1);
+  renderAimMarks();
 }, 40);
 
 // ---- HUD クリック(data-act 委譲) ----
