@@ -8,6 +8,7 @@ import { makeTower, makeBarbarianShip } from '../render3d/board3d.js';
 
 const SHIP_SCALE = 0.42;     // 盤の駒より小ぶりに。等倍だと浜を覆う
 const FOE_H = 0.20;          // 蛮族の背丈(盤の寸法)
+const TOWER_SCALE = 0.85;    // 浜に建てる櫓。盤の駒の大きさだと浜を覆う
 // 矢。**盤の寸法にしては大きい。** 実物の比なら細い棒だが、
 // 携帯の画面で 5 タイル先を飛ぶ矢は、正しい太さだと1画素も残らない
 // ── 実際「飛んでいる矢が見えない」ところから太くした。
@@ -16,11 +17,17 @@ const ARROW_R = 0.011;
 // 尾を引かせる。1フレームに 0.25 タイル進むので、1本の矢だけだと
 // 点滅しているようにしか見えない
 const TRACER_LEN = 0.55;
-// 櫓を立ち位置から岸に沿ってどれだけずらすか(盤の寸法)。
-// **符号は構えたカメラと逆。** カメラは肩の横(+outZ, -outX 側)へ回り込む
-// ので、櫓を同じ側に建てると今度は櫓が画面の真ん中に来て海が見えない
-// ── 体をよけたら櫓が入った、を一度やっている。
-const TOWER_SIDE = -0.34;
+// 櫓の置き場所。立ち位置から見て、陸のほう(TOWER_BACK)と岸に沿った横
+// (TOWER_SIDE)へずらす。
+//
+// **構えたときのカメラより後ろに置くのが肝。** カメラは肩の横・少し後ろに
+// 付くので、それより後ろの物は画面に入りようがない。
+//   横だけにずらす  … 端に映って邪魔だった(0.34)
+//   横へ大きく逃がす … 邪魔ではなくなるが、歩いて近づいても見えず、
+//                      「あの浜に何かある」の目印にならなかった(0.85)
+//   後ろへ回す      … 陸から歩いてくる人は必ず通り、狙う間は映らない
+const TOWER_BACK = 1.05;
+const TOWER_SIDE = -0.45;
 
 // 蛮族ひとり。棒人間ほど作り込まない ── 何人も出るし、遠くの浜で見るので、
 // 「暗い色の人影が浜を上がってくる」ことのほうが大事。
@@ -105,10 +112,11 @@ export class ArcheryFx {
     // 海のほうを向いたときに櫓が正面をふさいで、撃つ相手が1隻も見えない
     // (港の看板を横へよけるのと同じ理由。ground.js の STAND_SIDE)。
     this.tower = makeTower(towerColor);
+    this.tower.scale.setScalar(TOWER_SCALE);
     this.tower.position.set(
-      post.x + post.outZ * TOWER_SIDE,
+      post.x - post.outX * TOWER_BACK + post.outZ * TOWER_SIDE,
       post.y,
-      post.z - post.outX * TOWER_SIDE,
+      post.z - post.outZ * TOWER_BACK - post.outX * TOWER_SIDE,
     );
     // 海を背にして立つ(旗が陸から見えるように)
     this.tower.rotation.y = Math.atan2(post.outX, post.outZ);
