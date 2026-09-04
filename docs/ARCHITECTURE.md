@@ -119,7 +119,7 @@ dispatch(state, action)
 
 ```
 src/
-├── main.js       # 画面フロー(title/select/rules/records/game)・入力モード・CPUスケジューラ・演出
+├── main.js       # 画面フロー(title/select/walkset/rules/records/online/game)・入力モード・CPUスケジューラ・演出
 ├── actions.js    # validate / apply の一本道
 ├── state.js      # createGame と定数
 ├── progress.js   # 戦績と実績の保存・集計(localStorage)
@@ -533,6 +533,14 @@ main.js ── 通常の refresh・dispatch・演出がそのまま動く
 
 - **乱数はそれぞれ専用の種を持つ。** `state.rng` は絶対に回さない ──
   回すとオンライン対戦で全員の乱数列がずれる。
+- **ひとりで歩くときは、島えらびの画面(`walkset`)で島と種を決める。**
+  歩く島は `makeWalkIsland(seed, mode)` が作る ── 散策部屋と同じ入口。
+  ここを設けるまでは、タイトルの飾りの盤(`showTitleBoard` が `mode:'cak'`
+  で作る)をそのまま歩いていたので、**タイトルから歩くと必ず都市と騎士の島**
+  だった。対戦の設定(`settings`)とは分けてある(歩くのに CPU の数は要らないし、
+  歩くために選んだ島で次の対戦が始まっても困る)。
+  何が乗っている島かは `meet-guide.js` の `islandNoteHtml` が1行で出し、
+  `test/meet-guide.test.js` が**実際に島を作って**書いてあることと突き合わせる。
 - 櫓や受付のまわりは木や岩を片付ける(`POST_CLEAR` / `DESK_CLEAR`)。
   海のほうに物を置かないのは、構える高さが地面から 0.11 しかなく、
   低い物でも射線を塞ぐため。片付けた木は島を出るときに戻す。

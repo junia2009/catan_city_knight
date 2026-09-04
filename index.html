@@ -555,6 +555,7 @@
   }
   body[data-screen="title"] #screen-title { display: flex; }
   body[data-screen="select"] #screen-select { display: flex; }
+  body[data-screen="walkset"] #screen-walkset { display: flex; }
   body[data-screen="rules"] #screen-rules { display: flex; }
   body[data-screen="online"] #screen-online { display: flex; }
   body[data-screen="records"] #screen-records { display: flex; }
@@ -1209,6 +1210,25 @@
   .rcard .ricon { font-size: 22px; margin-top: 2px; }
   .rcard small { color: var(--dim); margin-left: 8px; }
   .rcard p { margin-top: 2px; font-size: 12.5px; }
+  /* 島えらび(ひとりで歩く)。島5つ + すがた8つで縦に長いので、
+     背の低い端末でも下の「島に入る」まで届くようにする。 */
+  #walkset-panel { max-height: 92dvh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  /* 「島に入る」は下に貼りつける。背の低い端末では、送らないと
+     いちばん押したいボタンが画面の外にいた(375x667 で実測)。 */
+  #walkset-panel .row.end {
+    position: sticky; bottom: -22px; z-index: 2;
+    margin-top: auto; padding: 10px 0 22px;
+    background: linear-gradient(to top, #0f2439 74%, rgba(15, 36, 57, 0));
+  }
+  /* その島で何ができるかの一言 */
+  .mg-solo {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 12.5px; color: #cfdcea; line-height: 1.6;
+    background: rgba(0,0,0,0.22); border: 1px solid var(--line);
+    border-radius: 10px; padding: 9px 11px;
+  }
+  .mg-solo .mg-dim { color: var(--dim); font-size: 11.5px; }
+  .mg-solo b { color: var(--accent2); }
   /* あそびかた(集まり)。箇条書きと、大富豪の「入れるルール」の一覧 */
   .mg-list { padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
   .mg-note {
@@ -1718,6 +1738,10 @@
   </div>
   <div id="screen-select" class="screen">
     <div class="select-panel" id="select-panel"></div>
+  </div>
+  <!-- ひとりで島を歩くときの島えらび(タイトルの 🚶 から) -->
+  <div id="screen-walkset" class="screen">
+    <div class="select-panel" id="walkset-panel"></div>
   </div>
   <div id="screen-rules" class="screen">
     <div class="select-panel rules-panel" id="rules-panel"></div>

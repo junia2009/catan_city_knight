@@ -141,6 +141,35 @@ export function guideBodyHtml(id, { rules = null } = {}) {
     ${id === 'daifugo' ? dfgRulesHtml(rules) : ''}`;
 }
 
+// 島ごとに、**ひとりでも触れるもの**。
+//
+// 港の釣りはどの島にもあるので別枠。櫓(蛮族を射る)は都市と騎士だけ、
+// 巣の竜はドラゴンの島だけ ── どちらも進行が手元にあるので、ひとりでも動く。
+// **集まり(大会)はここに入れない。** サーバーが要るので、混ぜて並べると
+// 「基本の島を選べば大富豪がひとりで遊べる」と読めてしまう。
+// **集まりと同じ名前で書かない。** 都市と騎士の島は、櫓に立てばひとりでも
+// 撃てる ── 集まりのほうは「順位を競う」だけの違いなので、同じ言葉で並べると
+// 「ひとりでは撃てない」とも「ひとりで大会ができる」とも読めてしまう。
+const SOLO = {
+  cak: ['🏹 浜の物見の櫓で弓を構える(ひとりでも撃てる)'],
+  dragon: ['🐉 山の上の巣で眠る竜に会う'],
+};
+const SOLO_ANY = '🎣 港で釣り(釣ったものは図鑑に残る)';
+
+export function islandSolo(mode) {
+  return [SOLO_ANY, ...(SOLO[mode] ?? [])];
+}
+
+// 島を選ぶところに出す一言。**ひとりでできることと、人が要ることを分ける。**
+export function islandNoteHtml(mode) {
+  const meet = MEETS[mode];
+  return `<div class="mg-solo">
+    ${islandSolo(mode).map((t) => `<div>${t}</div>`).join('')}
+    <div class="mg-dim">${meet
+      ? `🎪 中心に<b>${meet.name}</b>の受付。順位を競う集まりは、オンラインで人が集まったときだけ開けます`
+      : '🎪 この島に受付はありません'}</div></div>`;
+}
+
 // 島の歩きかた。どの島でも同じなので、集まりの説明とは別に置く
 export function walkGuideHtml() {
   return `<h4>🚶 島のあるきかた</h4>

@@ -10,8 +10,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  GUIDES, MIN_PLAYERS as GUIDE_MIN, guideBodyHtml, meetGuideHtml, meetsGuideHtml, minutes,
+  GUIDES, MIN_PLAYERS as GUIDE_MIN, guideBodyHtml, islandNoteHtml, islandSolo,
+  meetGuideHtml, meetsGuideHtml, minutes,
 } from '../src/render/meet-guide.js';
+import { createGame } from '../src/state.js';
+import { fishingSpots, nestPoint, watchPost } from '../src/minigame/ground.js';
+import { ARCHERY_MODES } from '../src/minigame/archery.js';
+import { MODES } from '../src/progress.js';
 import { rulesHtml, RULES_TABS } from '../src/render/rules-content.js';
 import { MEETS } from '../src/minigame/meets.js';
 import { RULES as DFG_RULES } from '../src/minigame/daifugo.js';
@@ -127,4 +132,48 @@ test('あそびかた: 説明書の「集まり」タブに全部載る', () => 
   const tab = rulesHtml('meets');
   assert.ok(tab.includes(MEETS.base.title), 'タブの中身が集まりになっていない');
   assert.match(tab, /data-act="rules-tab:meets"/);
+});
+
+// ---- 島えらび(ひとりで歩く)に出す一言 ----
+//
+// **書いてあることを、実際に島を作って確かめる。** 文章だけで持っていると、
+// 島の作りが変わったときに黙って嘘になる(「櫓で射られます」と書いてある
+// 島に櫓が無い、など)。ここだけは本物の盤から測る。
+test('島えらび: 書いてあるものが本当にその島にある', () => {
+  for (const mode of MODES) {
+    const said = islandSolo(mode).join('\n');
+    for (const seed of [1, 7, 4242]) {
+      const st = createGame({ seed, playerCount: 4, humanIndex: -1, mode });
+      // 港の釣りはどの島にもある(だから全部の島に書いてある)
+      assert.ok(fishingSpots(st).length > 0, `${mode}/${seed} に釣り場が無い`);
+      assert.ok(said.includes('釣り'), `${mode} に釣りが書かれていない`);
+      // 巣の竜。盤に巣があるかどうかと、書いてあるかどうかを合わせる
+      assert.equal(said.includes('巣'), nestPoint(st) != null,
+        `${mode}/${seed}: 巣の有無と文章が食い違う`);
+      // 櫓。**盤には全ての島に立つが、弓を構えられるのは ARCHERY_MODES だけ**
+      assert.ok(watchPost(st), `${mode}/${seed} に櫓の場所が無い`);
+      assert.equal(said.includes('櫓'), ARCHERY_MODES.includes(mode),
+        `${mode}: 弓を構えられるかと文章が食い違う`);
+    }
+  }
+});
+
+// ひとりでできることと、人が要ることを混ぜない。
+// 混ぜると「基本の島を選べば大富豪がひとりで遊べる」と読めてしまう。
+test('島えらび: 集まりは「ひとりでできること」に混ぜない', () => {
+  for (const mode of MODES) {
+    const meet = MEETS[mode];
+    const solo = islandSolo(mode).join('\n');
+    if (meet) assert.equal(solo.includes(meet.name), false,
+      `${mode}: ${meet.name} がひとりでできることに並んでいる`);
+    const html = islandNoteHtml(mode);
+    if (meet) {
+      assert.ok(html.includes(meet.name), `${mode}: 受付に何があるか書かれていない`);
+      assert.match(html, /オンライン/, `${mode}: 人が要ることが書かれていない`);
+    } else {
+      assert.match(html, /受付はありません/);
+    }
+    // ひとりでできることは、受付があってもなくても必ず出る
+    for (const t of islandSolo(mode)) assert.ok(html.includes(t), `${mode}: ${t} が出ていない`);
+  }
 });
