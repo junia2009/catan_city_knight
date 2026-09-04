@@ -53,7 +53,8 @@ test('progress: 空の戦績でも全モードの枠が出る', () => {
   assert.equal(s.total.played, 0);
   assert.equal(s.total.bestTurns, null);
   // 対戦の到達値は空。散策部屋の記録(蛮族を射る)は 0 から始まる
-  assert.deepEqual(s.bests, { raidScore: 0, raidWave: 0, raidAcc: 0 });
+  assert.deepEqual(s.bests,
+    { raidScore: 0, raidWave: 0, raidAcc: 0, daifugoPlayed: 0, daifugoBest: 0 });
 });
 
 test('progress: モード別・難易度別に数える', () => {
@@ -652,4 +653,53 @@ test('射: addRaidRun は元の戦績を書き換えない', () => {
   addRaidRun(p, { score: 100, wave: 6, shots: 20, hits: 20 });
   assert.deepEqual(p.raid, emptyRaid());
   assert.deepEqual(p.achievements, {});
+});
+
+// ---- 大富豪(散策部屋)----
+
+test('大富豪: 1番に上がると実績と称号が付く', () => {
+  const r = addContestResult(emptyProgress(), {
+    kind: 'daifugo', won: true, score: 3, key: 'A#1',
+  });
+  assert.ok(r.unlocked.includes('daifugo-win'));
+  assert.equal(r.progress.meets.daifugo.best, 3);
+  // ほかの遊びの実績は付かない
+  assert.equal(r.unlocked.includes('meet-win'), false);
+});
+
+test('大富豪: 10回遊ぶと常連。それまでは進捗が出る', () => {
+  let p = emptyProgress();
+  for (let i = 1; i <= 9; i++) {
+    p = addContestResult(p, { kind: 'daifugo', won: false, score: 0, key: `A#${i}` }).progress;
+  }
+  assert.equal(p.achievements['daifugo-regular'], undefined, '9回で常連になっている');
+  assert.deepEqual(progressOf(achievementById('daifugo-regular'), summarize(p)),
+    { now: 9, goal: 10, unit: '回' });
+  const last = addContestResult(p, { kind: 'daifugo', won: false, score: 0, key: 'A#10' });
+  assert.ok(last.unlocked.includes('daifugo-regular'), '10回で常連にならない');
+});
+
+// 「何人抜いたか」で数えると、5人卓の2位が4人卓の1位より上に残ってしまう。
+// 記録は「大富豪になった卓の大きさ」なので、負けた回は 0。
+test('大富豪: 大卓を制すのは、4人以上の卓で1番になったときだけ', () => {
+  // 3人卓で優勝しても届かない
+  let p = addContestResult(emptyProgress(), {
+    kind: 'daifugo', won: true, score: 3, key: 'A#1',
+  }).progress;
+  assert.equal(p.achievements['daifugo-table4'], undefined, '3人卓で大卓の実績が付いた');
+  assert.deepEqual(progressOf(achievementById('daifugo-table4'), summarize(p)),
+    { now: 3, goal: 4, unit: '人' });
+  // 4人卓で優勝すると付く
+  const big = addContestResult(p, { kind: 'daifugo', won: true, score: 4, key: 'A#2' });
+  assert.ok(big.unlocked.includes('daifugo-table4'));
+});
+
+test('大富豪: 対戦の締めでは付かない', () => {
+  const result = { mode: 'base', won: true, points: 10, difficulty: 'hard', players: 4, turns: 40 };
+  const ids = unlockedBy({
+    result, marks: { daifugoPlayed: 99, daifugoBest: 9 }, stats: noStats(),
+  });
+  for (const id of ['daifugo-win', 'daifugo-regular', 'daifugo-table4']) {
+    assert.equal(ids.includes(id), false, `${id}: 対戦を終えただけで付いた`);
+  }
 });

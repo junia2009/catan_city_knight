@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import {
   makeGround, spawnPoint, fishingSpots, spotNear, hexCenter, nestPoint, nestHexOf,
   watchPost, POST_RADIUS, POST_CLEAR, DESK_RADIUS, DESK_REACH, DESK_CLEAR,
-  TABLE_RADIUS, TABLE_CLEAR, tableSeats,
+  TABLE_RADIUS, TABLE_CLEAR, TABLE_REACH, tableSeats,
 } from './ground.js';
 import { Raid, ARCHERY_MODES, BOW_Y, reach as arrowReach } from './archery.js';
 import { ArcheryFx } from './archery-fx.js';
@@ -110,6 +110,9 @@ const AIM_FOV = 64;
 // 収まるところまで引き、天板が面として見える角度まで起こす。
 const TABLE_CLOSER = -0.6;   // 負で遠ざかる(_placeCamera の closer)
 const TABLE_PITCH = 0.62;
+// 肩の横へずらす幅。真後ろから撮ると自分の体が卓の手前を隠して、
+// 天板に出ている札が頭の裏に入る(弓と同じ理由・同じ手当て)。
+const TABLE_SIDE = sc(0.34);
 // 画面の端に出す「敵はあちら」の三角を、縁からどれだけ内側に置くか(画素)
 const MARK_INSET = 26;
 
@@ -759,8 +762,10 @@ export class WalkMode {
 
     // 受付のそばに来たら知らせる(入った/出たときだけ)。
     // 受付の無い島では deskAt が null なので、そもそも近づけない
+    // 円卓は台より大きく、席も囲むので、届く距離も広く取る(ground.js)
+    const reach = this.roundTable ? TABLE_REACH : DESK_REACH;
     const near = !!this.deskAt && r.grounded
-      && Math.hypot(w.x - this.deskAt.x, w.z - this.deskAt.z) < DESK_REACH;
+      && Math.hypot(w.x - this.deskAt.x, w.z - this.deskAt.z) < reach;
     if (near !== this.atDesk) {
       this.atDesk = near;
       this.onDesk?.(near);
@@ -837,12 +842,19 @@ export class WalkMode {
     // 見下ろす角度は戻せるように覚えておく(弓と同じ作法)
     this.camPitchSaved = this.camPitch;
     this.camPitch = TABLE_PITCH;
-    this._placeCamera(0, true, TABLE_CLOSER);
+    this._placeCamera(0, true, TABLE_CLOSER, TABLE_SIDE);
     return true;
+  }
+
+  // 卓の上に出ている札を並べ直す(円卓の島だけ)。
+  // 向きは座っている席に合わせる ── 座っていなければ手前の席の向き。
+  setTableField(cards) {
+    this.desk?.setField?.(cards ?? [], this.tableSeatAt?.angle ?? Math.PI);
   }
 
   standUp() {
     if (!this.tableSeatAt) return;
+    this.setTableField([]);
     this.tableSeatAt = null;
     if (this.camPitchSaved != null) {
       this.camPitch = this.camPitchSaved;
@@ -854,7 +866,7 @@ export class WalkMode {
   _sitFrame(dt, t) {
     this.sitT += dt;
     this.walker.sit(this.sitT);
-    this._placeCamera(dt, false, TABLE_CLOSER);
+    this._placeCamera(dt, false, TABLE_CLOSER, TABLE_SIDE);
   }
 
   // ---- 蛮族を射る ----
@@ -1010,7 +1022,7 @@ export class WalkMode {
     // 構えた姿勢。引き絞りは弦と矢にも出る
     this.walker.aim(this.aimT, this.draw);
     // カメラは狙う向きへ。肩の横へずらして、体と照準を重ねない
-    this._placeCamera(dt, false, AIM_CLOSER, true);
+    this._placeCamera(dt, false, AIM_CLOSER, AIM_SIDE);
   }
 
   // 釣っている間のフレーム。歩きの計算はしない(その場に立ったまま)。
@@ -1064,7 +1076,7 @@ export class WalkMode {
     );
   }
 
-  _placeCamera(dt, snap, closer = 0, aim = false) {
+  _placeCamera(dt, snap, closer = 0, side = 0) {
     const cam = this.b.camera;
     // 追うのは「足元の位置」。描画上のモデル位置を追うと、
     // アニメーションの上下がそのまま画面の揺れになる。
@@ -1091,11 +1103,12 @@ export class WalkMode {
     const dive = Math.max(0, Math.min(1, -my / 0.6));  // 沈む深さは盤の寸法
     const eye = (sc(0.42) + h) * (1 - dive) + sc(0.16) * dive;
 
-    // 弓を構えている間は肩の横へずらす。**見る先も同じだけずらす**ので、
-    // 視線の向きは変わらず、本人だけが画面の端へどく ── ずらすのを
-    // カメラの位置だけにすると、体が中心に残ったまま斜めから見るだけになる。
-    const sx = aim ? Math.cos(this.camYaw) * AIM_SIDE : 0;
-    const sz = aim ? -Math.sin(this.camYaw) * AIM_SIDE : 0;
+    // 弓を構えているときと円卓に着いているときは、肩の横へずらす。
+    // **見る先も同じだけずらす**ので、視線の向きは変わらず、本人だけが
+    // 画面の端へどく ── ずらすのをカメラの位置だけにすると、体が中心に
+    // 残ったまま斜めから見るだけになる。
+    const sx = Math.cos(this.camYaw) * side;
+    const sz = -Math.sin(this.camYaw) * side;
     const want = new THREE.Vector3(
       w.x + sx - Math.sin(this.camYaw) * flat,
       groundY + lift + eye,

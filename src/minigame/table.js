@@ -7,14 +7,16 @@
 // 寸法は素のまま書いて、いちばん外の入れ物に縮尺を1回だけ掛ける
 // (desk.js と同じ。ぶつかる大きさと席の並びは ground.js)。
 //
-// 札そのものはここには置かない。手札も場も画面の HUD で見せる ──
-// 携帯の画面で卓の上の札を読ませるには、カメラを卓に寄せるしかなく、
-// そうすると誰が座っているのか分からなくなる。
+// **手札は置かない。場に出ている札だけを天板へ並べる。**
+// 手札まで卓の上で読ませようとすると、カメラを寄せるしかなくなり、誰が
+// 座っているのか分からなくなる ── 読ませるのは画面下の HUD の仕事。
+// 卓の上の札は「いま何が出ているか」が遠目に分かればよいので、小さくてよい。
 
 import * as THREE from 'three';
 import { WALK_SCALE, HIP_Y } from './scale.js';
 import { TABLE_RADIUS, SEAT_R, tableSeats } from './ground.js';
 import { makeSignFace } from './desk.js';
+import { RANKS, SUITS, isJoker, rankOf, suitOf } from './daifugo.js';
 
 // 素の寸法(縮尺を掛ける前)
 const R = TABLE_RADIUS / WALK_SCALE;      // 天板の半径
@@ -22,6 +24,44 @@ const RING = SEAT_R / WALK_SCALE;         // 腰かけの輪
 const TOP_Y = 0.17;                       // 天板の高さ
 const STOOL_Y = HIP_Y;                    // 腰かけの座面 = 棒人間の腰の高さ
 const STOOL_R = 0.055;
+// 天板に置く札。並べる幅は天板に収まるまで詰める
+const CARD_W = 0.13;
+const CARD_H = 0.18;
+const CARD_GAP = 0.095;
+
+// 札の絵を canvas に描いて板に貼る(フォントも画像も積まずに済む。
+// desk.js の看板と同じやり方)。同じ札は作り直さないので溜めておく。
+const faceCache = new Map();
+function cardFace(c) {
+  if (faceCache.has(c)) return faceCache.get(c);
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 136;
+  const g = canvas.getContext('2d');
+  g.fillStyle = isJoker(c) ? '#2b3b52' : '#fdfaf3';
+  g.fillRect(0, 0, 96, 136);
+  g.strokeStyle = isJoker(c) ? '#4a5f7d' : '#d8cdb8';
+  g.lineWidth = 5;
+  g.strokeRect(2.5, 2.5, 91, 131);
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  if (isJoker(c)) {
+    g.fillStyle = '#ffd97d';
+    g.font = 'bold 54px system-ui, sans-serif';
+    g.fillText('JK', 48, 68);
+  } else {
+    const suit = suitOf(c);
+    g.fillStyle = suit === 1 || suit === 2 ? '#c0392b' : '#1d2733';
+    g.font = 'bold 52px system-ui, sans-serif';
+    g.fillText(RANKS[rankOf(c)], 48, 50);
+    g.font = 'bold 40px system-ui, sans-serif';
+    g.fillText(SUITS[suit], 48, 98);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  faceCache.set(c, tex);
+  return tex;
+}
 
 export function makeTable(scene, x, z, groundY, meet, seats = 6) {
   const g = new THREE.Group();
@@ -97,10 +137,45 @@ export function makeTable(scene, x, z, groundY, meet, seats = 6) {
   flag.position.set(0.04, SIGN_Y + 0.23, 0);
   g.add(flag);
 
+  // 場に出ている札を置くところ。
+  //   外(fieldGroup) … 読む向きを合わせるために Y で回す
+  //   内(fieldFlat)  … 板を寝かせて、札の上を +Z へ向ける
+  const fieldGroup = new THREE.Group();
+  fieldGroup.position.y = TOP_Y + 0.022;
+  g.add(fieldGroup);
+  const fieldFlat = new THREE.Group();
+  fieldFlat.rotation.set(-Math.PI / 2, 0, Math.PI);
+  // **見ている人のほうへ寄せる。** 天板のまん中に置くと、看板の柱が
+  // ちょうど札の上を通って読めなくなる(柱は誰の邪魔にもならない位置に
+  // 立てるため、まん中から動かせない)。手前に寄れば読みやすくもなる。
+  fieldFlat.position.z = R * 0.25;
+  fieldGroup.add(fieldFlat);
+  const cardGeo = new THREE.PlaneGeometry(CARD_W, CARD_H);
+
   scene.add(g);
   return {
     group: g,
+    // 場の札を並べ直す。cards は daifugo.js の番号(空なら片付ける)。
+    // seatAngle は見る人の席の角度 ── **札の上をその人と反対側へ向ける**ので、
+    // どこに座っていても自分から見て正しい向きで読める。
+    setField(cards = [], seatAngle = Math.PI) {
+      fieldGroup.rotation.y = seatAngle + Math.PI;
+      for (const gone of [...fieldFlat.children]) {
+        fieldFlat.remove(gone);
+        gone.material?.dispose?.();
+      }
+      const n = cards.length;
+      if (!n) return;
+      // 天板からはみ出さないように、枚数が増えたら重ねて詰める
+      const gap = Math.min(CARD_GAP, (R * 1.5) / n);
+      cards.forEach((c, i) => {
+        const m = new THREE.Mesh(cardGeo, new THREE.MeshBasicMaterial({ map: cardFace(c) }));
+        m.position.set((i - (n - 1) / 2) * gap, 0, 0);
+        fieldFlat.add(m);
+      });
+    },
     dispose() {
+      cardGeo.dispose();
       g.removeFromParent();
       g.traverse((o) => {
         o.geometry?.dispose?.();

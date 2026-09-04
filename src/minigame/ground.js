@@ -96,6 +96,12 @@ export const DESK_CLEAR = sc(0.95);
 export const TABLE_RADIUS = sc(0.30);   // 天板の半径(ぶつかる大きさでもある)
 export const SEAT_R = sc(0.50);         // 腰かけを並べる輪の半径
 export const TABLE_CLEAR = sc(1.35);    // 卓のまわりを片付ける広さ
+// 卓に「着いている」と見なす距離。**腰かけの輪より外、降り立つ輪より内**。
+//   腰かけより内だと … 席を立った人が卓から離れた扱いになり、
+//                      結果のあと「もう一度」が押せない
+//   降り立つ輪より外だと … 島に降りた瞬間から受付のパネルが開きっぱなしになる
+// test/minigame.test.js がこの前後関係を見張っている。
+export const TABLE_REACH = sc(0.56);
 
 // 円卓を囲む席。n 人を輪の上に等間隔で並べ、それぞれ卓のほうを向かせる。
 // **席0は手前(-z)**。島の中心から見て正面に人が座る。
@@ -116,7 +122,7 @@ export function tableSeats(center, n) {
 // **受付の手の届く範囲(DESK_REACH)より外に出すこと** ── でないと、
 // 島に降りた瞬間から受付のパネルが開きっぱなしになる。
 // 両方に同じ縮尺が掛かるので、この前後関係は縮尺を変えても保たれる。
-const SPAWN_RING = sc(0.62);
+export const SPAWN_RING = sc(0.62);
 // 散策部屋の席数。輪を何等分するか。
 const SPAWN_SEATS = 8;
 

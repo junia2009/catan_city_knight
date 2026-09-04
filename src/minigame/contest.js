@@ -52,8 +52,14 @@ export function contestOutcome(view, seat) {
     if (!me) return { entered: false, won: false, score: 0, place: 0 };
     // ひとりしか残らなかった回は優勝にしない(ほかの遊びと同じ)
     if (rank.length < 2) return { entered: true, won: false, score: 0, place: me.place };
+    // 記録は「大富豪になった卓の大きさ」。負けた回は 0 にする ──
+    // 「何人抜いたか」にすると、5人卓の2位が4人卓の1位より上に残って
+    // 「大きい卓で1番になった」の記録として使えなくなる。
     return {
-      entered: true, won: me.place === 1, score: rank.length - me.place, place: me.place,
+      entered: true,
+      won: me.place === 1,
+      score: me.place === 1 ? rank.length : 0,
+      place: me.place,
     };
   }
   // サーバーが place を入れて配っているが、ここでも数え直す ── 古い版の

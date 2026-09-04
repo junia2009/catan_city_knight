@@ -68,6 +68,7 @@ const UNIT = {
   cities: 'つ', roadLen: '', knights: '体', ships: '隻',
   metropolis: 'つ', defender: '回', maxTrack: 'Lv', treasures: 'つ', islands: 'つ',
   raidScore: '点', raidWave: '波', raidAcc: '%',
+  daifugoPlayed: '回', daifugoBest: '人',
 };
 
 // そのモードで勝った実績(5モードぶん自動で作る)
@@ -266,6 +267,24 @@ export const ACHIEVEMENTS = [
     title: '大富豪',
     icon: '🃏', tier: 'silver', scope: '散策部屋',
     checkMeet: ({ meets }) => (meets.daifugo?.won ?? 0) > 0,
+  },
+  {
+    id: 'daifugo-regular',
+    name: '卓の常連',
+    desc: '散策部屋の大富豪を10回遊ぶ',
+    title: '常連客',
+    icon: '🪑', tier: 'bronze', scope: '散策部屋',
+    mark: 'daifugoPlayed', goal: 10,
+    checkMeet: ({ meets }) => (meets.daifugo?.played ?? 0) >= 10,
+  },
+  {
+    id: 'daifugo-table4',
+    name: '大卓を制す',
+    desc: '4人以上の卓で大富豪になる',
+    title: '札さばき',
+    icon: '🎩', tier: 'gold', scope: '散策部屋',
+    mark: 'daifugoBest', goal: 4,
+    checkMeet: ({ meets }) => (meets.daifugo?.best ?? 0) >= 4,
   },
   {
     id: 'raid-meet-win',

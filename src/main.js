@@ -41,7 +41,7 @@ import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
 import { contestOutcome } from './minigame/contest.js';
-import { DESK_REACH, POST_RADIUS } from './minigame/ground.js';
+import { DESK_REACH, POST_RADIUS, TABLE_REACH } from './minigame/ground.js';
 import { meetFor } from './minigame/meets.js';
 import {
   RULES as DFG_RULES, SUITS as DFG_SUITS, RANKS as DFG_RANKS, TITLE_JP,
@@ -744,6 +744,8 @@ function exitWalk() {
   dfgSeated = false;
   dfgSel = [];
   dfgHandKey = '';
+  dfgPrev = null;
+  dfgFieldKey = '';
   setDfgRules(false);
   // 次に入った部屋は回数が 1 から始まる。持ち越すと初回を数え損ねる
   meetRound = null;
@@ -1346,8 +1348,13 @@ function renderContestPanel() {
     const got = meetUnlocked.map(achievementById).filter(Boolean)
       .map((a) => `<div class="meet-ach">🎉 実績を解除しました
         <b>${a.icon} ${a.name}</b><small>称号「${a.title}」</small></div>`).join('');
-    setHTML(el, `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>${got}
-      <div class="note">受付でもう一度エントリーできます</div>`);
+    // **その場でもう一度エントリーできるようにする。** 結果を見せている
+    // 25秒を待たないと次が始められないと、続けて遊ぶのが妙に重い
+    // (器の enter は結果の最中でも次の回の受付を開いてくれる)。
+    const again = atDesk
+      ? '<div class="row"><button class="primary" data-act="meet-enter">もう一度エントリーする</button></div>'
+      : '<div class="note">受付でもう一度エントリーできます</div>';
+    setHTML(el, `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>${got}${again}`);
     return;
   }
   if (c.phase === 'running') {
@@ -1402,6 +1409,22 @@ let dfgSeated = false;    // 円卓に座らせたか
 
 const dfgTable = () => (contest?.kind === 'daifugo' ? contest.table : null);
 
+// 卓の音。**届いた中身の差分から鳴らす。** 自分の操作だけで鳴らすと、
+// 相手が出したときに何も起きず、画面が黙って書き換わるだけになる。
+let dfgPrev = null;
+let dfgFieldKey = '';
+function dfgSounds(t, seat) {
+  const before = dfgPrev;
+  const now = t
+    ? { turn: t.turn, out: t.out.length, field: t.field?.cards.join(',') ?? '', game: t.game }
+    : null;
+  dfgPrev = now;
+  if (!now || !before || before.game !== now.game) return;   // 配り直しは鳴らさない
+  if (before.field !== now.field) sfx.play(now.field ? 'card' : 'ui');
+  if (now.out > before.out) sfx.play('gain');
+  if (now.turn === seat && before.turn !== seat) sfx.play('turn');
+}
+
 // 1枚の札。赤いマークは赤で、ジョーカーだけ別の顔にする
 function dfgCard(c, cls = '') {
   if (isJoker(c)) {
@@ -1435,8 +1458,16 @@ function renderDaifugo() {
   const on = !!t && contest.phase === 'running' && seat != null && t.players.includes(seat);
   el.classList.toggle('on', on);
   document.getElementById('walk-hud')?.classList.toggle('sitting', on);
-  if (!on) { dfgSel = []; dfgHandKey = ''; return; }
+  if (!on) { dfgSel = []; dfgHandKey = ''; dfgPrev = null; dfgFieldKey = ''; return; }
 
+  dfgSounds(t, seat);
+  // 卓の上にも同じ札を並べる。**変わったときだけ**組み直す
+  // (毎フレーム作り直すと、板と絵を毎回作っては捨てることになる)
+  const fieldKey = t.field?.cards.join(',') ?? '';
+  if (fieldKey !== dfgFieldKey) {
+    dfgFieldKey = fieldKey;
+    walk?.setTableField(t.field?.cards ?? []);
+  }
   const mine = t.turn === seat && !t.awaiting;
   const waiting = t.awaiting?.player === seat;
   renderDfgTop(t, seat, mine || waiting);
@@ -1511,20 +1542,40 @@ function renderDfgHand(t, seat) {
   }
 }
 
+// 誰かが札を選んでいる間の説明。**選んでいない人にも出す** ──
+// カード交換は自分の手が勝手に減る場面なので、黙って止まっていると
+// 「固まった」ようにしか見えない。
+function dfgWaitNote(t, seat) {
+  const a = t.awaiting;
+  if (!a) return '';
+  const who = seatName(a.player);
+  if (a.type === 'exchange') {
+    if (a.player === seat) {
+      return `${seatName(a.to)} から強い札 ${a.count}枚 が届きました。返す ${a.count}枚 を選んでください`;
+    }
+    if (a.to === seat) return `あなたの強い札 ${a.count}枚 が ${who} へ渡りました`;
+    return `${who} が返す札を選んでいます`;
+  }
+  if (a.type === 'give') {
+    if (a.player === seat) return `${seatName(a.to)} へ渡す ${a.count}枚 を選んでください`;
+    if (a.to === seat) return `${who} から ${a.count}枚 届きます`;
+    return `${who} が渡す札を選んでいます`;
+  }
+  if (a.player === seat) return `捨てる ${a.count}枚 を選んでください`;
+  return `${who} が捨てる札を選んでいます`;
+}
+
 function renderDfgAct(t, seat, mine, waiting) {
   const el = document.getElementById('dfg-act');
   const note = document.getElementById('dfg-note');
   if (waiting) {
     const a = t.awaiting;
-    const what = a.type === 'give'
-      ? `${seatName(a.to)} へ ${a.count}枚 渡す`
-      : a.type === 'discard' ? `${a.count}枚 捨てる` : `${seatName(a.to)} へ ${a.count}枚 返す`;
-    setHTML(note, `${what}(${dfgSel.length}/${a.count})`);
+    setHTML(note, `${dfgWaitNote(t, seat)}(${dfgSel.length}/${a.count})`);
     setHTML(el, `<button class="primary" data-act="dfg-pick" ${dfgSel.length === a.count ? '' : 'disabled'}>きめる</button>`);
     return;
   }
   if (!mine) {
-    setHTML(note, '');
+    setHTML(note, dfgWaitNote(t, seat));
     setHTML(el, '');
     return;
   }
@@ -3505,7 +3556,9 @@ window.hexDebug = {
   atDesk: () => atDesk,
   // reach も返す。E2E が「どれだけ寄れば届くか」を決め打ちすると、
   // 縮尺(minigame/scale.js)を変えたときにそこだけ落ちる。
-  deskAt: () => (walk?.deskAt ? { ...walk.deskAt, reach: DESK_REACH } : null),
+  deskAt: () => (walk?.deskAt
+    ? { ...walk.deskAt, reach: walk.roundTable ? TABLE_REACH : DESK_REACH }
+    : null),
   // 竜の巣(E2E 用)。居場所と、いま自分がその山の上に立っているか
   nestAt: () => (walk?.nestAt ? { ...walk.nestAt, hex: walk.nestHex } : null),
   atNest: () => !!walk?.atNest,

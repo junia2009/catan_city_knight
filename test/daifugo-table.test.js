@@ -333,9 +333,9 @@ test('結果: 1番に上がった人だけが優勝。順位はサーバーの�
   for (const seat of order.slice(1)) {
     assert.equal(contestOutcome(v, seat).won, false, `${seat} が優勝になっている`);
   }
-  // 記録は「何人抜いたか」。1番が いちばん大きい
-  assert.equal(contestOutcome(v, order[0]).score, 2);
-  assert.equal(contestOutcome(v, order.at(-1)).score, 0);
+  // 記録は「大富豪になった卓の大きさ」。負けた回は 0
+  assert.equal(contestOutcome(v, order[0]).score, 3, '卓の人数が記録に残らない');
+  assert.equal(contestOutcome(v, order[1]).score, 0, '負けた回にも記録が付く');
   // 出ていない人は数えない
   assert.equal(contestOutcome(v, 7).entered, false);
 });
