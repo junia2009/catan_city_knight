@@ -126,6 +126,8 @@ src/
 ├── achievements.js # 実績の定義(終局時の state と累計だけで判定する)
 ├── rng.js        # makeRng / rngNext / rngInt / shuffled(mulberry32)
 ├── input.js      # ポインタ入力の正規化
+├── storage.js    # localStorage の薄い包み(使えない環境でも落ちない)
+├── terrain.js    # 地形の色・名前(2D と 3D で共有)
 ├── rules/
 │   ├── board.js      # LAYOUT(hex/vertex/edge の隣接表)・盤の形の導出・盤面生成・PIPS
 │   ├── build.js      # 建設コスト・配置判定・手札上限
@@ -146,24 +148,59 @@ src/
 ├── render/
 │   ├── board-render.js  # 2D Canvas(オフスクリーンキャッシュ)
 │   ├── hud-render.js    # DOM HUD・全ダイアログ・ステータス文
+│   ├── records.js       # 戦績・実績・釣り図鑑の画面
+│   ├── avatars.js       # プレイヤーアバター(SVG 直描き。画像アセットなし)
+│   ├── dom.js           # setHTML(変わったときだけ書く。指のタップを消さない)
 │   └── rules-content.js # あそびかた(タブ構成、カード説明は定義から自動生成)
 ├── demo/
 │   ├── scenario.js      # デモ用の盤面づくり(初期配置の消化・資源配布・出目の仕込み)
 │   ├── script.js        # あそびかたデモの台本(章とビート)
 │   └── driver.js        # 再生エンジン(字幕・指カーソル・一時停止/速度)。ブラウザ専用
-├── minigame/
-│   ├── ground.js        # 歩ける地面の判定(THREE 非依存 = テスト可能)
-│   ├── walker.js        # 棒人間(手続き的なぐらつき。物理エンジンは使わない)
-│   └── walk-mode.js     # 島を歩くモード(Board3D のシーンに相乗り)
-├── render3d/board3d.js  # Three.js レンダラー
+├── minigame/            # 島を歩く(下の「ミニゲーム」の節)
+│   ├── walk-mode.js     # 島を歩くモード(Board3D のシーンに相乗り)。すべての入口
+│   ├── ground.js        # 歩ける地面・受付・櫓の場所(THREE 非依存 = テスト可能)
+│   ├── obstacles.js     # 盤の上の物(木・山・建物…)の当たり判定
+│   ├── motion.js        # 歩き・跳び・落下の計算(THREE 非依存)
+│   ├── scale.js         # 棒人間の縮尺(盤の寸法とは別。s() を通す)
+│   ├── walker.js        # 棒人間(体・姿勢・動きの取りまとめ)
+│   ├── body.js          # 棒人間のメッシュの組み立て
+│   ├── pose.js          # 姿勢(関節の角度)の計算
+│   ├── species.js       # すがたの一覧(ひと・ねこ・くま…)
+│   ├── emote.js         # エモート(その場でする短い身ぶり)
+│   ├── water-fx.js      # 海に落ちたときの演出(しぶき・泡・水中の色)
+│   ├── remote.js        # 散策部屋: 届いた位置の補間
+│   ├── remote-view.js   # 散策部屋: 他の人を描く
+│   ├── remote-st.js     # 散策部屋: 配る「見た目の状態」(席・すがた・身ぶり)
+│   ├── meets.js         # 島ごとに何の集まりが開かれるか(サーバーと共有する表)
+│   ├── contest.js       # 大会の順位づけと優勝の判定(サーバーと共有)
+│   ├── desk.js          # 集まりの受付(看板は meets.js の文言を焼き込む)
+│   ├── fish.js          # 釣れるものの一覧
+│   ├── fishing.js       # 釣りの進行(THREE 非依存)
+│   ├── fishing-fx.js    # 釣りの見た目(糸・浮き・波紋)
+│   ├── archery.js       # 蛮族を射るの進行(THREE 非依存)
+│   └── archery-fx.js    # 蛮族を射るの見た目(船・矢・射場)
+├── render3d/board3d.js  # Three.js レンダラー(盤・空・海・駒・竜。歩きもここに相乗り)
 ├── net/client.js        # オンライン対戦のクライアント(WebSocket・再接続)
-└── audio/bgm.js         # ジェネレーティブBGM(Web Audio)
+└── audio/
+    ├── bgm.js           # ジェネレーティブBGM(Web Audio)
+    ├── sfx.js           # 効果音(合成。音声ファイルは持たない)
+    ├── footsteps.js     # 足音(地面 × 動きで変わる)
+    └── ctx.js           # AudioContext の共有
 
-server/                  # オンライン対戦サーバー(Cloudflare Workers)
+server/                  # オンライン対戦・散策部屋のサーバー(Cloudflare Workers)
+├── index.js             # Worker(合言葉の発行と振り分け)
+├── room-do.js           # Durable Object(WebSocket ↔ RoomCore / 集まりの進行)
 ├── room-core.js         # 部屋のロジック(トランスポート非依存 = テスト可能)
-├── room-do.js           # Durable Object(WebSocket ↔ RoomCore)
-└── index.js             # Worker(合言葉の発行と振り分け)
+├── walk-relay.js        # 散策部屋の位置の中継(溜めて一定間隔でまとめて配る)
+├── meet-core.js         # 集まりの進行の器(受付 → 開催 → 結果 の状態機械)
+├── fishing-contest.js   # つり大会(漁師たちの島)
+├── dragon-hunt.js       # ドラゴンから逃げろ(ドラゴンの島)。竜を動かすのもここ
+└── raid-contest.js      # 蛮族を射る(都市と騎士の島)。波の種を配る
 ```
+
+`server/` は `src/rules/` と `src/actions.js` をそのまま取り込む(wrangler が
+バンドルする)。**ルールエンジンを直したらサーバーも再デプロイが要る** ──
+`.github/workflows/server.yml` の paths に `src/**` が入っているので自動で走る。
 
 ### 進歩カードのプラグイン構造
 
@@ -257,6 +294,11 @@ Durable Object がそのまま `import` して使える。**ルール実装は 1
 | `server/room-core.js` | 部屋のロジック(席・ホスト・開始・アクション適用・伏せ処理・肩代わり)。**WebSocket に非依存**なので `node --test` で直接検証できる |
 | `server/room-do.js` | Durable Object。WebSocket 接続を RoomCore に繋ぎ、誰に何を送るかを決める |
 | `server/index.js` | Worker。`/new` で合言葉を発行し、`/room?code=` を DO へ振り分ける |
+| `server/walk-relay.js` | 散策部屋の位置の中継。溜めて一定間隔でまとめて配る(下の節) |
+| `server/meet-core.js` | 集まりの進行の器(受付 → 開催 → 結果)。中身は継承先が決める |
+| `server/fishing-contest.js` | つり大会 |
+| `server/dragon-hunt.js` | ドラゴンから逃げろ。竜を動かして捕まえるのもサーバー |
+| `server/raid-contest.js` | 蛮族を射る。全員に同じ波の種を配る |
 | `src/net/client.js` | ブラウザ側。接続・再接続・端末IDの保持 |
 
 ### メッセージ
@@ -323,6 +365,40 @@ Durable Object は WebSocket が繋がっている間ずっとメモリに常駐
 - 席の手は**自分の席のものしか出せない**(`action.player !== seat` は拒否)
 - ルール判定は `validateAction` がサーバーで必ず走る(クライアントの検証は往復を減らす早期リターンにすぎない)
 - ルール・難易度・開始はホストのみ
+
+### 散策部屋(`kind: 'walk'`)
+
+同じ合言葉で集まって、対戦せずに島を歩く部屋。盤は「種 + 島の種類」から
+**各自が同じ引数で作る**ので、サーバーは盤を持たない。
+
+- **位置は中継するだけ**(`walk-relay.js`)。届いた位置を溜めて 10回/秒で
+  「全員ぶん1通」にして配る。宛先ごとに作り分けない(自分の席を飛ばすのは
+  受け取った側の仕事)── N人に N通ずつ作ると N×N になる。
+- 位置は **storage に書かない**。次の瞬間には古くなる値なので、書くと遅くて高いだけ。
+
+#### 集まり(大会)
+
+島ごとに何が開かれるかは `src/minigame/meets.js` の表**1か所**で決まり、
+サーバーとクライアントの両方がそこを見る(受付が立たない島で大会が始まる、
+という食い違いを防ぐ)。表に足したら `room-do.js` の `ENGINES` にも足すこと ──
+`test/meets.test.js` がその食い違いを見張っている。
+
+| 島 | 開かれるもの | 誰が進行を持つか |
+|---|---|---|
+| 漁師たち | つり大会 | 締め切りと順位。**釣果はクライアントが申告**(魚の抽選は端末側) |
+| ドラゴン | ドラゴンから逃げろ | 竜の位置も当たり判定もサーバー。端末ごとに竜の居場所が違うと揉める |
+| 都市と騎士 | 蛮族を射る | 波の**種**を配る。点はクライアントが申告(当たり判定は端末側) |
+
+- **締め切りと順位はサーバーが決める。** 端末の時計のずれや切断で
+  「どっちが勝ったか」が食い違わないように、`view()` を全員に配る。
+- 順位の付け方(`src/minigame/contest.js`)は**サーバーとクライアントで同じ1本**を通す。
+  同着は同率(1,1,3)。席番号は表に並べる順を決めるだけで、順位には効かせない。
+- クライアントが申告するものには壊れた値よけを置く(上限・間隔・単調増加)。
+  友達どうしで遊ぶ前提なので、それ以上の対策はしていない。
+- 秒に何度も届く申告は `quiet` を返し、**配り直しも保存もしない**。
+  順位表を秒に何度も描き直すと実機の指が効かなくなるし(`src/render/dom.js`)、
+  当たるたびに storage へ書くのは高い。1秒ごとの tick が同じ表を運ぶ。
+- 大会の通算と実績は端末のローカル(`progress.js` の `meets`)。サーバーは持たない。
 
 ## BGM(`audio/bgm.js`)
 
@@ -422,11 +498,31 @@ main.js ── 通常の refresh・dispatch・演出がそのまま動く
   海には立てない」を全モードで確かめる ── 盤の幾何を1つ間違えると
   島の真ん中に穴が空くが、描画を見ただけでは気づきにくい。
 
+### 島の上でできること
+
+歩くだけでなく、島ごとに遊びが乗っている。**どれも「進行」と「見た目」を
+分けてある** ── 進行(`fishing.js` / `archery.js`)は THREE も DOM も
+知らない純粋な計算なので `node --test` で押さえられ、見た目(`*-fx.js`)は
+それを映すだけ。`test/no-bare-imports.test.js` がこの分離を静的に見張る。
+
+| 遊び | 場所 | 進行 / 見た目 |
+|---|---|---|
+| 釣り | 港の桟橋ぎわ(全ての島) | `fishing.js` / `fishing-fx.js`。釣れるものは `fish.js` の表 |
+| 蛮族を射る | 浜の物見の櫓(都市と騎士) | `archery.js` / `archery-fx.js` |
+| 集まり(大会) | 島の中心の受付 | サーバー持ち(上の「散策部屋」の節) |
+
+- **乱数はそれぞれ専用の種を持つ。** `state.rng` は絶対に回さない ──
+  回すとオンライン対戦で全員の乱数列がずれる。
+- 櫓や受付のまわりは木や岩を片付ける(`POST_CLEAR` / `DESK_CLEAR`)。
+  海のほうに物を置かないのは、構える高さが地面から 0.11 しかなく、
+  低い物でも射線を塞ぐため。片付けた木は島を出るときに戻す。
+- 記録と実績は端末のローカル(`progress.js`)。図鑑・自己最高・大会の通算を持つ。
+
 ## テスト戦略
 
 | 層 | 手段 |
 |---|---|
-| ルール単体 | `node --test test/`(145+ テスト)。validate の拒否理由・apply の結果・保存則 |
+| ルール単体 | `node --test test/`(480 テスト)。validate の拒否理由・apply の結果・保存則 |
 | 回帰 | `test/board-regression.test.js`。モード×シードごとに盤面と対戦の全展開をハッシュで固定。
 盤面まわり(LAYOUT・生成・合法手の列挙順)を触って既存モードが変わったら落ちる |
 | 統計 | `test/rng.test.js` + `scripts/dice-audit.mjs`(χ² バッテリー。対の検定は**非重複**ペアで) |
