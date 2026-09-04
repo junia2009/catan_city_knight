@@ -7,6 +7,7 @@ import { WalkRelay, TICK_MS } from './walk-relay.js';
 import { FishingContest } from './fishing-contest.js';
 import { DragonHunt } from './dragon-hunt.js';
 import { RaidContest } from './raid-contest.js';
+import { DaifugoTable } from './daifugo-table.js';
 import { hasMeet, meetFor } from '../src/minigame/meets.js';
 import { meetHome } from '../src/minigame/ground.js';
 import { createGame } from '../src/state.js';
@@ -14,7 +15,9 @@ import { createGame } from '../src/state.js';
 // 島ごとの進行。表(src/minigame/meets.js)の id で引く。
 // 表に足したのにここへ書き忘れると、受付は立つのに何も始まらない島ができる
 // ── test/meets.test.js がその食い違いを見張っている。
-const ENGINES = { fishing: FishingContest, dragonhunt: DragonHunt, raid: RaidContest };
+const ENGINES = {
+  fishing: FishingContest, dragonhunt: DragonHunt, raid: RaidContest, daifugo: DaifugoTable,
+};
 
 // CPU / 切断中の席をサーバーが打つときの間合い(ローカル戦の演出と揃える)
 const AUTO_DELAY_MS = 650;
@@ -82,6 +85,7 @@ export class RoomDO {
     // 波の抽選に使う種。全員が同じ波を迎え撃つように、サーバーが配る
     // (server/raid-contest.js)。部屋の種そのものは既に全員が持っている。
     this.contest.setSeed?.(r.seed);
+    this.syncHost();
     if (!this.contest.setHome) return;
     // 島はクライアントと同じ「種 + 島の種類」から作る(main.js の
     // makeWalkIsland と同じ引数でないと、竜が別の島の中心から飛び立つ)。
@@ -97,6 +101,13 @@ export class RoomDO {
     this.contest.setHome(home.x, home.y);
   }
 
+  // ルールを決められる人(ゲームマスター)を進行へ渡す。
+  // **名簿から取る。** クライアントの言い分で決めると、誰でもホストを名乗れる。
+  syncHost() {
+    if (!this.contest?.setHost || !this.room) return;
+    this.contest.setHost(this.room.lobbyInfo().hostSeat);
+  }
+
   async fetch(request) {
     await this.ready;
     const url = new URL(request.url);
@@ -108,6 +119,9 @@ export class RoomDO {
     if (url.pathname.endsWith('/claim')) {
       if (this.room) return Response.json({ free: false });
       this.room = new RoomCore({ code, kind });
+      // **部屋を作った時点で進行も作る。** 島を「変えた」ときにしか作らないと、
+      // 既定の島(基本)のまま遊ぶ部屋にはいつまでも受付が立たない。
+      this.makeMeet(this.room.settings.mode);
       await this.save();
       // 誰も入らないまま放置された部屋も掃除対象にする(合言葉を空けるため)
       this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
@@ -119,6 +133,7 @@ export class RoomDO {
     }
     if (!this.room) {
       this.room = new RoomCore({ code, kind });
+      this.makeMeet(this.room.settings.mode);
       await this.save();
       this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
     }
@@ -178,7 +193,7 @@ export class RoomDO {
       // 大会のいまの様子も渡す。変わったときだけ配っていると、あとから
       // 来た人はいつまでも受付を見られない(実際そうなっていた)。
       if (room.kind === 'walk' && this.contest) {
-        this.send(ws, { t: 'contest', contest: this.contest.view() });
+        this.send(ws, { t: 'contest', contest: this.contest.viewFor(res.seat) });
       }
       if (room.phase === 'playing') this.sendState(ws, res.seat, null);
       this.pumpAuto();
@@ -248,6 +263,7 @@ export class RoomDO {
       }
       const seat = room.seatOf(clientId);
       if (seat < 0) return;
+      this.syncHost();
       // 中身は進行のほうが知っている。room-do は遊びごとの操作を持たない
       const res = this.contest.command(seat, msg.do, msg);
       if (res.error) return this.send(ws, { t: 'error', msg: res.error });
@@ -315,6 +331,17 @@ export class RoomDO {
   }
 
   broadcastContest() {
+    // 席ごとに伏せ方が違う遊び(大富豪)は、接続ごとに作って送る。
+    // それ以外は1通だけ作って配る ── 竜は秒10回配るので、宛先ごとに
+    // 作り直すと人数の二乗ぶんの手間になる。
+    if (this.contest?.perSeat) {
+      for (const [ws, clientId] of this.sockets) {
+        const seat = this.room.seatOf(clientId);
+        if (seat < 0) continue;
+        this.send(ws, { t: 'contest', contest: this.contest.viewFor(seat) });
+      }
+      return;
+    }
     // 受付の無い島に変わったときは **null を配る**。黙っていると、
     // 前の島の大会が走ったままの表がクライアントに残り続ける。
     const line = JSON.stringify({ t: 'contest', contest: this.contest?.view() ?? null });
@@ -426,6 +453,7 @@ export class RoomDO {
 
   broadcastLobby() {
     const info = this.room.lobbyInfo();
+    this.contest?.setHost?.(info.hostSeat);
     for (const ws of this.sockets.keys()) this.send(ws, { t: 'lobby', ...info });
   }
 

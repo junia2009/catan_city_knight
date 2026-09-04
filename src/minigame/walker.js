@@ -15,7 +15,8 @@
 import * as THREE from 'three';
 import { WalkerMotion, WALK_SPEED, MAX_DT } from './motion.js';
 import {
-  walkPose, airPose, tumblePose, sinkPose, fishPose, aimPose, emotePose, PHASE_PER_UNIT,
+  walkPose, airPose, tumblePose, sinkPose, fishPose, aimPose, sitPose, emotePose,
+  PHASE_PER_UNIT,
 } from './pose.js';
 import { makeWalker } from './body.js';
 
@@ -120,6 +121,13 @@ export class Walker {
     this.parts.bow.draw(draw);
     const g = this.motion.groundAt(this.pos.x, this.pos.z);
     this._apply(aimPose(t, this.motion.facing, draw), g.y);
+  }
+
+  // 円卓に着いて座る。歩きと同じで、座っている間は動かさない
+  sit(t) {
+    this.phase = 0;
+    const g = this.motion.groundAt(this.pos.x, this.pos.z);
+    this._apply(sitPose(t, this.motion.facing), g.y);
   }
 
   // 弓を持つ手の世界座標(矢はここから出す)

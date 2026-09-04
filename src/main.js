@@ -41,8 +41,13 @@ import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
 import { stepSound } from './audio/footsteps.js';
 import { contestOutcome } from './minigame/contest.js';
-import { DESK_REACH, POST_RADIUS } from './minigame/ground.js';
+import { DESK_REACH, POST_RADIUS, TABLE_REACH } from './minigame/ground.js';
 import { meetFor } from './minigame/meets.js';
+import {
+  RULES as DFG_RULES, SUITS as DFG_SUITS, RANKS as DFG_RANKS, TITLE_JP,
+  beatsField, classify, defaultRules, fitsShibari, forbiddenFinish,
+  isJoker, playsFor, rankOf, suitOf,
+} from './minigame/daifugo.js';
 import { EMOTES } from './minigame/emote.js';
 import { WALK_SEATS } from './minigame/remote-st.js';
 import { SPECIES, speciesById, cleanSpecies, DEFAULT_SPECIES } from './minigame/species.js';
@@ -429,7 +434,9 @@ function startNet(code, name, kind = 'game') {
       walk?.setDragon(c?.phase === 'running' && c.dragon ? c.dragon : null);
       noteContestResult(c);
       syncRaidContest(c);
+      syncTable(c);
       renderContest();
+      renderDfgRules();
     },
     onError: (msg, fatal) => {
       online.error = msg;
@@ -734,6 +741,12 @@ function exitWalk() {
   contest = null;
   raidNet = false;
   raidOver = false;
+  dfgSeated = false;
+  dfgSel = [];
+  dfgHandKey = '';
+  dfgPrev = null;
+  dfgFieldKey = '';
+  setDfgRules(false);
   // 次に入った部屋は回数が 1 から始まる。持ち越すと初回を数え損ねる
   meetRound = null;
   meetUnlocked = [];
@@ -1014,6 +1027,12 @@ function setWalkExitLabel(fishing) {
   if (el) el.textContent = fishing ? '✕ 釣りをやめる' : '✕ もどる';
 }
 
+// 円卓に着いている間は「席を立つ」。押すと卓から抜ける(島には残る)
+function setTableExitLabel(seated) {
+  const el = document.querySelector('[data-act="walk-exit"]');
+  if (el && seated) el.textContent = '✕ 席を立つ';
+}
+
 function setFishButton(kind) {
   const el = fishEl();
   if (!el) return;
@@ -1231,15 +1250,29 @@ function dragonArrow(d) {
   return `${ARROWS[i]} ${dist.toFixed(1)}`;
 }
 
+// いま入っているルールの名前を並べる(受付に出す1行)
+function dfgRuleNames(rules) {
+  const now = rules ?? defaultRules();
+  const on = DFG_RULES.filter((r) => now[r.id]).map((r) => r.name);
+  return on.length ? `入れるルール: ${on.join(' ・ ')}` : '入れるルール: なし(いちばん素の大富豪)';
+}
+
 // 誰も記録を残さずに終わった回の言い方。遊びごとに違う
 const MEET_EMPTY = {
   fishing: 'だれも釣れませんでした',
   dragonhunt: 'だれも出ませんでした',
   raid: 'だれも撃てませんでした',
+  daifugo: 'だれも打ちませんでした',
 };
 
 // 順位表に出す記録。遊びごとに単位が違う(釣りは cm、竜は生き残った時間)
 function meetScore(c, r) {
+  if (c.kind === 'daifugo') {
+    const why = r.why === 'foul' ? '<small>(反則)</small>'
+      : r.why === 'miyakoochi' ? '<small>(都落ち)</small>'
+      : r.why === 'left' ? '<small>(退席)</small>' : '';
+    return `<b>${TITLE_JP[r.title] ?? ''}${why}</b>`;
+  }
   if (c.kind === 'dragonhunt') {
     return r.alive
       ? '<b>逃げきり</b>'
@@ -1256,7 +1289,8 @@ function renderMeetBar() {
   const el = document.getElementById('walk-meet');
   if (!el) return;
   const c = contest;
-  const on = !!c && (c.phase === 'running' || c.phase === 'result');
+  // 円卓に着いている間は #dfg-top が同じことを出しているので、細いバーは出さない
+  const on = !!c && (c.phase === 'running' || c.phase === 'result') && !walk?.isSeated;
   el.classList.toggle('on', on);
   if (!on) { el.classList.remove('hurry'); return; }
   const me = c.rank.find((r) => r.seat === mySeat());
@@ -1271,16 +1305,19 @@ function renderMeetBar() {
     el.classList.remove('hurry');
     return;
   }
-  el.classList.toggle('hurry', c.remain <= 30000);
+  el.classList.toggle('hurry', c.kind !== 'daifugo' && c.remain <= 30000);
   const alive = c.rank.filter((r) => r.alive).length;
   const mine = c.kind === 'dragonhunt'
     ? (me?.alive
       ? ` 🐉 <b>${dragonArrow(c.dragon)}</b> のこり${alive}人`
       : ' 💀 つかまった')
-    : c.kind === 'raid'
+    : c.kind === 'daifugo'
+      ? (me ? ` 🃏 のこり ${c.table?.counts?.[mySeat()] ?? '-'}枚` : ' 観戦中')
+      : c.kind === 'raid'
       ? (me ? ` 🏹 ${me.place}位/${c.rank.length}人` : ' 観戦中')
       : (me ? ` 🎣 ${me.cm}cm(${me.place}位/${c.rank.length}人)` : ' 観戦中');
-  setHTML(el, `<span class="t">⏱ ${mmss(c.remain)}</span>` + (me ? mine : ' 観戦中'));
+  const clock = c.kind === 'daifugo' ? `<span class="t">${c.game}回戦</span>` : `<span class="t">⏱ ${mmss(c.remain)}</span>`;
+  setHTML(el, clock + (me ? mine : ' 観戦中'));
 }
 
 // 受付のそばで開くパネル
@@ -1292,8 +1329,11 @@ function renderContestPanel() {
   const seat = mySeat();
   // 受付の無い島(meets.js に無いもの)ではそもそも何も出さない
   const meet = walk?.meet ?? null;
-  // 受付から離れたら閉じる。ただし結果だけは、その場に居なくても見せたい
-  const show = !!meet && seat != null && (atDesk || c.phase === 'result');
+  // 受付から離れたら閉じる。ただし結果だけは、その場に居なくても見せたい。
+  // 円卓に着いている間は、卓の UI(#dfg)が同じ場所を使うので出さない
+  // ── 出すと「開催中です」の札が手札の上に重なる。
+  const show = !!meet && seat != null && !walk?.isSeated
+    && (atDesk || c.phase === 'result');
   el.classList.toggle('on', show);
   if (!show) { setHTML(el, ''); return; }
 
@@ -1308,8 +1348,13 @@ function renderContestPanel() {
     const got = meetUnlocked.map(achievementById).filter(Boolean)
       .map((a) => `<div class="meet-ach">🎉 実績を解除しました
         <b>${a.icon} ${a.name}</b><small>称号「${a.title}」</small></div>`).join('');
-    setHTML(el, `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>${got}
-      <div class="note">受付でもう一度エントリーできます</div>`);
+    // **その場でもう一度エントリーできるようにする。** 結果を見せている
+    // 25秒を待たないと次が始められないと、続けて遊ぶのが妙に重い
+    // (器の enter は結果の最中でも次の回の受付を開いてくれる)。
+    const again = atDesk
+      ? '<div class="row"><button class="primary" data-act="meet-enter">もう一度エントリーする</button></div>'
+      : '<div class="note">受付でもう一度エントリーできます</div>';
+    setHTML(el, `<h4>🏆 結果</h4><div class="meet-rank">${rows}</div>${got}${again}`);
     return;
   }
   if (c.phase === 'running') {
@@ -1326,9 +1371,18 @@ function renderContestPanel() {
   // ここは押せるボタンが入る唯一の場面。setHTML で「変わったときだけ」書く
   // ことに意味がある ── 受付の間もサーバーは表を配り続けているので、
   // 毎回作り直すとボタンの節点が入れ替わって、指のタップが消える。
+  // 大富豪だけは時間ではなく決着で終わるので、秒数を出さない。
+  // 代わりに「いま入っているルール」と、ホストならその選び直しを出す。
+  const host = c.hostSeat != null && c.hostSeat === seat;
+  const isDfg = c.kind === 'daifugo';
+  const head = isDfg
+    ? `<div class="note">${meet.hint}</div>
+       <div class="note">${dfgRuleNames(c.rules)}</div>
+       ${host ? '<div class="row"><button data-act="dfg-rules">🃏 ルールを決める</button></div>' : ''}`
+    : `<div class="note">${Math.round(c.total / 1000)}秒。${meet.hint}</div>`;
   setHTML(el, `<h4>${meet.title} 受付</h4>
     <div class="who">${who}</div>
-    <div class="note">${Math.round(c.total / 1000)}秒。${meet.hint}</div>
+    ${head}
     <div class="row">
       <button data-act="meet-${joined ? 'leave' : 'enter'}">${joined ? 'エントリーを取り消す' : 'エントリーする'}</button>
       ${canStart ? '<button class="primary" data-act="meet-start">はじめる</button>' : ''}
@@ -1339,6 +1393,240 @@ function renderContestPanel() {
 function renderContest() {
   renderMeetBar();
   renderContestPanel();
+  renderDaifugo();
+}
+
+// ---- 大富豪 ----
+//
+// 進行はサーバーが持つ(server/daifugo-table.js)。ここは配られた中身を
+// 描いて、選んだ札を送るだけ。**「出せるか」は手元でも見る** ── 配られた
+// 中身に判定の材料が全部入っているので(daifugo.js の viewFor)、出せない
+// 札を沈めて見せられる。通るかどうかを決めるのは、あくまでサーバー。
+let dfgSel = [];          // いま選んでいる札
+let dfgHandKey = '';      // 手札が変わったときだけ組み直すための目印
+let dfgRulesOpen = false;
+let dfgSeated = false;    // 円卓に座らせたか
+
+const dfgTable = () => (contest?.kind === 'daifugo' ? contest.table : null);
+
+// 卓の音。**届いた中身の差分から鳴らす。** 自分の操作だけで鳴らすと、
+// 相手が出したときに何も起きず、画面が黙って書き換わるだけになる。
+let dfgPrev = null;
+let dfgFieldKey = '';
+function dfgSounds(t, seat) {
+  const before = dfgPrev;
+  const now = t
+    ? { turn: t.turn, out: t.out.length, field: t.field?.cards.join(',') ?? '', game: t.game }
+    : null;
+  dfgPrev = now;
+  if (!now || !before || before.game !== now.game) return;   // 配り直しは鳴らさない
+  if (before.field !== now.field) sfx.play(now.field ? 'card' : 'ui');
+  if (now.out > before.out) sfx.play('gain');
+  if (now.turn === seat && before.turn !== seat) sfx.play('turn');
+}
+
+// 1枚の札。赤いマークは赤で、ジョーカーだけ別の顔にする
+function dfgCard(c, cls = '') {
+  if (isJoker(c)) {
+    return `<div class="dfg-card joker ${cls}" data-act="dfg-card:${c}"><span class="r">🃏</span></div>`;
+  }
+  const suit = DFG_SUITS[suitOf(c)];
+  const red = suitOf(c) === 1 || suitOf(c) === 2 ? 'red' : '';
+  return `<div class="dfg-card ${red} ${cls}" data-act="dfg-card:${c}">`
+    + `<span class="r">${DFG_RANKS[rankOf(c)]}</span><span class="s">${suit}</span></div>`;
+}
+
+// 選んでいる札が、いま出せるか。出せない理由も返す(ボタンの下に出す)
+function dfgCheck(t) {
+  if (!t || !dfgSel.length) return { ok: false, why: '' };
+  const play = classify(dfgSel, t.rules);
+  if (!play) return { ok: false, why: 'その組み合わせでは出せません' };
+  if (!beatsField(t, play, dfgSel)) return { ok: false, why: '場より強くありません' };
+  if (!fitsShibari(t, play)) {
+    return { ok: false, why: `しばり中(${t.shibari.map((x) => DFG_SUITS[x]).join('')})` };
+  }
+  // 反則負けになる手は止めない(公式どおり出せる)。代わりに必ず警告を出す
+  const foul = t.hand.length === dfgSel.length ? forbiddenFinish(t, play, dfgSel) : null;
+  return { ok: true, why: foul ? `⚠ ${foul}` : '' };
+}
+
+function renderDaifugo() {
+  const el = document.getElementById('dfg');
+  if (!el) return;
+  const t = dfgTable();
+  const seat = mySeat();
+  const on = !!t && contest.phase === 'running' && seat != null && t.players.includes(seat);
+  el.classList.toggle('on', on);
+  document.getElementById('walk-hud')?.classList.toggle('sitting', on);
+  if (!on) { dfgSel = []; dfgHandKey = ''; dfgPrev = null; dfgFieldKey = ''; return; }
+
+  dfgSounds(t, seat);
+  // 卓の上にも同じ札を並べる。**変わったときだけ**組み直す
+  // (毎フレーム作り直すと、板と絵を毎回作っては捨てることになる)
+  const fieldKey = t.field?.cards.join(',') ?? '';
+  if (fieldKey !== dfgFieldKey) {
+    dfgFieldKey = fieldKey;
+    walk?.setTableField(t.field?.cards ?? []);
+  }
+  const mine = t.turn === seat && !t.awaiting;
+  const waiting = t.awaiting?.player === seat;
+  renderDfgTop(t, seat, mine || waiting);
+  renderDfgField(t);
+  renderDfgSeats(t, seat);
+  renderDfgHand(t, seat);
+  renderDfgAct(t, seat, mine, waiting);
+}
+
+function renderDfgTop(t, seat, mine) {
+  const flags = [];
+  if (t.revolution) flags.push('<span class="flag">革命</span>');
+  if (t.jback) flags.push('<span class="flag">Jバック</span>');
+  if (t.shibari) flags.push(`<span class="flag">しばり ${t.shibari.map((x) => DFG_SUITS[x]).join('')}</span>`);
+  const who = t.awaiting ? t.awaiting.player : t.turn;
+  const turn = who === seat
+    ? '<span class="me">あなたの番</span>'
+    : `<span class="turn">${seatName(who)} の番</span>`;
+  const left = Math.ceil((contest.turnRemain ?? 0) / 1000);
+  const clock = mine && left > 0 && left <= 20
+    ? `<span class="clock hurry">${left}</span>`
+    : '';
+  setHTML(document.getElementById('dfg-top'),
+    `<span>${t.game}回戦</span>${turn}${clock}${flags.join('')}`);
+}
+
+function renderDfgField(t) {
+  const el = document.getElementById('dfg-field');
+  const html = t.field
+    ? t.field.cards.map((c) => dfgCard(c)).join('')
+    : '<span class="empty">場が流れています ── 好きな札から</span>';
+  setHTML(el, html);
+}
+
+function renderDfgSeats(t, seat) {
+  const html = t.players.map((p) => {
+    const down = t.demoted.find((d) => d.player === p);
+    const done = t.out.includes(p);
+    const cls = down ? 'gone' : done ? 'done' : (p === t.turn ? 'now' : '');
+    const title = t.titles?.[p] ? `<small>${TITLE_JP[t.titles[p]]}</small>` : '';
+    const tail = down ? '✖' : done ? `${t.out.indexOf(p) + 1}位` : `${t.counts[p]}枚`;
+    const mark = t.passed[p] && !done && !down ? ' パス' : '';
+    return `<span class="${cls}">${seatIcon(p)}${p === seat ? 'あなた' : seatName(p)}`
+      + `${title} ${tail}${mark}</span>`;
+  }).join('');
+  setHTML(document.getElementById('dfg-seats'), html);
+}
+
+// 手札。**中身が変わったときだけ組み直す。** 選ぶたびに作り直すと、
+// 指が離れる前に節点が入れ替わってタップが消える(src/render/dom.js)。
+function renderDfgHand(t, seat) {
+  const el = document.getElementById('dfg-hand');
+  if (!el) return;
+  const mine = t.turn === seat && !t.awaiting;
+  // 出せる札(自分の番のときだけ沈める。待ちのときは全部選べる)
+  const live = mine
+    ? new Set(playsFor(t, t.hand).flat())
+    : null;
+  const key = `${t.hand.join(',')}|${mine}|${!!t.awaiting}|${t.field?.cards.join(',') ?? ''}`;
+  if (key !== dfgHandKey) {
+    dfgHandKey = key;
+    // 手札が変わったら選び直し(渡した札を選んだままにしない)
+    dfgSel = dfgSel.filter((c) => t.hand.includes(c));
+    el.innerHTML = t.hand
+      .map((c) => dfgCard(c, live && !live.has(c) ? 'dead' : ''))
+      .join('');
+  }
+  // 選んでいる印だけは、作り直さずに付け替える
+  for (const node of el.children) {
+    const id = Number(node.dataset.act.split(':')[1]);
+    node.classList.toggle('sel', dfgSel.includes(id));
+  }
+}
+
+// 誰かが札を選んでいる間の説明。**選んでいない人にも出す** ──
+// カード交換は自分の手が勝手に減る場面なので、黙って止まっていると
+// 「固まった」ようにしか見えない。
+function dfgWaitNote(t, seat) {
+  const a = t.awaiting;
+  if (!a) return '';
+  const who = seatName(a.player);
+  if (a.type === 'exchange') {
+    if (a.player === seat) {
+      return `${seatName(a.to)} から強い札 ${a.count}枚 が届きました。返す ${a.count}枚 を選んでください`;
+    }
+    if (a.to === seat) return `あなたの強い札 ${a.count}枚 が ${who} へ渡りました`;
+    return `${who} が返す札を選んでいます`;
+  }
+  if (a.type === 'give') {
+    if (a.player === seat) return `${seatName(a.to)} へ渡す ${a.count}枚 を選んでください`;
+    if (a.to === seat) return `${who} から ${a.count}枚 届きます`;
+    return `${who} が渡す札を選んでいます`;
+  }
+  if (a.player === seat) return `捨てる ${a.count}枚 を選んでください`;
+  return `${who} が捨てる札を選んでいます`;
+}
+
+function renderDfgAct(t, seat, mine, waiting) {
+  const el = document.getElementById('dfg-act');
+  const note = document.getElementById('dfg-note');
+  if (waiting) {
+    const a = t.awaiting;
+    setHTML(note, `${dfgWaitNote(t, seat)}(${dfgSel.length}/${a.count})`);
+    setHTML(el, `<button class="primary" data-act="dfg-pick" ${dfgSel.length === a.count ? '' : 'disabled'}>きめる</button>`);
+    return;
+  }
+  if (!mine) {
+    setHTML(note, dfgWaitNote(t, seat));
+    setHTML(el, '');
+    return;
+  }
+  const check = dfgCheck(t);
+  setHTML(note, check.why);
+  setHTML(el,
+    `<button class="primary" data-act="dfg-play" ${check.ok ? '' : 'disabled'}>出す</button>`
+    + `<button data-act="dfg-pass" ${t.field ? '' : 'disabled'}>パス</button>`);
+}
+
+// 入れるルールを決める画面(ゲームマスターだけ)
+function setDfgRules(on) {
+  dfgRulesOpen = !!on;
+  const el = document.getElementById('dfg-rules');
+  if (!el) return;
+  el.classList.toggle('on', dfgRulesOpen);
+  if (dfgRulesOpen) renderDfgRules();
+  else setHTML(el, '');
+}
+
+function renderDfgRules() {
+  const el = document.getElementById('dfg-rules');
+  if (!el || !dfgRulesOpen) return;
+  const now = contest?.rules ?? defaultRules();
+  const rows = DFG_RULES.map((r) => `<button class="dfg-rule ${now[r.id] ? 'on' : ''}" data-act="dfg-rule:${r.id}">
+    <span class="box">${now[r.id] ? '✓' : ''}</span>
+    <span><b>${r.name}</b><small>${r.desc}</small></span>
+  </button>`).join('');
+  setHTML(el, `<h4>🃏 入れるルールを決める</h4>${rows}
+    <div class="row end"><button class="primary" data-act="dfg-rules-close">とじる</button></div>`);
+}
+
+// 卓が立った/畳まれたのに合わせて、円卓の席へ座らせる。
+// 席の並びは全員が同じ式で決めるので、各自が自分を座らせれば
+// 相手の画面にも同じ場所に座って見える(minigame/ground.js の tableSeats)。
+function syncTable(c) {
+  if (!walk || c?.kind !== 'daifugo') return;
+  const seat = mySeat();
+  const t = c.table;
+  const sit = c.phase === 'running' && !!t && seat != null && t.players.includes(seat);
+  if (sit === dfgSeated) return;
+  dfgSeated = sit;
+  if (!sit) {
+    walk.standUp();
+    setDfgRules(false);
+    setWalkExitLabel(false);
+    return;
+  }
+  walk.sitAtTable(t.players.indexOf(seat), t.players.length);
+  setTableExitLabel(true);
+  sfx.play('ui');
 }
 
 // エモート。上のバーのボタンで開いて、選ぶと1つ出して閉じる。
@@ -2672,6 +2960,33 @@ document.addEventListener('click', (e) => {
     case 'goto-walk':
       enterWalk();
       return;
+    case 'dfg-card': {          // 手札を選ぶ/選び直す
+      const id = Number(arg);
+      dfgSel = dfgSel.includes(id) ? dfgSel.filter((c) => c !== id) : [...dfgSel, id];
+      renderDaifugo();
+      return;
+    }
+    case 'dfg-play':
+      net?.contest('play', { cards: [...dfgSel] });
+      dfgSel = [];
+      sfx.play('ui');
+      return;
+    case 'dfg-pass':
+      net?.contest('pass');
+      dfgSel = [];
+      return;
+    case 'dfg-pick':
+      net?.contest('pick', { cards: [...dfgSel] });
+      dfgSel = [];
+      return;
+    case 'dfg-rules': setDfgRules(true); return;
+    case 'dfg-rules-close': setDfgRules(false); return;
+    case 'dfg-rule': {         // ホストだけが押せる(サーバーも弾く)
+      const now = { ...(contest?.rules ?? defaultRules()) };
+      now[arg] = !now[arg];
+      net?.contest('rules', { rules: now });
+      return;
+    }
     case 'meet-enter': net?.contest('enter'); return;
     case 'meet-leave': net?.contest('leave'); return;
     case 'meet-start':
@@ -2705,6 +3020,8 @@ document.addEventListener('click', (e) => {
       // エモートやすがた選びを開いていたら、まずそれを閉じる
       if (walkEmoteOpen) { setWalkEmotes(false); return; }
       if (walkLookOpen) { setWalkLooks(false); return; }
+      // 円卓に着いていたら、まず席を立つ(その回からは抜ける)
+      if (walk?.isSeated) { net?.contest('retire'); walk.standUp(); return; }
       // 弓を構えていたら、まず弓をおろす(押し間違いで島から出さない)
       if (walk?.isAiming) { stopArchery(); return; }
       // 釣っている途中なら、まず竿をしまう(押し間違いで島から出さない)
@@ -3221,6 +3538,10 @@ window.hexDebug = {
   // 櫓の居場所。deskAt と同じで、どれだけ寄れば立てるかも返す
   postAt: () => (walk?.postAt ? { ...walk.postAt, radius: POST_RADIUS } : null),
   raidRecord: () => progress.raid ?? null,
+  // 大富豪(E2E 用)。卓の中身と、選ぶ/打つの入口
+  getTable: () => dfgTable(),
+  dfgSelect: (cards) => { dfgSel = [...cards]; renderDaifugo(); return dfgSel; },
+  dfgSeated: () => !!walk?.isSeated,
   // 向きを直接決める(E2E 用)。スティックを倒して向き直らせると、
   // 木や岩に阻まれて狙ったほうを向けないことがある ── 見た目の確認で
   // 「竜のほうを向いた絵」が欲しいだけのときはこちらを使う
@@ -3235,7 +3556,9 @@ window.hexDebug = {
   atDesk: () => atDesk,
   // reach も返す。E2E が「どれだけ寄れば届くか」を決め打ちすると、
   // 縮尺(minigame/scale.js)を変えたときにそこだけ落ちる。
-  deskAt: () => (walk?.deskAt ? { ...walk.deskAt, reach: DESK_REACH } : null),
+  deskAt: () => (walk?.deskAt
+    ? { ...walk.deskAt, reach: walk.roundTable ? TABLE_REACH : DESK_REACH }
+    : null),
   // 竜の巣(E2E 用)。居場所と、いま自分がその山の上に立っているか
   nestAt: () => (walk?.nestAt ? { ...walk.nestAt, hex: walk.nestHex } : null),
   atNest: () => !!walk?.atNest,

@@ -91,6 +91,12 @@ export function summarize(progress) {
   bests.raidScore = raid.best ?? 0;
   bests.raidWave = raid.wave ?? 0;
   bests.raidAcc = raid.acc ?? 0;
+  // 大会の通算も同じ棚へ。大富豪は「何回遊んだか」と「いちばん大きい卓で
+  // 大富豪になったときの人数」に進捗が出せる(ほかの大会は取るか取らないか
+  // だけなので、進捗を出しても 0/1 にしかならない)。
+  const daifugo = progress.meets?.daifugo ?? {};
+  bests.daifugoPlayed = daifugo.played ?? 0;
+  bests.daifugoBest = daifugo.best ?? 0;
   return { byMode, total, bests };
 }
 

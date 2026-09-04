@@ -794,7 +794,14 @@
   }
   /* 一度でも動かしたら引っ込める(遊びの邪魔をしない)。
      釣っている間も出さない ── 移動の案内は関係がないうえ、バーと重なる */
-  #walk-hud.moved .walk-hint, #walk-hud.fishing .walk-hint { opacity: 0; }
+  #walk-hud.moved .walk-hint, #walk-hud.fishing .walk-hint,
+  #walk-hud.sitting .walk-hint { opacity: 0; }
+  /* 円卓に着いている間は歩けない。移動の手だてを引っ込める
+     (出したままだと押しても何も起きず、壊れて見える) */
+  #walk-hud.sitting #walk-jump,
+  #walk-hud.sitting #walk-stick,
+  #walk-hud.sitting #walk-fish,
+  #walk-hud.sitting #walk-bow { display: none !important; }
   /* 左下のスティック。触れた場所に出す */
   #walk-stick {
     position: absolute; width: 108px; height: 108px; border-radius: 50%;
@@ -912,6 +919,115 @@
   #aim-draw i { display: block; height: 100%; width: 0; background: var(--accent2); }
   /* 満まで引けたら色を変える。バーの長さだけだと、指を離す頃合いが分からない */
   #aim-draw.full i { background: #ffd97d; }
+
+  /* ---------- 大富豪 ---------- */
+  /* 卓に着いている間だけ、画面の下半分を札の場にする。
+     3D の卓は上半分に残す ── 誰が座っているかが見えなくなると、
+     みんなで囲んでいる意味がなくなる。 */
+  #dfg {
+    position: absolute; inset: auto 0 0 0; z-index: 4;
+    display: none; flex-direction: column; gap: 6px;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, rgba(6,18,32,0.96) 72%, rgba(6,18,32,0));
+    pointer-events: none;
+  }
+  #dfg.on { display: flex; }
+  #dfg > * { pointer-events: auto; }
+
+  #dfg-top {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 12.5px; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  }
+  #dfg-top .turn { color: var(--accent2); }
+  #dfg-top .me { color: #ffd97d; }
+  #dfg-top .flag {
+    padding: 1px 7px; border-radius: 999px; font-size: 11px;
+    background: rgba(255,120,90,0.22); border: 1px solid rgba(255,150,120,0.5);
+  }
+  /* 残り時間。0 になるとサーバーが代わりに打つ */
+  #dfg-top .clock { font-variant-numeric: tabular-nums; color: var(--dim); }
+  #dfg-top .clock.hurry { color: #ff9a8a; }
+
+  /* 場に出ている札。何も無ければ「場が流れています」 */
+  #dfg-field {
+    display: flex; align-items: center; justify-content: center;
+    gap: 3px; min-height: 54px;
+  }
+  #dfg-field .empty { font-size: 12px; color: var(--dim); }
+
+  /* 囲んでいる人。名前・すがた・残り枚数・称号 */
+  #dfg-seats {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 8px;
+    font-size: 11.5px; color: #cfe0f0;
+  }
+  #dfg-seats span { white-space: nowrap; }
+  #dfg-seats .now { color: var(--accent2); font-weight: 700; }
+  #dfg-seats .done { color: #8fd7a0; }
+  #dfg-seats .gone { color: #7a8a99; text-decoration: line-through; }
+
+  #dfg-note { text-align: center; font-size: 12px; color: #ffd97d; min-height: 15px; }
+
+  /* 手札。横に並べて、はみ出したら横スクロール */
+  #dfg-hand {
+    display: flex; gap: 2px; overflow-x: auto; overflow-y: hidden;
+    padding: 4px 2px 6px; scrollbar-width: none;
+  }
+  #dfg-hand::-webkit-scrollbar { display: none; }
+
+  /* 1枚の札 */
+  .dfg-card {
+    flex: 0 0 auto; width: 38px; height: 52px; border-radius: 5px;
+    background: #fdfaf3; border: 1px solid #d8cdb8;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 800; line-height: 1.05; color: #1d2733;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+    transition: transform 0.09s ease;
+  }
+  .dfg-card .r { font-size: 17px; }
+  .dfg-card .s { font-size: 14px; }
+  .dfg-card.red { color: #c0392b; }
+  .dfg-card.joker { background: #2b3b52; color: #ffd97d; border-color: #4a5f7d; }
+  .dfg-card.joker .r { font-size: 20px; }
+  /* 選んだ札は持ち上げる */
+  #dfg-hand .dfg-card { cursor: pointer; }
+  #dfg-hand .dfg-card.sel { transform: translateY(-9px); box-shadow: 0 8px 12px rgba(0,0,0,0.5); }
+  /* いま出せない札は沈めて薄く。出せる札だけが目に入る */
+  #dfg-hand .dfg-card.dead { opacity: 0.42; }
+  /* 場の札は少し小さく */
+  #dfg-field .dfg-card { width: 34px; height: 46px; }
+  #dfg-field .dfg-card .r { font-size: 15px; }
+
+  #dfg-act { display: flex; gap: 8px; justify-content: center; }
+  #dfg-act button { min-width: 96px; }
+
+  /* ルールを決める画面(ゲームマスターだけ) */
+  #dfg-rules {
+    position: absolute; inset: 0; z-index: 6; display: none;
+    background: rgba(4,12,22,0.9);
+    padding: calc(12px + env(safe-area-inset-top)) 12px 12px;
+    overflow-y: auto;
+  }
+  #dfg-rules.on { display: block; }
+  #dfg-rules h4 { margin: 0 0 8px; text-align: center; color: var(--accent2); }
+  .dfg-rule {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    margin-bottom: 6px; padding: 8px 10px; border-radius: 10px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+    color: #fff; text-align: left;
+  }
+  .dfg-rule.on { background: rgba(120,200,255,0.16); border-color: var(--accent2); }
+  .dfg-rule .box {
+    flex: 0 0 auto; width: 20px; height: 20px; border-radius: 5px;
+    border: 2px solid rgba(255,255,255,0.4);
+    display: flex; align-items: center; justify-content: center; font-size: 13px;
+  }
+  .dfg-rule.on .box { border-color: var(--accent2); color: var(--accent2); }
+  /* 説明は折り返させる。flex の子は既定で縮まないので、
+     min-width を切らないと右端で切れる(実際そうなっていた) */
+  .dfg-rule > span:last-child { min-width: 0; }
+  .dfg-rule b { font-size: 13px; }
+  .dfg-rule small { display: block; font-size: 11px; color: var(--dim); margin-top: 1px; }
 
   /* 波・撃退数・残り。上のバーの下に細く */
   #aim-bar {
@@ -1592,6 +1708,17 @@
     <div id="aim-draw"><i></i></div>
     <button id="walk-bow" type="button">🏹<span>いる</span></button>
     <div id="aim-result"></div>
+    <!-- 大富豪。円卓に着いている間だけ出る(手札・場・出す/パス) -->
+    <div id="dfg">
+      <div id="dfg-top"></div>
+      <div id="dfg-field"></div>
+      <div id="dfg-seats"></div>
+      <div id="dfg-note"></div>
+      <div id="dfg-hand"></div>
+      <div id="dfg-act"></div>
+    </div>
+    <!-- 入れるルールを決める(ゲームマスターだけ) -->
+    <div id="dfg-rules"></div>
     <!-- 波の合図。本筋のターン開始(.turnfx)と同じ見た目を借りる -->
     <div id="aim-fx"></div>
     <!-- 画面の外にいる敵の方向。端に三角を出して知らせる -->

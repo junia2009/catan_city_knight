@@ -117,6 +117,15 @@ export class MeetCore {
 
   // ---- 配る中身 ----
 
+  // **席ごとに違うものを配る遊び**(手札を伏せる大富豪)だけが、
+  // perSeat を立てて viewFor を上書きする。既定は全員に同じものなので、
+  // 配る側(room-do)は1通だけ作って全員へ送れる。
+  get perSeat() { return false; }
+
+  viewFor(seat, now = Date.now()) {
+    return this.view(now);
+  }
+
   // 残り時間は「ミリ秒」で配る。締め切りの時刻を配ると、端末の時計が
   // ずれている人だけ違う残り時間を見ることになる。
   view(now = Date.now()) {

@@ -12,7 +12,11 @@ import { makeGround, spawnPoint } from '../src/minigame/ground.js';
 import { WalkerMotion, WALK_SPEED, JUMP_HEIGHT, WATER_Y } from '../src/minigame/motion.js';
 import { makeBlocker, WALKER_RADIUS } from '../src/minigame/obstacles.js';
 import {
-  walkPose, airPose, tumblePose, sinkPose, fishPose, emotePose, blendPose, poseKeys,
+  SEAT_R, SPAWN_RING, TABLE_CLEAR, TABLE_RADIUS, TABLE_REACH, tableSeats,
+} from '../src/minigame/ground.js';
+import {
+  walkPose, airPose, tumblePose, sinkPose, fishPose, aimPose, sitPose, emotePose,
+  blendPose, poseKeys,
 } from '../src/minigame/pose.js';
 import { EMOTES, EMOTE_MAX, emoteById, emotesOk } from '../src/minigame/emote.js';
 
@@ -496,6 +500,8 @@ test('walk: どの姿勢も同じ項目を全部返す(前の姿勢が残らな�
     ...Object.fromEntries(EMOTES.flatMap((e) => [0.05, 0.5, 0.95].map((k) =>
       [`エモート(${e.label} ${k})`, emotePose(e.key, k * (e.ms / 1000), 0.3, k)]))),
     'エモート(知らない番号)': emotePose('???', 1, 0.3, 0.5),
+    '弓を構える': aimPose(1.2, 0.3, 0.6),
+    '円卓に座る': sitPose(1.2, 0.3),
   };
   const base = poseKeys(poses['歩き']);
   assert.ok(base.length > 20, `項目が少なすぎる(${base.length})`);
@@ -759,4 +765,33 @@ test('emote: しょんぼりは体ごとひねり、上体を左右に倒す(後
   // 倒れるのは上体だけ。腰まで倒すと足が地面から浮いて見える
   const hips = Array.from({ length: 60 }, (_, i) => Math.abs(at((i + 0.5) / 60).hips.z));
   assert.ok(Math.max(...hips) < 0.12, `腰まで倒れている(${Math.max(...hips).toFixed(2)})`);
+});
+
+// 円卓の寸法。**腰かけの輪 < 卓に届く距離 < 降り立つ輪** の順でないと、
+// 席を立った人が卓から離れた扱いになるか、島に降りた瞬間からパネルが開く。
+test('円卓: 届く距離は、腰かけの輪より外・降り立つ輪より内', () => {
+  assert.ok(SEAT_R < TABLE_REACH, `腰かけ(${SEAT_R})が届く距離(${TABLE_REACH})より外`);
+  assert.ok(TABLE_REACH < SPAWN_RING, `届く距離(${TABLE_REACH})が降り立つ輪(${SPAWN_RING})より外`);
+  // 卓そのものにぶつかったまま席に立てること
+  assert.ok(TABLE_RADIUS + WALKER_RADIUS < SEAT_R,
+    `卓(${TABLE_RADIUS})にぶつかって席(${SEAT_R})に立てない`);
+  // 片付ける広さは、席の輪をまるごと含むこと
+  assert.ok(TABLE_CLEAR > SEAT_R, '席の輪の上に木が残る');
+});
+
+test('円卓: 席は輪の上に等間隔で、みんな卓のほうを向く', () => {
+  for (const n of [2, 3, 4, 8]) {
+    const spots = tableSeats({ x: 1, z: -2 }, n);
+    assert.equal(spots.length, n);
+    for (const p of spots) {
+      assert.ok(Math.abs(Math.hypot(p.x - 1, p.z + 2) - SEAT_R) < 1e-9, '輪の上にない');
+      // 向いた先へ少し進むと、卓の中心に近づく(輪の半径より小さく踏み出す)
+      const step = SEAT_R * 0.1;
+      const ahead = { x: p.x + Math.sin(p.face) * step, z: p.z + Math.cos(p.face) * step };
+      assert.ok(Math.hypot(ahead.x - 1, ahead.z + 2) < Math.hypot(p.x - 1, p.z + 2) - step / 2,
+        '卓のほうを向いていない');
+    }
+    // 席0は手前(-z)
+    assert.ok(Math.abs(spots[0].x - 1) < 1e-9 && spots[0].z < -2, '席0が手前にない');
+  }
 });
