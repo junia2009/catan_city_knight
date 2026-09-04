@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { WalkerMotion, WALK_SPEED, MAX_DT } from './motion.js';
 import {
-  walkPose, airPose, tumblePose, sinkPose, fishPose, emotePose, PHASE_PER_UNIT,
+  walkPose, airPose, tumblePose, sinkPose, fishPose, aimPose, emotePose, PHASE_PER_UNIT,
 } from './pose.js';
 import { makeWalker } from './body.js';
 
@@ -65,11 +65,14 @@ export class Walker {
   // 歩いている途中で替えても足が揃わなくなることはない。
   setSpecies(species) {
     if (species === this.species) return;
-    const rod = this.parts.rod.group.visible;  // 竿を出したまま替えても消えない
+    // 竿や弓を出したまま替えても消えない
+    const rod = this.parts.rod.group.visible;
+    const bow = this.parts.bow.group.visible;
     this.dispose();
     this.species = species;
     this.parts = makeWalker(this.color, species);
     this.parts.rod.group.visible = rod;
+    this.parts.bow.group.visible = bow;
     this.scene.add(this.parts.group);
     // 位置を書くのは毎フレームの _apply だけ。書いておかないと、
     // 次の1フレームだけ原点(島の中心)に現れる
@@ -102,6 +105,26 @@ export class Walker {
     this.phase = 0;
     const g = this.motion.groundAt(this.pos.x, this.pos.z);
     this._apply(fishPose(t, this.motion.facing, k), g.y);
+  }
+
+  // 弓を出す/しまう
+  setBow(on) {
+    this.parts.bow.group.visible = !!on;
+    if (!on) this.parts.bow.draw(0);
+  }
+
+  // 弓を構えた姿勢。釣りと同じで、構えている間は歩かせない。
+  // draw は引き絞り(0〜1)。弦と番えた矢もここで引く。
+  aim(t, draw) {
+    this.phase = 0;
+    this.parts.bow.draw(draw);
+    const g = this.motion.groundAt(this.pos.x, this.pos.z);
+    this._apply(aimPose(t, this.motion.facing, draw), g.y);
+  }
+
+  // 弓を持つ手の世界座標(矢はここから出す)
+  bowHand(out) {
+    return this.parts.bow.group.getWorldPosition(out);
   }
 
   // エモートの姿勢を当てる。歩きの update を回したあとに上書きして使う

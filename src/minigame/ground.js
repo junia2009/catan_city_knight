@@ -211,6 +211,68 @@ export function fishingSpots(state) {
   return spots;
 }
 
+// ---- 物見の櫓(蛮族を射る)----
+
+// 櫓のそばと見なす距離。釣り場より広く取る ── 櫓は港の看板より大きく、
+// 真下に立つと画面が塞がるので、少し離れて構えられるようにする。
+export const POST_RADIUS = sc(0.85);
+
+// 櫓の正面に、これだけ海が続いていること(タイル)。
+// 蛮族船はもっと沖から寄せてくる(archery.js の SPAWN_D)ので、
+// ここが足りない浜に建てると、船が島の上に湧く。
+export const POST_OPEN_SEA = 6.0;
+const OPEN_STEP = 0.25;
+
+// 櫓を建てる浜。**島にひとつだけ**建てて、歩いて向かう先にする。
+//
+// 2 と 3 は**前提を守るための番人**で、いまの盤では 1 を満たす辺はどれも
+// 自動的に 2 も満たす(島は丸く、どの海岸からも沖は開けている)。
+// 消しても今日の見た目は変わらないが、盤の形を変えたときに
+// 「船が陸の上に湧く」で気づくのでは遅いので残してある。
+//
+// 選び方:
+//   1. 港のない海岸の辺(港と重ねると 🎣 と 🏹 が同じ場所で取り合う)
+//   2. 正面に POST_OPEN_SEA ぶんの海が続いていること ── 岬の先や
+//      島と島のあいだだと、撃つ先に自分の島が入り、船の湧く場所も陸になる
+//   3. そのうち、降り立つ場所からいちばん遠い浜(歩いて向かう先にする)
+// 乱数は使わない ── 同じ島なら毎回同じ場所に建っていてほしい
+// (「あの浜にある」が覚えられなくなる)。
+export function watchPost(state) {
+  const land = new Map(landHexes(state).map((t) => [t.hid, t.c]));
+  const ground = makeGround(state);
+  const home = spawnPoint(state);
+  const ports = new Set((state.board.ports ?? []).map((p) => p.edgeId));
+  // 正面がどこまで海か
+  const openSea = (x, z, outX, outZ) => {
+    for (let d = OPEN_STEP; d <= POST_OPEN_SEA; d += OPEN_STEP) {
+      if (ground(x + outX * d, z + outZ * d).ok) return d;
+    }
+    return POST_OPEN_SEA;
+  };
+  let best = null;
+  for (const [eid, e] of Object.entries(LAYOUT.edges)) {
+    if (ports.has(eid)) continue;
+    // 海岸の辺 = 両隣のうち陸がちょうど1つ
+    const near = e.hexes.filter((hid) => land.has(hid));
+    if (near.length !== 1) continue;
+    const c = land.get(near[0]);
+    const dx = e.x - c.x;
+    const dz = e.y - c.y;
+    const len = Math.hypot(dx, dz) || 1;
+    const outX = dx / len;
+    const outZ = dz / len;
+    const x = c.x + outX * (len - STAND_BACK);
+    const z = c.y + outZ * (len - STAND_BACK);
+    if (!ground(x, z).ok) continue;
+    if (openSea(x, z, outX, outZ) < POST_OPEN_SEA) continue;
+    const far = Math.hypot(x - home.x, z - home.y);
+    // 同じ距離なら辺の名前で決める。島が左右対称でも毎回同じ場所になる
+    if (best && (far < best.far || (far === best.far && eid > best.edgeId))) continue;
+    best = { edgeId: eid, x, z, outX, outZ, far };
+  }
+  return best;
+}
+
 // いま立っている場所からいちばん近い釣り場(範囲外なら null)
 export function spotNear(spots, x, z, r = SPOT_RADIUS) {
   let best = null;

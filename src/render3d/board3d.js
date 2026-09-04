@@ -1245,7 +1245,7 @@ export function makeDragon() {
 }
 
 // 見張り塔(ドラゴンの島)
-function makeTower(colorHex) {
+export function makeTower(colorHex) {
   const g = new THREE.Group();
   const stone = mat(0xb8bec7, { roughness: 0.85 });
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.095, 0.34, 8), stone);
@@ -1389,7 +1389,7 @@ function easeOutBack(k) {
 
 // ---- 蛮族船(+X 方向を進行方向として組む)----
 
-function makeBarbarianShip() {
+export function makeBarbarianShip() {
   const g = new THREE.Group();
   const hullMat = mat(0x4a3423, { roughness: 0.9 });
 

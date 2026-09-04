@@ -694,6 +694,15 @@ async function startWalk() {
   };
   walk.onSink = setDiveVeil;
   walk.onSpot = onFishSpot;
+  walk.onPost = onWatchPost;
+  walk.onRaidEvent = (e) => {
+    if (e.type === 'sink' || e.type === 'down') sfx.play('ui');
+    if (e.type === 'over') { showRaidResult(walk.raid); setBowButton('done'); }
+    if (e.type === 'wave') walkNote(`🌊 ${e.wave}波目`);
+    renderAimBar();
+  };
+  walk.onRaidHurt = () => { renderAimBar(); walkNote('🛡 浜を破られた!'); };
+  walk.onLoose = () => sfx.play('cast');
   walk.onFishStep = renderFishHud;
   walk.onFishEvent = onFishEvent;
   resetFishHud();
@@ -704,6 +713,7 @@ async function startWalk() {
 }
 
 function exitWalk() {
+  if (walk?.isAiming) stopArchery();
   setWalkBook(false);
   setWalkEmotes(false);
   setWalkLooks(false);
@@ -769,6 +779,98 @@ function resetFishHud() {
   const r = document.getElementById('fish-result');
   if (r) { r.classList.remove('on', 'miss'); r.innerHTML = ''; }
   clearTimeout(fishResultTimer);
+}
+
+// ---- 蛮族を射る ----
+
+const bowEl = () => document.getElementById('walk-bow');
+const on = (id, v) => document.getElementById(id)?.classList.toggle('on', !!v);
+
+// 櫓のそばに来た/離れた
+function onWatchPost(near) {
+  if (walk?.isAiming) return;   // 射っている最中は触らない
+  if (near) { setBowButton('ready'); walkNote('🏹 ここで弓を構えられる'); }
+  else bowEl()?.classList.remove('on');
+}
+
+function startArchery() {
+  if (!walk || walk.isAiming) return;
+  // 乱数は**この遊び専用**。対戦の state.rng は回さない
+  if (!walk.startArchery((Date.now() ^ 0x9e3779b9) >>> 0)) return;
+  // ボタンはそのまま残して「ひく」に変える ── 構えたとたんに消すと、
+  // 弓を引く手だてが画面から無くなる(実際そうなっていた)。
+  setBowButton('draw');
+  on('aim-mark', true);
+  on('aim-draw', true);
+  on('aim-bar', true);
+  on('aim-result', false);
+  jumpEl()?.style.setProperty('display', 'none');
+  setWalkExitLabel(false);
+  const el = document.querySelector('[data-act="walk-exit"]');
+  if (el) el.textContent = '✕ 弓をおろす';
+  document.getElementById('walk-hud')?.classList.add('fishing');
+  renderAimBar();
+  sfx.play('ui');
+}
+
+// 🏹 のボタン。'ready' = 構える / 'draw' = 引く / 'done' = やめる
+const BOW_BTN = {
+  ready: ['🏹', 'かまえる'],
+  draw: ['🏹', 'ひく'],
+  done: ['✓', 'おわり'],
+};
+function setBowButton(kind) {
+  const el = bowEl();
+  if (!el) return;
+  const [icon, label] = BOW_BTN[kind] ?? BOW_BTN.ready;
+  el.innerHTML = `${icon}<span>${label}</span>`;
+  el.classList.add('on');
+}
+
+function stopArchery() {
+  if (!walk?.isAiming) return;
+  walk.stopArchery();
+  setBowButton('ready');
+  for (const id of ['aim-mark', 'aim-draw', 'aim-bar']) on(id, false);
+  jumpEl()?.style.removeProperty('display');
+  setWalkExitLabel(false);
+  document.getElementById('walk-hud')?.classList.remove('fishing');
+  bowEl()?.classList.toggle('on', !!walk.atPost);
+}
+
+// 波・撃退数・残り。1フレームごとに書き直すと重いので、変わったときだけ
+let aimShown = '';
+function renderAimBar() {
+  const r = walk?.raid;
+  const el = document.getElementById('aim-bar');
+  if (!r || !el) return;
+  const html = `<span>🌊 ${r.wave}波</span><span class="t">🏹 ${r.score}</span>`
+    + `<span class="life">${'🛡'.repeat(r.lives)}${'·'.repeat(Math.max(0, 3 - r.lives))}</span>`;
+  if (setHTML(el, html)) aimShown = html;
+}
+
+// 弓を引き始めた/離した。ボタンでも鍵盤でも同じ道を通す
+function bowPress() {
+  if (!walk) return;
+  if (!walk.isAiming) { startArchery(); return; }
+  if (walk.raid?.over) { stopArchery(); return; }
+  walk.setDrawing(true);
+}
+
+function bowRelease() {
+  bowEl()?.classList.remove('press');
+  if (walk?.isAiming) walk.setDrawing(false);
+}
+
+// 射終わり。結果を出して、少し置いてから弓をおろす
+function showRaidResult(r) {
+  const el = document.getElementById('aim-result');
+  if (!el) return;
+  const acc = r.shots ? Math.round((r.hits / r.shots) * 100) : 0;
+  el.innerHTML = `🏹 撃退 <b>${r.score}</b><br>`
+    + `<small>${r.wave}波までしのいだ ・ 命中 ${acc}%</small>`;
+  el.classList.add('on');
+  sfx.play('ui');
 }
 
 // 釣り場に入った/出た
@@ -2332,6 +2434,18 @@ for (const ev of ['pointerup', 'pointercancel']) {
 }
 
 // 釣りのボタン。押している間だけ巻くので、押し始めと離しの両方を拾う
+// 弓のボタン。**押している間だけ引き絞る**ので、click ではなく
+// pointerdown / pointerup で受ける(釣りと同じ)。
+const bowBtn = () => document.getElementById('walk-bow');
+bowBtn()?.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  bowBtn()?.classList.add('press');
+  bowPress();
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  window.addEventListener(ev, () => bowRelease());
+}
+
 const fishBtn = () => document.getElementById('walk-fish');
 fishBtn()?.addEventListener('pointerdown', (e) => {
   e.preventDefault();
@@ -2350,6 +2464,7 @@ window.addEventListener('keydown', (e) => {
   // Escape は手前のものから閉じる: 図鑑 → 竿 → 島
   if (e.code === 'Escape') {
     if (walkBookOpen) setWalkBook(false);
+    else if (walk.isAiming) stopArchery();
     else if (!fishQuit()) exitWalk();
     return;
   }
@@ -2369,6 +2484,15 @@ window.addEventListener('keyup', (e) => {
 });
 // 立っている場所の表示は毎フレームだと重いので、間引いて更新する
 setInterval(() => { if (walk) updateWalkHud(); }, 400);
+// 引き絞りだけは細かく出す(離す頃合いが読めないと駆け引きにならない)
+setInterval(() => {
+  if (!walk?.isAiming) return;
+  const k = walk.draw;
+  const bar = document.getElementById('aim-draw');
+  const fill = bar?.firstElementChild;
+  if (fill) fill.style.width = `${Math.round(k * 100)}%`;
+  bar?.classList.toggle('full', k >= 1);
+}, 40);
 
 // ---- HUD クリック(data-act 委譲) ----
 
@@ -2432,6 +2556,8 @@ document.addEventListener('click', (e) => {
       // エモートやすがた選びを開いていたら、まずそれを閉じる
       if (walkEmoteOpen) { setWalkEmotes(false); return; }
       if (walkLookOpen) { setWalkLooks(false); return; }
+      // 弓を構えていたら、まず弓をおろす(押し間違いで島から出さない)
+      if (walk?.isAiming) { stopArchery(); return; }
       // 釣っている途中なら、まず竿をしまう(押し間違いで島から出さない)
       if (!fishQuit()) exitWalk();
       return;
@@ -2939,6 +3065,10 @@ window.hexDebug = {
     spot: walk.spot,
   } : null),
   walkStick: (x, y) => walk?.setStick(x, y),
+  // 蛮族を射る(E2E 用)。進行のまとめと、弓の実物
+  getRaid: () => walk?.raid?.view() ?? null,
+  getWalkMode: () => walk,
+  atPost: () => !!walk?.atPost,
   // 向きを直接決める(E2E 用)。スティックを倒して向き直らせると、
   // 木や岩に阻まれて狙ったほうを向けないことがある ── 見た目の確認で
   // 「竜のほうを向いた絵」が欲しいだけのときはこちらを使う

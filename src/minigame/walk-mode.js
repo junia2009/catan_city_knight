@@ -8,8 +8,10 @@
 import * as THREE from 'three';
 import {
   makeGround, spawnPoint, fishingSpots, spotNear, hexCenter, nestPoint, nestHexOf,
-  DESK_RADIUS, DESK_REACH, DESK_CLEAR,
+  watchPost, POST_RADIUS, DESK_RADIUS, DESK_REACH, DESK_CLEAR,
 } from './ground.js';
+import { Raid, ARCHERY_MODES, BOW_Y, reach as arrowReach } from './archery.js';
+import { ArcheryFx } from './archery-fx.js';
 import { makeBlocker, clearAround } from './obstacles.js';
 import { MAX_DT, SINK_DEPTH, WATER_Y } from './motion.js';
 import { Walker, WALK_SPEED } from './walker.js';
@@ -76,6 +78,13 @@ const EMBER_WAKE = 0.9;
 // まばたき。起きているときだけ、ときどき。生きている合図はこれがいちばん安い
 const BLINK_EVERY = 4200;           // ms
 const BLINK_MS = 150;
+
+// 弓を満まで引き絞るのにかかる秒数。短すぎると連打が最適になり、
+// 長すぎると「引いている間に着かれる」ばかりになる。
+const DRAW_FULL = 0.9;
+// 構えたときのカメラの見下ろし角。歩き(0.40)より水平に近づけて、
+// 沖の船が画面に入るようにする(orbit の下限と同じ)。
+const AIM_PITCH = 0.06;
 
 // 釣っている間のカメラ。竿は右手(モデルの +X 側)なので、そちらへ回り込むと
 // 竿と糸が本人に重ならない。
@@ -205,6 +214,29 @@ export class WalkMode {
         .map((e) => ({ y: e.scale.y, color: e.material.color.clone() })),
       ember: this.nestMesh.userData.ember?.material.opacity ?? null,
     } : null;
+    // 物見の櫓(蛮族を射る)。開く島だけ建てる ── 建っていない島では
+    // postAt が null なので、そもそも近づけない(受付と同じ考え方)。
+    this.postAt = null;
+    this.archeryFx = null;
+    this.raid = null;         // 射っている間だけ Raid が入る
+    this.atPost = false;
+    this.onPost = null;       // 櫓のそばに来た/離れた
+    this.drawT = 0;           // 弓を引き始めてからの秒数
+    this.drawing = false;
+    this.aimT = 0;
+    if (ARCHERY_MODES.includes(state.mode)) {
+      const p = watchPost(state);
+      if (p) {
+        this.postAt = { ...p, y: this.ground(p.x, p.z).y };
+        this.archeryFx = new ArcheryFx(board3d.scene, this.postAt);
+        // 櫓にもぶつかる。collectObstacles はシーンを見て集めるので、
+        // あとから建てたものは自分で入れる
+        // ぶつかるのは櫓の実物の場所(archery-fx が岸に沿ってずらして建てる)
+        this.obstacles.push({
+          x: p.x + p.outZ * 0.34, z: p.z - p.outX * 0.34, r: 0.11, h: 0.5,
+        });
+      }
+    }
     this.species = speciesById(look);
     this.walker = new Walker(
       board3d.scene,
@@ -642,6 +674,11 @@ export class WalkMode {
       this._fishFrame(dt);
       return;
     }
+    if (this.raid) {
+      this._archeryFrame(dt, t);
+      return;
+    }
+    // 櫓は撃っていない間も動かす(船は湧かないが、旗と塔はそこにある)
 
     const kb = this._keyInput();
     const inp = (kb.x || kb.y) ? kb : this.input;
@@ -661,6 +698,15 @@ export class WalkMode {
     if (near !== this.atDesk) {
       this.atDesk = near;
       this.onDesk?.(near);
+    }
+
+    // 櫓のそばに来たら知らせる(入った/出たときだけ)。
+    // 建っていない島では postAt が null なので、そもそも近づけない
+    const onPost = !!this.postAt && r.grounded
+      && Math.hypot(w.x - this.postAt.x, w.z - this.postAt.z) < POST_RADIUS;
+    if (onPost !== this.atPost) {
+      this.atPost = onPost;
+      this.onPost?.(onPost);
     }
 
     // 港のそばに来たら知らせる(入った/出たときだけ)
@@ -702,6 +748,106 @@ export class WalkMode {
       WaterFx.submersion(this.b.camera.position.y),
       r?.depth ?? 0, this.savedFog,
     );
+  }
+
+  // ---- 蛮族を射る ----
+
+  get isAiming() { return this.raid != null; }
+
+  // 櫓のそばで弓を構える。始めると蛮族船が寄せてくる
+  startArchery(seed = Date.now() >>> 0) {
+    if (this.raid || !this.postAt || this.fishing) return false;
+    this.raid = new Raid(seed, this.postAt, SEA_Y);
+    this.aimT = 0;
+    this.drawT = 0;
+    this.drawing = false;
+    this.walker.setBow(true);
+    // 海のほうを向いて構える。始めた瞬間に的が画面に入っていないと、
+    // 「何が始まったのか」が分からない
+    const yaw = Math.atan2(this.postAt.outX, this.postAt.outZ);
+    this.walker.motion.facing = yaw;
+    this.camYaw = yaw;
+    // **水平まで見上げる。** 歩きのカメラは 0.40 ほど見下ろしていて、
+    // そのままだと沖の船が画面の上へ外れる ── 撃つ相手が見えない。
+    this.camPitch = AIM_PITCH;
+    return true;
+  }
+
+  stopArchery() {
+    if (!this.raid) return;
+    this.raid = null;
+    this.drawing = false;
+    this.drawT = 0;
+    this.walker.setBow(false);
+    this.archeryFx?.reset();
+  }
+
+  // 弓を引く/放つ。押している間 true、離したら false で放つ
+  setDrawing(on) {
+    if (!this.raid || this.raid.over) return;
+    if (on) {
+      if (!this.drawing) { this.drawing = true; this.drawT = 0; }
+      return;
+    }
+    if (!this.drawing) return;
+    this.drawing = false;
+    this._loose();
+  }
+
+  // いまの引き絞り(0〜1)。満まで DRAW_FULL 秒
+  get draw() {
+    return this.drawing ? Math.min(1, this.drawT / DRAW_FULL) : 0;
+  }
+
+  // 画面の中心が指している海の上の点。照準はここに合っている。
+  // カメラの前向きを水面まで伸ばす ── 上を向いていて水面に当たらないときは、
+  // 届く限界の距離を返す(そこへ向けて撃てば、いちばん遠くへ飛ぶ)。
+  aimPoint(out = new THREE.Vector3()) {
+    const cam = this.b.camera;
+    const dir = new THREE.Vector3();
+    cam.getWorldDirection(dir);
+    const from = cam.position;
+    const far = arrowReach(1, this.postAt.y + BOW_Y, SEA_Y);
+    if (dir.y < -1e-4) {
+      const t = (SEA_Y - from.y) / dir.y;
+      if (t > 0 && t < far * 3) return out.copy(from).addScaledVector(dir, t);
+    }
+    return out.copy(from).addScaledVector(dir, far);
+  }
+
+  // 矢を出す点(弓を持つ手のあたり)
+  bowPoint(out = new THREE.Vector3()) {
+    const w = this.walker.pos;
+    return out.set(w.x, this.ground(w.x, w.z).y + BOW_Y, w.z);
+  }
+
+  _loose() {
+    const from = this.bowPoint(new THREE.Vector3());
+    const to = this.aimPoint(new THREE.Vector3());
+    const power = Math.min(1, this.drawT / DRAW_FULL);
+    this.raid.shoot(from, {
+      x: to.x - from.x, y: to.y - from.y, z: to.z - from.z,
+    }, power);
+    this.drawT = 0;
+    this.onLoose?.(power);
+  }
+
+  // 射っている間のフレーム。歩きの計算はしない(その場に構えたまま)。
+  _archeryFrame(dt, t) {
+    this.aimT += dt;
+    if (this.drawing) this.drawT += dt;
+    const r = this.raid;
+    const before = r.lives;
+    r.update(dt);
+    const events = r.takeEvents();
+    this.archeryFx?.update(r, t);
+    this.archeryFx?.onEvents(events);
+    for (const e of events) this.onRaidEvent?.(e);
+    if (r.lives !== before) this.onRaidHurt?.(r.lives);
+    // 構えた姿勢。引き絞りは弦と矢にも出る
+    this.walker.aim(this.aimT, this.draw);
+    // カメラは狙う向きへ。歩きより低く、遠くを見る
+    this._placeCamera(dt, false);
   }
 
   // 釣っている間のフレーム。歩きの計算はしない(その場に立ったまま)。
@@ -871,6 +1017,7 @@ export class WalkMode {
     this._nestRestore();                                         // 巣の竜を盤に返す
     this.setDragon(null);
     this.desk?.dispose();
+    this.archeryFx?.dispose();
     this.walker.dispose();
     this.remoteView.dispose();
     this.fx.dispose();

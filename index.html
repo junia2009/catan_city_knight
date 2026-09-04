@@ -864,6 +864,81 @@
   @keyframes fishHit { 50% { transform: scale(1.1); } }
   @media (prefers-reduced-motion: reduce) { #walk-fish.hit { animation: none; } }
 
+  /* ---------- 蛮族を射る ---------- */
+  /* 弓のボタンは釣ると同じ場所。同じ島に港と櫓が両方あっても、
+     近づけるのはどちらか一方だけ(範囲が重ならないよう ground.js で離してある)。 */
+  #walk-bow {
+    position: absolute; pointer-events: auto; display: none;
+    right: calc(22px + env(safe-area-inset-right));
+    bottom: calc(122px + env(safe-area-inset-bottom));
+    width: 74px; height: 74px; border-radius: 50%;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px; padding: 0;
+    border: 2px solid rgba(255, 217, 125, 0.55);
+    background: rgba(8, 22, 38, 0.52);
+    color: #fff; font-size: 23px; line-height: 1;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 90ms ease, background 90ms ease;
+  }
+  #walk-bow.on { display: flex; }
+  #walk-bow span { font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
+  #walk-bow.press { transform: scale(0.92); background: rgba(255, 217, 125, 0.42); }
+
+  /* 照準。画面の中心に出す ── 右半分をなぞって視点を回すと、
+     ここが指しているところへ矢が飛ぶ。 */
+  #aim-mark {
+    position: absolute; z-index: 2; pointer-events: none; display: none;
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 34px; height: 34px;
+  }
+  #aim-mark.on { display: block; }
+  #aim-mark i, #aim-mark::before, #aim-mark::after {
+    content: ''; position: absolute; background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 3px rgba(0,0,0,0.8);
+  }
+  #aim-mark::before { left: 0; top: 50%; width: 11px; height: 2px; margin-top: -1px; }
+  #aim-mark::after { right: 0; top: 50%; width: 11px; height: 2px; margin-top: -1px; }
+  #aim-mark i { left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; }
+
+  /* 引き絞り。照準のすぐ下に短く出す(視線を動かさずに読めるように) */
+  #aim-draw {
+    position: absolute; z-index: 2; pointer-events: none; display: none;
+    left: 50%; top: calc(50% + 26px); transform: translateX(-50%);
+    width: 76px; height: 5px; border-radius: 3px;
+    background: rgba(8, 22, 38, 0.6); overflow: hidden;
+  }
+  #aim-draw.on { display: block; }
+  #aim-draw i { display: block; height: 100%; width: 0; background: var(--accent2); }
+  /* 満まで引けたら色を変える。バーの長さだけだと、指を離す頃合いが分からない */
+  #aim-draw.full i { background: #ffd97d; }
+
+  /* 波・撃退数・残り。上のバーの下に細く */
+  #aim-bar {
+    position: absolute; z-index: 2; pointer-events: none;
+    top: calc(46px + env(safe-area-inset-top));
+    left: 50%; transform: translateX(-50%);
+    display: none; align-items: center; gap: 10px;
+    padding: 5px 14px; border-radius: 999px;
+    background: rgba(8, 22, 38, 0.82);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: #fff; font-size: 13px; font-weight: 700;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6); white-space: nowrap;
+  }
+  #aim-bar.on { display: flex; }
+  #aim-bar .t { color: var(--accent2); font-variant-numeric: tabular-nums; }
+  #aim-bar .life { letter-spacing: 1px; }
+
+  #aim-result {
+    position: absolute; z-index: 4; pointer-events: none; display: none;
+    left: 50%; top: 40%; transform: translate(-50%, -50%);
+    padding: 14px 22px; border-radius: 14px; text-align: center;
+    background: rgba(8, 22, 38, 0.9); border: 1px solid rgba(255, 217, 125, 0.5);
+    color: #fff; font-size: 15px; font-weight: 700; line-height: 1.6;
+  }
+  #aim-result.on { display: block; }
+  #aim-result b { color: var(--accent2); font-size: 21px; }
+
   /* 張りと取り込みの2本。ボタンの左に縦置きだと親指で隠れるので、下に横置き */
   /* 右下はボタンが2つ縦に並ぶので、バーは左下に寄せる。
      釣っている間は移動しないので、左半分(移動スティック)は空いている。 */
@@ -1496,6 +1571,12 @@
     </div>
     <div id="fish-note"></div>
     <div id="fish-result"></div>
+    <!-- 蛮族を射る。櫓のそばで出る。押している間だけ弓を引き、離すと放つ -->
+    <div id="aim-bar"></div>
+    <div id="aim-mark"><i></i></div>
+    <div id="aim-draw"><i></i></div>
+    <button id="walk-bow" type="button">🏹<span>いる</span></button>
+    <div id="aim-result"></div>
     <div class="walk-hint">左半分をなぞって移動 ・ 右半分をなぞって視点 ・ ⤒ でジャンプ ・ 港のそばで 🎣</div>
     <!-- 釣り図鑑。島を出ずに見られるようにする(開いている間は時間を止める) -->
     <div id="walk-book">

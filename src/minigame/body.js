@@ -46,6 +46,10 @@ export const CUTE = {
   // 釣り竿。手のさきから腕の延長方向(-Y)へ伸ばす。
   // 腕を前上がりに構えると、そのまま竿も前上がりになる。
   rod: { len: 0.42, r: 0.0055, grip: 0.05 },
+  // 弓。竿と同じ手に持たせる(どちらも同時には出さない)。
+  // 竿と違って**腕と直交**させる ── 腕の延長に持たせると、真横から見た
+  // ときに弓が線にしか見えない。
+  bow: { r: 0.085, thick: 0.006 },
 };
 
 // 手足1本。上下2節で、付け根から吊り下げる。
@@ -117,6 +121,53 @@ function makeRod(r) {
   g.add(tip);
 
   return { group: g, tip };
+}
+
+// 弓。手のさきに、腕と直交する向きで持たせる。
+// 弦は引き絞ると V 字にへこむので、真ん中の1点を上下の端とつないだ
+// 3点の折れ線で作る(draw() でその1点だけ動かす)。
+function makeBow(b) {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x7a5a32, roughness: 0.75 });
+  // 弓幹。細いトーラスの一部を弧にする
+  const limb = new THREE.Mesh(
+    new THREE.TorusGeometry(b.r, b.thick, 4, 14, Math.PI * 1.15), wood,
+  );
+  limb.rotation.z = -Math.PI * 0.575;   // 弧の開いた側を前(+Z)へ
+  limb.castShadow = true;
+  g.add(limb);
+
+  // 弦。3点の折れ線(上端 → 引き点 → 下端)
+  const pts = [
+    new THREE.Vector3(0, b.r, 0),
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, -b.r, 0),
+  ];
+  const string = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: 0xe8e0cc }),
+  );
+  g.add(string);
+
+  // 番えた矢。引いている間だけ出す
+  const arrow = new THREE.Mesh(
+    new THREE.CylinderGeometry(b.thick * 0.5, b.thick * 0.5, b.r * 2.2, 4),
+    new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.7 }),
+  );
+  arrow.rotation.x = Math.PI / 2;       // 前(+Z)へ向ける
+  arrow.visible = false;
+  g.add(arrow);
+
+  // 引き絞り(0〜1)。弦と矢を後ろへ引く
+  const draw = (k) => {
+    const back = -b.r * 0.85 * Math.max(0, Math.min(1, k));
+    pts[1].z = back;
+    string.geometry.setFromPoints(pts);
+    arrow.visible = k > 0.01;
+    arrow.position.z = back + b.r * 1.1;
+  };
+  draw(0);
+  return { group: g, draw };
 }
 
 // ミトンの手。指は作らない ── 小さく映るので、丸いほうが可愛く見える。
@@ -435,6 +486,13 @@ export function makeWalker(color = CLOTH, species = speciesById(DEFAULT_SPECIES)
   rod.group.visible = false;
   arms[1].knee.add(rod.group);
 
+  // 弓は左手(arms[0])。竿と別の手にするのは、両方出したときに
+  // 重なるのを避けるためではなく ── 弓は左手で構えて右手で引くから。
+  const bow = makeBow(p.bow);
+  bow.group.position.y = -(p.upperArm + p.foreArm);
+  bow.group.visible = false;
+  arms[0].knee.add(bow.group);
+
   const legs = [-1, 1].map((sx) => {
     const limb = makeLimb(cloth, p.thigh, p.shin, p.legR, makeShoe(shoe, p.shoe));
     limb.root.position.set(sx * p.hipX, 0, 0);
@@ -461,7 +519,7 @@ export function makeWalker(color = CLOTH, species = speciesById(DEFAULT_SPECIES)
   // この入れ物の子なので、まとめて同じ率で縮む。
   // applyPose は位置と回転しか触らないので、この scale は消えない。
   g.scale.setScalar(WALK_SCALE);
-  return { group: g, hips, chest, head, mouth, arms, legs, rod };
+  return { group: g, hips, chest, head, mouth, arms, legs, rod, bow };
 }
 
 // 足元から頭のてっぺんまで。名札の高さとカメラの寄りに使う。
