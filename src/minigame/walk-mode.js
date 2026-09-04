@@ -335,9 +335,14 @@ export class WalkMode {
     // 上のバーの矢印で知らせる(main.js の renderMeetBar)。
     h.mesh.position.set(h.x, (g.ok ? g.y : SEA_Y) + sc(0.12) + Math.sin(t / 620) * sc(0.04), h.z);
     h.mesh.rotation.y = h.a;
+    // **両翼は同じ揺れを打つ。** 片方だけ位相をずらすと、羽ばたかずに
+    // シーソーのように左右が交互に上下する(実際そうなっていた ──
+    // 追いかけてくる竜が、飛ばずに揺れているだけに見えていた)。
+    // 左右で違うのは符号だけなので、揺れの値はループの外で1つだけ作る
+    // ── ずらしようがないようにしておく。
+    const flap = 0.35 + Math.sin(t / 130) * 0.5;
     for (const [i, w] of (h.mesh.userData.wings ?? []).entries()) {
-      const f = Math.sin(t / 130 + i * Math.PI) * 0.5;
-      w.rotation.z = (i === 0 ? 1 : -1) * (0.35 + f);
+      w.rotation.z = (i === 0 ? 1 : -1) * flap;
     }
   }
 
@@ -380,13 +385,16 @@ export class WalkMode {
     // 動かしていて、書かずにおくと**寝ている竜が羽ばたき続ける**
     // ── 畳んだ x と合わさって、翼を広げているように見えていた。
     const hands = m.userData.wingHands ?? [];
+    // 揺れは左右で共通(_dragonFrame と同じ理由。片方だけずらすと
+    // 羽ばたきではなくシーソーになる)。左右の違いは符号だけ。
+    const breathe = Math.sin(t / 900);
+    const flutter = Math.sin(t / 700);
     for (const [i, wing] of (m.userData.wings ?? []).entries()) {
       const side = i === 0 ? 1 : -1;
-      const breathe = Math.sin(t / 900 + i * Math.PI);
       wing.rotation.x = lerp(WING_FOLD.x, WING_OPEN.x + breathe * 0.05, k);
       wing.rotation.y = side * lerp(WING_FOLD.y, WING_OPEN.y, k);
       // 眠っている間は閉じたまま。起きたら、ゆっくりとした呼吸ぶんだけ動く
-      wing.rotation.z = side * lerp(WING_FOLD.z, WING_OPEN.z + breathe * 0.06, k);
+      wing.rotation.z = side * lerp(WING_FOLD.z, WING_OPEN.z + flutter * 0.06, k);
       // 手首。畳むのはここで、肩だけ動かしても「広げた翼を傾けた」ようにしか
       // 見えない ── 膜ごと折り返して初めて畳んだと分かる
       if (hands[i]) hands[i].rotation.z = lerp(WING_FOLD.hand, WING_OPEN.hand, k);
