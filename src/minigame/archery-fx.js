@@ -95,6 +95,43 @@ function makeArrow() {
   return g;
 }
 
+// 射場。木を片付けただけだと「たまたま開けている浜」にしか見えないので、
+// 人の手が入った場所にする ── 板張りの台と、脇に積んだ樽と杭。
+//
+// **海のほうには何も置かない。** 弓を構える高さは地面から 0.11 しかなく、
+// そこから撃ち下ろすので、正面に置いた物は低くても射線を塞ぐ。
+function makeRange(post) {
+  const g = new THREE.Group();
+  const plank = new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 0.9 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x5d442a, roughness: 0.9 });
+
+  const deck = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.5, 0.035, 12), plank);
+  deck.position.y = 0.017;
+  deck.receiveShadow = true;
+  g.add(deck);
+  // 板の目。1枚板だと「土を塗った」ようにしか見えない
+  for (let i = -2; i <= 2; i++) {
+    const line = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.004, 0.012), dark);
+    line.position.set(0, 0.036, i * 0.17);
+    g.add(line);
+  }
+  // 脇の樽と杭。左右にだけ置く(前は射線、後ろは櫓)
+  for (const sx of [-1, 1]) {
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.15, 8), dark);
+    barrel.position.set(sx * 0.44, 0.075, -0.1);
+    barrel.castShadow = true;
+    g.add(barrel);
+    const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.026, 0.3, 5), plank);
+    stake.position.set(sx * 0.5, 0.15, 0.18);
+    stake.rotation.z = sx * 0.12;
+    stake.castShadow = true;
+    g.add(stake);
+  }
+  // 岸に沿って向ける(板の目が海と平行になる)
+  g.rotation.y = Math.atan2(post.outX, post.outZ);
+  return g;
+}
+
 function dispose(root) {
   root.traverse((o) => {
     o.geometry?.dispose?.();
@@ -121,6 +158,11 @@ export class ArcheryFx {
     // 海を背にして立つ(旗が陸から見えるように)
     this.tower.rotation.y = Math.atan2(post.outX, post.outZ);
     scene.add(this.tower);
+
+    // 射場。立ち位置そのものに敷く
+    this.range = makeRange(post);
+    this.range.position.set(post.x, post.y, post.z);
+    scene.add(this.range);
 
     this.ships = new Map();   // id -> mesh
     this.foes = new Map();
@@ -222,6 +264,8 @@ export class ArcheryFx {
   dispose() {
     this.tower.removeFromParent();
     dispose(this.tower);
+    this.range.removeFromParent();
+    dispose(this.range);
     for (const map of [this.ships, this.foes, this.arrows]) {
       for (const m of map.values()) { m.removeFromParent(); dispose(m); }
       map.clear();

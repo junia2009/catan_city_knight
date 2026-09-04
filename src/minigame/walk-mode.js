@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import {
   makeGround, spawnPoint, fishingSpots, spotNear, hexCenter, nestPoint, nestHexOf,
-  watchPost, POST_RADIUS, DESK_RADIUS, DESK_REACH, DESK_CLEAR,
+  watchPost, POST_RADIUS, POST_CLEAR, DESK_RADIUS, DESK_REACH, DESK_CLEAR,
 } from './ground.js';
 import { Raid, ARCHERY_MODES, BOW_Y, reach as arrowReach } from './archery.js';
 import { ArcheryFx } from './archery-fx.js';
@@ -234,6 +234,16 @@ export class WalkMode {
       const p = watchPost(state);
       if (p) {
         this.postAt = { ...p, y: this.ground(p.x, p.z).y };
+        // **射場をこしらえる。** 受付の広場と同じ要領で、まわりの木や岩を
+        // 片付ける ── 浜のすぐ横に松が立っているだけで海が隠れ、狙いようが
+        // なくなる(実際そうなっていた)。的が見えないのは腕前の話ではない。
+        const cut = clearAround(this.obstacles, { x: p.x, z: p.z }, POST_CLEAR);
+        this.obstacles = cut.kept;
+        for (const o of cut.cleared) {
+          if (!o.obj) continue;
+          this.clearedObjs.push({ o: o.obj, vis: o.obj.visible });
+          o.obj.visible = false;
+        }
         this.archeryFx = new ArcheryFx(board3d.scene, this.postAt);
         // 櫓にもぶつかる。collectObstacles はシーンを見て集めるので、
         // あとから建てたものは自分で入れる
