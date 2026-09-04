@@ -20,7 +20,7 @@ import { WaterFx } from './water-fx.js';
 import { Fishing, CAST_TIME } from './fishing.js';
 import { FishingFx } from './fishing-fx.js';
 import { RemoteWalkers } from './remote.js';
-import { RemoteView, WALK_COLORS } from './remote-view.js';
+import { RemoteView, WALK_COLORS, NAME_SCALE_TABLE } from './remote-view.js';
 import { ST, WALK_SEATS } from './remote-st.js';
 import { emoteById } from './emote.js';
 import { speciesById, DEFAULT_SPECIES } from './species.js';
@@ -104,15 +104,22 @@ const AIM_CLOSER = 0.10;
 // 構えている間だけ画角を広げる。歩きの 45° だと海がほとんど映らず、
 // どこから船が来ているのか分からない。広げすぎると的が小さくなる。
 const AIM_FOV = 64;
-// 円卓に着いている間のカメラ。
-// **少し引いて、上から見下ろす。** 歩きのカメラは本人の背中越しに低く
-// 構えているので、そのまま座ると自分の後頭部で卓が埋まる。卓と向かいの人が
-// 収まるところまで引き、天板が面として見える角度まで起こす。
-const TABLE_CLOSER = -0.6;   // 負で遠ざかる(_placeCamera の closer)
-const TABLE_PITCH = 0.62;
-// 肩の横へずらす幅。真後ろから撮ると自分の体が卓の手前を隠して、
-// 天板に出ている札が頭の裏に入る(弓と同じ理由・同じ手当て)。
-const TABLE_SIDE = sc(0.34);
+// 円卓に着いている間のカメラは**一人称**。
+// 卓を囲んで座っているのだから、自分の後頭部越しに見るより、そこに座って
+// いる目で見るほうが素直 ── 三人称だと自分の体が卓の手前を隠すし、
+// 引いて避けると今度は誰の卓なのか分からなくなる。
+//
+// 目の高さは body.js の積み上げから(腰 + 胸 + 頭 + 目のずれ)。
+// **自分の体は隠す**ので、目は体の中心にそのまま置いてよい ── 前へ逃がすと、
+// そのぶん卓へ近づいて天板が視界を埋める(この卓は人の頭ほどの大きさしかない)。
+const TABLE_EYE = sc(0.355);
+// 初めに見下ろす角度。天板の札が入り、向かいの人も肩から上が見えるところ。
+// なぞれば orbit で上下できる(0.05 でほぼ水平)。
+const TABLE_PITCH = 0.34;
+// 画角。**縦持ちの画面は横の画角がうんと狭くなる**(縦 45° でも横は 22° しか
+// ない)ので、歩きのままだと向かいの人の顔だけで画面が埋まる。広げて、
+// 卓と左右の席がいっしょに入るところまで持っていく。
+const TABLE_FOV = 88;
 // 画面の端に出す「敵はあちら」の三角を、縁からどれだけ内側に置くか(画素)
 const MARK_INSET = 26;
 
@@ -839,11 +846,37 @@ export class WalkMode {
     this.sitT = 0;
     this.emote = null;
     this.setStick(0, 0);
-    // 見下ろす角度は戻せるように覚えておく(弓と同じ作法)
+    // 角度と画角は戻せるように覚えておく(弓と同じ作法)
     this.camPitchSaved = this.camPitch;
+    this.camFovSaved = this.b.camera.fov;
     this.camPitch = TABLE_PITCH;
-    this._placeCamera(0, true, TABLE_CLOSER, TABLE_SIDE);
+    this.b.camera.fov = TABLE_FOV;
+    this.b.camera.updateProjectionMatrix();
+    // 一人称なので自分の体と、卓のまん中に立つ看板の柱は伏せる。
+    // どちらも目の高さで正面に来て、視界をまるごと塞ぐ ──
+    // **消えるのは自分の画面だけ**で、相手の画面には座った姿も看板も出ている。
+    this.walker.setVisible(false);
+    this.desk?.setSignVisible?.(false);
+    // 向かいの人は目と鼻の先。名札はそのままだと画面の上を埋める
+    this.remoteView.setNameScale(NAME_SCALE_TABLE);
+    this._placeTableCamera();
     return true;
+  }
+
+  // 一人称のカメラ。座っているので目は動かない ── 向きだけ camYaw /
+  // camPitch で決める(なぞると orbit がその2つを回す)。
+  // 追従のならしは要らない。動かないものを追う必要がないため。
+  _placeTableCamera() {
+    const cam = this.b.camera;
+    const w = this.walker.pos;
+    const fx = Math.sin(this.camYaw);
+    const fz = Math.cos(this.camYaw);
+    const x = w.x;
+    const z = w.z;
+    const y = this.ground(x, z).y + TABLE_EYE;
+    cam.position.set(x, y, z);
+    const flat = Math.cos(this.camPitch);
+    cam.lookAt(x + fx * flat, y - Math.sin(this.camPitch), z + fz * flat);
   }
 
   // 卓の上に出ている札を並べ直す(円卓の島だけ)。
@@ -856,9 +889,17 @@ export class WalkMode {
     if (!this.tableSeatAt) return;
     this.setTableField([]);
     this.tableSeatAt = null;
+    this.walker.setVisible(true);
+    this.desk?.setSignVisible?.(true);
+    this.remoteView.setNameScale(1);
     if (this.camPitchSaved != null) {
       this.camPitch = this.camPitchSaved;
       this.camPitchSaved = null;
+    }
+    if (this.camFovSaved != null) {
+      this.b.camera.fov = this.camFovSaved;
+      this.b.camera.updateProjectionMatrix();
+      this.camFovSaved = null;
     }
   }
 
@@ -866,7 +907,7 @@ export class WalkMode {
   _sitFrame(dt, t) {
     this.sitT += dt;
     this.walker.sit(this.sitT);
-    this._placeCamera(dt, false, TABLE_CLOSER, TABLE_SIDE);
+    this._placeTableCamera();
   }
 
   // ---- 蛮族を射る ----

@@ -120,22 +120,18 @@ export function makeTable(scene, x, z, groundY, meet, seats = 6) {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, SIGN_Y - TOP_Y, 6), wood);
   pole.position.set(0, TOP_Y + (SIGN_Y - TOP_Y) / 2, 0);
   pole.castShadow = true;
-  g.add(pole);
 
   // 表裏の両面に文字を焼き込む(どちらから来ても読める)
   const faces = [board, board, board, board, makeSignFace(meet.sign), makeSignFace(meet.sign)];
   const sign = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.13, 0.015), faces);
   sign.position.set(0, SIGN_Y, 0);
   sign.castShadow = true;
-  g.add(sign);
 
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.20, 5), dark);
   mast.position.set(0, SIGN_Y + 0.17, 0);
-  g.add(mast);
   const flag = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.11, 3), cloth);
   flag.rotation.z = -Math.PI / 2;
   flag.position.set(0.04, SIGN_Y + 0.23, 0);
-  g.add(flag);
 
   // 場に出ている札を置くところ。
   //   外(fieldGroup) … 読む向きを合わせるために Y で回す
@@ -148,13 +144,23 @@ export function makeTable(scene, x, z, groundY, meet, seats = 6) {
   // **見ている人のほうへ寄せる。** 天板のまん中に置くと、看板の柱が
   // ちょうど札の上を通って読めなくなる(柱は誰の邪魔にもならない位置に
   // 立てるため、まん中から動かせない)。手前に寄れば読みやすくもなる。
-  fieldFlat.position.z = R * 0.25;
+  fieldFlat.position.z = -R * 0.25;
   fieldGroup.add(fieldFlat);
   const cardGeo = new THREE.PlaneGeometry(CARD_W, CARD_H);
+
+  // 柱・看板・旗はひとまとまりにする。一人称で座ると目の前に立つので、
+  // 座っている間だけ隠せるようにしておく(遠くからの目印としては要る)。
+  const signPost = new THREE.Group();
+  signPost.add(pole, sign, mast, flag);
+  g.add(signPost);
 
   scene.add(g);
   return {
     group: g,
+    // 看板を出す/隠す。**隠すのは座っている本人の画面だけ** ──
+    // 一人称の目の高さでは、卓のまん中から伸びる柱がまともに視界を塞ぐ。
+    // 相手の画面では出たままなので、世界から消えるわけではない。
+    setSignVisible(on) { signPost.visible = !!on; },
     // 場の札を並べ直す。cards は daifugo.js の番号(空なら片付ける)。
     // seatAngle は見る人の席の角度 ── **札の上をその人と反対側へ向ける**ので、
     // どこに座っていても自分から見て正しい向きで読める。

@@ -60,6 +60,8 @@ function makeNameTag(text, y) {
   sprite.scale.set((canvas.width / canvas.height) * NAME_H, NAME_H, 1);
   sprite.position.y = y;
   sprite.renderOrder = 10;   // 木や山に隠れず、誰がどこにいるか分かるように
+  // 文字の長さで横幅が変わるので、縮めるときのために覚えておく
+  sprite.userData.w = (canvas.width / canvas.height) * NAME_H;
   return sprite;
 }
 
@@ -94,12 +96,33 @@ function makeBubble(icon, y) {
   return sprite;
 }
 
+// 名札の大きさを場面で変える倍率。
+// 名札は「遠くにいる相手が誰か分かる」ための大きさ(NAME_H)で作ってあり、
+// 棒人間の背丈とほぼ同じ。円卓に着くと相手は目と鼻の先なので、そのままだと
+// 名札だけで画面の上が埋まる。
+export const NAME_SCALE_TABLE = 0.55;
+
 export class RemoteView {
   // groundAt(x, z) → { y }。相手の足を地面に合わせるのに使う
   constructor(scene, groundAt) {
     this.scene = scene;
     this.groundAt = groundAt;
     this.people = new Map();   // seat -> { parts, tag, name, sp, phase, spin, t, y }
+    this.nameScale = 1;
+  }
+
+  // 名札の大きさを変える。円卓に着いている間だけ小さくする(上の説明)。
+  // すでに出ている名札にもその場で効かせる ── 座ったあとに来た人だけ
+  // 大きい、では揃わない。
+  setNameScale(k) {
+    this.nameScale = k > 0 ? k : 1;
+    for (const e of this.people.values()) this._sizeTag(e);
+  }
+
+  _sizeTag(e) {
+    if (!e.tag) return;
+    e.tag.scale.set(e.tagW * this.nameScale, NAME_H * this.nameScale, 1);
+    e.tag.position.y = nameY(e.sp) - (1 - this.nameScale) * NAME_H * 0.5;
   }
 
   _make(seat, name, look) {
@@ -109,10 +132,11 @@ export class RemoteView {
     const tag = name ? makeNameTag(name, nameY(sp)) : null;
     if (tag) parts.group.add(tag);
     const e = {
-      parts, tag, name: name ?? null, sp, look: sp.id,
+      parts, tag, tagW: tag?.userData.w ?? 0, name: name ?? null, sp, look: sp.id,
       phase: 0, spin: 0, t: 0, y: 0,
       emote: 0, emoteT: 0, bubble: null,
     };
+    this._sizeTag(e);
     this.people.set(seat, e);
     return e;
   }
@@ -135,6 +159,8 @@ export class RemoteView {
         if (e.tag) { e.tag.removeFromParent(); disposeSprite(e.tag); }
         e.name = p.name;
         e.tag = makeNameTag(p.name, nameY(e.sp));
+        e.tagW = e.tag.userData.w;
+        this._sizeTag(e);
         e.parts.group.add(e.tag);
       }
 
