@@ -36,7 +36,7 @@ import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-r
 import { avatarSvg } from './render/avatars.js';
 import { renderHUD, RES_ICON, COM_ICON, setHumanSeat, setPlayerTitle } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
-import { meetGuideHtml } from './render/meet-guide.js';
+import { islandNoteHtml, meetGuideHtml } from './render/meet-guide.js';
 import { setHTML } from './render/dom.js';
 import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
@@ -130,6 +130,7 @@ const settings = {
 };
 
 // 画面フロー: title(タイトル) → select(ルール選択) / online(合言葉・ロビー) → game(ゲーム)
+//             title → walkset(島えらび) → 島を歩く(ひとり)
 let screen = 'title';
 
 // オンライン対戦の状態(null ならローカル戦)
@@ -181,6 +182,39 @@ function renderSelectPanel() {
       <button data-act="goto-title">← タイトル</button>
       <button class="primary" data-act="start-game">ゲーム開始</button>
     </div>`;
+}
+
+// ひとりで島を歩くときの島えらび。
+//
+// **対戦の設定(settings)とは分ける。** 歩くのに CPU の数も難易度も要らないし、
+// 「歩くために選んだ島」で次の対戦が始まってしまうのも困る。
+// ここを設けるまでは、タイトルから歩くと**必ず都市と騎士の島**だった ──
+// タイトルの飾りの盤(showTitleBoard)をそのまま歩いていたため。
+const walkSetup = { mode: 'base', seed: '' };
+
+// 島えらびの画面(タイトルの 🚶 から)
+function renderWalkSetupPanel() {
+  const panel = document.getElementById('walkset-panel');
+  if (!panel || screen !== 'walkset') return;
+  const seg = (act, options, current) =>
+    `<div class="seg ${options.length >= 4 ? 'seg-grid' : ''}">${options
+      .map(([v, label]) => `<button class="${current === v ? 'sel' : ''}" data-act="${act}:${v}">${label}</button>`)
+      .join('')}</div>`;
+  // すがたはここでも選べるようにする(歩き始めてからでも 🧍 で変えられるが、
+  // ひとりで歩くときは「自分の見た目を決めてから出る」ほうが自然)
+  setHTML(panel, `
+    <h3>🚶 島を歩く</h3>
+    <div class="srow"><span>島</span>${seg('walkset-mode', [['base', '基本'], ['cak', '都市と騎士'], ['dragon', '🐉ドラゴン'], ['fish', '🐟漁師'], ['sea', '⛵航海者']], walkSetup.mode)}</div>
+    ${islandNoteHtml(walkSetup.mode)}
+    <div class="srow"><span>すがた</span>${seg('walkset-look',
+      SPECIES.map((sp) => [String(sp.id), `${sp.icon} ${sp.label}`]), String(myLook))}</div>
+    <div class="srow"><span>シード</span><input id="walk-seed-input" inputmode="numeric" placeholder="空欄でランダム" value="${walkSetup.seed}"></div>
+    <div class="net-note">同じシードなら同じ島が出ます。気に入った島は控えておけます。</div>
+    <div class="row end">
+      <button data-act="goto-rules:meets">❓ あそびかた</button>
+      <button data-act="goto-title">← タイトル</button>
+      <button class="primary" data-act="walkset-go">🏝 島に入る</button>
+    </div>`);
 }
 
 // ---- オンライン対戦の画面 ----
@@ -667,13 +701,20 @@ async function startWalk() {
     refresh();
     return;
   }
-  // 散策部屋にいるなら、みんなと同じ島を「種 + 島の種類」から作る
+  // 散策部屋にいるなら、みんなと同じ島を「種 + 島の種類」から作る。
+  // ひとりなら、島えらびで選んだものを作る ── **飾りの盤を流用しない**。
+  // 流用していたころは、タイトルから歩くと必ず都市と騎士の島だった
+  // (showTitleBoard が mode:'cak' で盤を作っているため)。
   const lobby = online.kind === 'walk' ? online.lobby : null;
   const seat = lobby ? net?.seat ?? null : null;
   if (lobby) {
     makeWalkIsland(lobby.seed, lobby.settings?.mode ?? 'base');
-  } else if (!state) {
-    newGame(); // 島がなければ作る(手は進めない)
+  } else {
+    const typed = String(walkSetup.seed ?? '').trim();
+    const seed = typed ? Number(typed) >>> 0 : (Date.now() % 0x7fffffff) || 1;
+    // 出た島の種を書き戻す。「さっきの島をもう一度」ができるように
+    walkSetup.seed = String(seed);
+    makeWalkIsland(seed, walkSetup.mode);
   }
   clearTimeout(cpuTimer); // 歩いている間に CPU が指し進めないように止める
   r.setGame(state);
@@ -737,6 +778,7 @@ async function startWalk() {
 function exitWalk() {
   if (walk?.isAiming) stopArchery();
   setWalkBook(false);
+  setWalkGuide(false);
   setWalkEmotes(false);
   setWalkLooks(false);
   atDesk = false;
@@ -757,8 +799,9 @@ function exitWalk() {
   walk = null;
   setDiveVeil(0);
   resetFishHud();
-  // 散策部屋から入った島なら、タイトルではなく部屋へ戻る
-  setScreen(online.kind === 'walk' && online.lobby ? 'online' : 'title');
+  // 散策部屋から入った島なら部屋へ、ひとりなら島えらびへ戻る
+  // (タイトルまで戻すと、島を変えてもう一度歩くのに2手かかる)
+  setScreen(online.kind === 'walk' && online.lobby ? 'online' : 'walkset');
   if (online.kind === 'walk' && online.lobby) renderOnlinePanel();
 }
 
@@ -2145,6 +2188,7 @@ function refresh() {
     ui.highlights = {};
   }
   renderSelectPanel();
+  renderWalkSetupPanel();
   renderRulesPanel();
   renderOnlinePanel();
   renderRecordsPanel();
@@ -2988,7 +3032,20 @@ document.addEventListener('click', (e) => {
       if (arg) rulesTab = arg;
       setScreen('rules');
       return;
-    case 'goto-walk':
+    case 'goto-walk':      // タイトルの 🚶 → まず島を選ぶ
+      setScreen('walkset');
+      return;
+    // 島えらびの操作。walk- で始めると HUD のボタン(walk-look など)と
+    // ぶつかるので、walkset- で分ける
+    case 'walkset-mode':   // 歩く島を選んだ
+      walkSetup.mode = arg;
+      refresh();
+      return;
+    case 'walkset-look':   // 島えらびですがたを選んだ
+      setMyLook(arg);
+      refresh();
+      return;
+    case 'walkset-go':     // 選んだ島へ入る
       enterWalk();
       return;
     case 'dfg-card': {          // 手札を選ぶ/選び直す
@@ -3538,9 +3595,10 @@ document.addEventListener(
   { passive: false },
 );
 
-// 設定シートのシード入力(再描画されても値を保持する)
+// シード入力(再描画されても値を保持する)。対戦の設定シートと、島えらび
 document.addEventListener('input', (e) => {
   if (e.target.id === 'seed-input') settings.seed = e.target.value;
+  if (e.target.id === 'walk-seed-input') walkSetup.seed = e.target.value;
 });
 
 // デバッグ・テスト用フック(シード制御と合わせて再現検証に使う)
