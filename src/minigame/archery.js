@@ -102,6 +102,7 @@ export class Raid {
     this.arrows = [];
     this.left = shipsInWave(1); // この波であと何隻湧くか
     this.next = 0.6;            // 次の船まで
+    this.cleared = false;       // この波を凌ぎ切ったか(次の波までの合図)
     this._id = 0;
     // 直前に起きたこと(音や演出のため。takeEvents で読んだら消える)
     this.events = [];
@@ -175,14 +176,23 @@ export class Raid {
   }
 
   _spawn(dt) {
-    // その波の船を出し切ったら、浜も海も片付いた時点で次の波へ
+    // その波の船を出し切ったら、浜も海も片付いた時点で次の波へ。
+    // **凌ぎ切った瞬間と、次が始まる瞬間を別々に知らせる。**
+    // ひとつの合図にまとめると「一区切りついた」がどこにも出ず、
+    // 攻めが途切れただけなのか波が変わったのか読めない。
     if (this.left <= 0) {
       if (this.ships.length || this.foes.length) return;
+      if (!this.cleared) {
+        this.cleared = true;
+        this.next = WAVE_GAP;
+        this.events.push({ type: 'cleared', wave: this.wave, score: this.score });
+      }
       this.next -= dt;
       if (this.next > 0) return;
       this.wave++;
+      this.cleared = false;
       this.left = shipsInWave(this.wave);
-      this.next = WAVE_GAP;
+      this.next = 0.6;
       this.events.push({ type: 'wave', wave: this.wave });
       return;
     }
@@ -290,6 +300,9 @@ export class Raid {
       hits: this.hits,
       ships: this.ships.length,
       foes: this.foes.length,
+      cleared: this.cleared,
+      // 凌ぎ切ってから次の波までの残り(そうでなければ null)
+      untilNext: this.cleared ? Math.max(0, this.next) : null,
     };
   }
 }

@@ -937,6 +937,19 @@
     color: #fff; font-size: 15px; font-weight: 700; line-height: 1.6;
   }
   #aim-result.on { display: block; }
+
+  /* 画面の外の敵。端に小さな三角を出して、どちらから来ているかを知らせる。
+     ここが無いと、視界の外から寄せてきた船に気づけない。 */
+  #aim-marks { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  #aim-marks i {
+    position: absolute; width: 0; height: 0;
+    margin: -9px 0 0 -7px;
+    border-left: 7px solid transparent; border-right: 7px solid transparent;
+    border-bottom: 13px solid var(--accent2);
+    filter: drop-shadow(0 1px 3px rgba(0,0,0,0.8));
+  }
+  /* 浜に降りた蛮族は赤。海の上の船より急ぐ相手だと色で分ける */
+  #aim-marks i.foe { border-bottom-color: #ff8a72; }
   #aim-result b { color: var(--accent2); font-size: 21px; }
 
   /* 張りと取り込みの2本。ボタンの左に縦置きだと親指で隠れるので、下に横置き */
@@ -1577,6 +1590,10 @@
     <div id="aim-draw"><i></i></div>
     <button id="walk-bow" type="button">🏹<span>いる</span></button>
     <div id="aim-result"></div>
+    <!-- 波の合図。本筋のターン開始(.turnfx)と同じ見た目を借りる -->
+    <div id="aim-fx"></div>
+    <!-- 画面の外にいる敵の方向。端に三角を出して知らせる -->
+    <div id="aim-marks"></div>
     <div class="walk-hint">左半分をなぞって移動 ・ 右半分をなぞって視点 ・ ⤒ でジャンプ ・ 港のそばで 🎣</div>
     <!-- 釣り図鑑。島を出ずに見られるようにする(開いている間は時間を止める) -->
     <div id="walk-book">

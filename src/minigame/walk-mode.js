@@ -91,6 +91,11 @@ const AIM_PITCH = 0.06;
 const AIM_SIDE = sc(0.40);
 // 構えている間だけカメラを寄せる割合。遠いと的が小さくて狙えない
 const AIM_CLOSER = 0.30;
+// 構えている間だけ画角を広げる。歩きの 45° だと海がほとんど映らず、
+// どこから船が来ているのか分からない。広げすぎると的が小さくなる。
+const AIM_FOV = 64;
+// 画面の端に出す「敵はあちら」の三角を、縁からどれだけ内側に置くか(画素)
+const MARK_INSET = 26;
 
 // 釣っている間のカメラ。竿は右手(モデルの +X 側)なので、そちらへ回り込むと
 // 竿と糸が本人に重ならない。
@@ -789,11 +794,20 @@ export class WalkMode {
     // **水平まで見上げる。** 歩きのカメラは 0.40 ほど見下ろしていて、
     // そのままだと沖の船が画面の上へ外れる ── 撃つ相手が見えない。
     this.camPitch = AIM_PITCH;
+    // 画角を広げる。戻せるように元の値を覚えておく
+    this.camFov = this.b.camera.fov;
+    this.b.camera.fov = AIM_FOV;
+    this.b.camera.updateProjectionMatrix();
     return true;
   }
 
   stopArchery() {
     if (!this.raid) return;
+    if (this.camFov != null) {
+      this.b.camera.fov = this.camFov;
+      this.b.camera.updateProjectionMatrix();
+      this.camFov = null;
+    }
     this.raid = null;
     this.drawing = false;
     this.drawT = 0;
@@ -832,6 +846,53 @@ export class WalkMode {
       if (t > 0 && t < far * 3) return out.copy(from).addScaledVector(dir, t);
     }
     return out.copy(from).addScaledVector(dir, far);
+  }
+
+  // 画面の外にいる敵。端に出す三角の位置と向きを返す。
+  //
+  // 構えたカメラは狭いので、視界の外から寄せてきた船に気づけない
+  // ── 「どこに現れているか分からない」の答えがこれ。
+  // 戻り値は画面の画素(main.js がそのまま置く)。
+  offScreenTargets(limit = 4) {
+    const r = this.raid;
+    const cam = this.b.camera;
+    if (!r) return [];
+    const el = this.b.renderer?.domElement;
+    const W = el?.clientWidth ?? window.innerWidth;
+    const H = el?.clientHeight ?? window.innerHeight;
+    const p = new THREE.Vector3();
+    const out = [];
+    const targets = [
+      ...r.foes.map((f) => ({ e: f, kind: 'foe' })),   // 浜の蛮族が先(急ぐ相手)
+      ...r.ships.map((e) => ({ e, kind: 'ship' })),
+    ];
+    for (const { e, kind } of targets) {
+      p.set(e.x, e.y + 0.15, e.z).project(cam);
+      const behind = p.z > 1;
+      const sx = (p.x * 0.5 + 0.5) * W;
+      const sy = (-p.y * 0.5 + 0.5) * H;
+      // 画面に入っていて手前なら、三角は要らない(本体が見えている)
+      if (!behind && sx > 0 && sx < W && sy > 0 && sy < H) continue;
+      // 後ろにあるときは投影が反転するので、符号を戻してから縁へ寄せる
+      let dx = (behind ? -p.x : p.x);
+      let dy = (behind ? p.y : -p.y);
+      const len = Math.hypot(dx, dy) || 1;
+      dx /= len; dy /= len;
+      // 画面の縁との交点。長方形なので、はみ出しの大きいほうで割る
+      const k = Math.min(
+        (W / 2 - MARK_INSET) / Math.max(1e-6, Math.abs(dx)),
+        (H / 2 - MARK_INSET) / Math.max(1e-6, Math.abs(dy)),
+      );
+      out.push({
+        kind,
+        x: Math.round(W / 2 + dx * k),
+        y: Math.round(H / 2 + dy * k),
+        // 三角は上向きに作ってあるので、その向きから回す
+        deg: Math.round((Math.atan2(dx, -dy) * 180) / Math.PI),
+      });
+      if (out.length >= limit) break;
+    }
+    return out;
   }
 
   // 矢を出す点(弓を持つ手のあたり)

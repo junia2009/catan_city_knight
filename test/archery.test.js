@@ -134,6 +134,45 @@ test('弓: 水平に放った矢は水面まで落ちて消える', () => {
   assert.ok(ARROW_GRAVITY > 0, '重力が無い');
 });
 
+// 波の切れ目。「凌ぎ切った」と「次が始まった」は別の合図で出すこと ──
+// ひとつにまとめると、一区切りついたことが画面に出せない。
+test('弓: 波を凌ぎ切ると合図が出て、少し間を置いて次の波が始まる', () => {
+  const r = raid(1);
+  const seen = [];
+  for (let i = 0; i < 60 * 40; i++) {
+    // 湧いた船は片端から沈めて、こちらは無傷のまま波を越える
+    for (const s of r.ships.slice()) {
+      r.shoot(BOW, { x: s.x - BOW.x, y: s.y + 0.2 - BOW.y, z: s.z - BOW.z }, 1);
+    }
+    r.update(1 / 60);
+    for (const e of r.takeEvents()) if (e.type === 'cleared' || e.type === 'wave') seen.push(e);
+    if (seen.some((e) => e.type === 'wave')) break;
+  }
+  assert.equal(seen[0]?.type, 'cleared', `凌ぎ切った合図が出ない(${JSON.stringify(seen)})`);
+  assert.equal(seen[0].wave, 1);
+  assert.equal(seen[1]?.type, 'wave', '次の波の合図が出ない');
+  assert.equal(seen[1].wave, 2);
+  assert.equal(r.lives, LIVES, '無傷で越えられていない');
+});
+
+test('弓: 凌ぎ切っている間は「次の波まで」が読める', () => {
+  const r = raid(1);
+  for (let i = 0; i < 60 * 40; i++) {
+    for (const s of r.ships.slice()) {
+      r.shoot(BOW, { x: s.x - BOW.x, y: s.y + 0.2 - BOW.y, z: s.z - BOW.z }, 1);
+    }
+    r.update(1 / 60);
+    if (r.view().cleared) break;
+  }
+  const v = r.view();
+  assert.ok(v.cleared, '凌ぎ切った状態にならない');
+  assert.ok(v.untilNext > 0, `次の波までが読めない(${v.untilNext})`);
+  // 攻めている間は null(「あと何秒」を出しっぱなしにしない)
+  const r2 = raid(1);
+  run(r2, 3);
+  assert.equal(r2.view().untilNext, null);
+});
+
 test('弓: 波が進むと船が増える', () => {
   assert.ok(shipsInWave(3) > shipsInWave(1), '波が進んでも船が増えない');
   assert.ok(shipsInWave(1) >= 2, '1波目が少なすぎる');
