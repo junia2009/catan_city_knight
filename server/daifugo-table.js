@@ -105,6 +105,9 @@ export class DaifugoTable extends MeetCore {
     if (what === 'leave') return this.leave(seat);
     if (what === 'start') return this.start(seat, now);
     if (what === 'rules') return this.setRules(seat, msg?.rules);
+    // 席を立つ。卓が立っている間は leave が効かないので、こちらで抜ける
+    // ── 抜けられないと、始まったあと島から出るまで卓に縛られる。
+    if (what === 'retire') { this.dropSeat(seat); return { ok: true }; }
     if (PLAY_OPS[what] || what === 'pick') return this.act(seat, what, msg, now);
     return { error: `不明な操作: ${what}` };
   }

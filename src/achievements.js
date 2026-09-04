@@ -260,6 +260,14 @@ export const ACHIEVEMENTS = [
   },
 
   {
+    id: 'daifugo-win',
+    name: '卓を制す',
+    desc: '散策部屋の大富豪で1番に上がる',
+    title: '大富豪',
+    icon: '🃏', tier: 'silver', scope: '散策部屋',
+    checkMeet: ({ meets }) => (meets.daifugo?.won ?? 0) > 0,
+  },
+  {
     id: 'raid-meet-win',
     name: '射手の頂点',
     desc: '散策部屋の「蛮族を射る」大会で優勝する',

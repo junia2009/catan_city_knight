@@ -119,6 +119,9 @@ export class RoomDO {
     if (url.pathname.endsWith('/claim')) {
       if (this.room) return Response.json({ free: false });
       this.room = new RoomCore({ code, kind });
+      // **部屋を作った時点で進行も作る。** 島を「変えた」ときにしか作らないと、
+      // 既定の島(基本)のまま遊ぶ部屋にはいつまでも受付が立たない。
+      this.makeMeet(this.room.settings.mode);
       await this.save();
       // 誰も入らないまま放置された部屋も掃除対象にする(合言葉を空けるため)
       this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
@@ -130,6 +133,7 @@ export class RoomDO {
     }
     if (!this.room) {
       this.room = new RoomCore({ code, kind });
+      this.makeMeet(this.room.settings.mode);
       await this.save();
       this.ctx.storage.setAlarm(Date.now() + IDLE_SWEEP_MS);
     }

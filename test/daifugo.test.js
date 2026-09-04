@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import {
   DECK, JOKER, RANKS, SUITS, RULES, RULE_IDS, SPADE3, TITLE_JP,
   cardName, cleanRules, classify, createTable, defaultRules, dispatch, isJoker,
-  legalPlays, rankOf, suitOf, titlesFor, validate, viewFor,
+  legalPlays, playsFor, rankOf, suitOf, titlesFor, validate, viewFor,
 } from '../src/minigame/daifugo.js';
 
 // '♠3' のような書き方で札を作る(テストを読めるようにするため)
@@ -750,6 +750,22 @@ test('出せる手: 場があるときは、それを超えるものだけ', () 
   // ジョーカーの片割れも「10のペア」として数えられる
   assert.ok(list.some((cs) => cs.length === 2 && cs.includes(52)) === false,
     '枚数の合わない手が混ざっている');
+});
+
+// クライアントは自分の手札しか知らないが、席ごとに配られる中身には
+// 判定に要るもの(ルール・場・革命・しばり)が全部入っている。
+// ここが崩れると、手元では出せるのにサーバーが弾く、が起きる。
+test('出せる手: 席ごとに配られる中身だけで、同じ答えが出る', () => {
+  let st = table({
+    0: cards('♠9', '♠4'), 1: cards('♠3', '♠10', '♥10', '🃏'), 2: cards('♠J'),
+  }, { shibari: true });
+  st = play(st, 0, cards('♠9'));
+  const me = 1;
+  const mine = legalPlays(st, me).map(show).sort();
+  const view = viewFor(st, me);
+  const same = playsFor(view, view.hand).map(show).sort();
+  assert.deepEqual(same, mine, '配られた中身だけでは同じ手が出せない');
+  assert.ok(mine.length > 0);
 });
 
 test('出せる手: 自分の番でなければ空', () => {

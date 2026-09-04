@@ -74,24 +74,27 @@ export function makeTable(scene, x, z, groundY, meet, seats = 6) {
   // 真後ろに柱が来て、カメラと本人の間を塞ぐ(実際そうなっていた)。席は
   // 輪を埋めているので「空いている方角」は無い。真ん中なら誰の邪魔にもならず、
   // 看板は座った人の頭より高いので、向かいの顔も隠さない。
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.46, 6), wood);
-  pole.position.set(0, TOP_Y + 0.23, 0);
+  // 看板は**座った人の頭よりずっと上**へ。低いと、向かいに座っている人の
+  // 体にちょうど重なって顔が読めなくなる(卓を挟んで正面に来るため)。
+  const SIGN_Y = TOP_Y + 0.62;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, SIGN_Y - TOP_Y, 6), wood);
+  pole.position.set(0, TOP_Y + (SIGN_Y - TOP_Y) / 2, 0);
   pole.castShadow = true;
   g.add(pole);
 
   // 表裏の両面に文字を焼き込む(どちらから来ても読める)
   const faces = [board, board, board, board, makeSignFace(meet.sign), makeSignFace(meet.sign)];
   const sign = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.13, 0.015), faces);
-  sign.position.set(0, TOP_Y + 0.40, 0);
+  sign.position.set(0, SIGN_Y, 0);
   sign.castShadow = true;
   g.add(sign);
 
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.20, 5), dark);
-  mast.position.set(0, TOP_Y + 0.57, 0);
+  mast.position.set(0, SIGN_Y + 0.17, 0);
   g.add(mast);
   const flag = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.11, 3), cloth);
   flag.rotation.z = -Math.PI / 2;
-  flag.position.set(0.04, TOP_Y + 0.63, 0);
+  flag.position.set(0.04, SIGN_Y + 0.23, 0);
   g.add(flag);
 
   scene.add(g);

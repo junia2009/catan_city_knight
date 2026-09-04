@@ -44,6 +44,18 @@ export const raidAhead = (r, o) => o.score > r.score
 //   place   … 自分の順位(出ていなければ 0)
 export function contestOutcome(view, seat) {
   const rank = view?.rank ?? [];
+  // 大富豪だけは順位を数え直さない。**順位は「札を出し切った順」**で、
+  // 配られた行の中身(残り枚数)からは作れない ── サーバーが上がった順に
+  // 並べて place を入れてくれているので、それをそのまま使う。
+  if (view?.kind === 'daifugo') {
+    const me = rank.find((r) => r.seat === seat);
+    if (!me) return { entered: false, won: false, score: 0, place: 0 };
+    // ひとりしか残らなかった回は優勝にしない(ほかの遊びと同じ)
+    if (rank.length < 2) return { entered: true, won: false, score: 0, place: me.place };
+    return {
+      entered: true, won: me.place === 1, score: rank.length - me.place, place: me.place,
+    };
+  }
   // サーバーが place を入れて配っているが、ここでも数え直す ── 古い版の
   // サーバーが繋がっていても、優勝の判定だけは自前で決められるように。
   const rows = view?.kind === 'dragonhunt'

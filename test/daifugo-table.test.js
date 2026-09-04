@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 
 import { DaifugoTable, AUTO_MS, TABLE_MS, dealSeed, weakestPlay } from '../server/daifugo-table.js';
 import { defaultRules, legalPlays, rankOf } from '../src/minigame/daifugo.js';
+import { contestOutcome } from '../src/minigame/contest.js';
 
 const at = (t) => t;
 
@@ -216,6 +217,20 @@ test('抜け: 卓の途中で抜けても回は続き、その人はいちばん
   assert.equal(c.table.result.order.at(-1), gone, '抜けた人が最下位になっていない');
 });
 
+// 卓が立っている間は leave が効かない(器の決まり)。抜ける手だてが
+// 無いと、始まったあと島から出るまで卓に縛られる。
+test('抜け: 席を立つ(retire)で、卓の途中でも抜けられる', () => {
+  const c = seated([0, 1, 2, 3]);
+  let now = 1;
+  for (let i = 0; i < 3; i++) step(c, at(now++));
+  assert.ok(c.command(1, 'leave', {}, at(now)).error, '開催中に leave が通ってしまう');
+  assert.equal(c.command(1, 'retire', {}, at(now)).error, undefined);
+  assert.equal(c.table.hands[1].length, 0, '手札が残っている');
+  assert.equal(c.entries.has(1), false, 'エントリーに残っている');
+  for (let i = 0; i < 4000 && c.phase === 'running'; i++) step(c, at(now++));
+  assert.equal(c.phase, 'result', '抜けたあと進行が止まった');
+});
+
 test('抜け: ふたり抜けても決着する', () => {
   const c = seated([0, 1, 2, 3]);
   let now = 1;
@@ -303,4 +318,38 @@ test('卓: 上限の時間は決め打ちしない', () => {
   assert.equal(short.tick(at(1000)), true, '上限で畳めない');
   assert.equal(short.phase, 'result');
   assert.equal(short.titles, null, '決着していない回の称号を持ち越した');
+});
+
+// ---- 結果の読み取り(実績と称号がここで付く)----
+
+test('結果: 1番に上がった人だけが優勝。順位はサーバーの並びをそのまま使う', () => {
+  const c = seated([0, 1, 2]);
+  let now = 1;
+  for (let i = 0; i < 4000 && c.phase === 'running'; i++) step(c, at(now++));
+  const v = c.view(at(now));
+  const order = v.rank.map((r) => r.seat);
+  assert.equal(contestOutcome(v, order[0]).won, true, '1番の人が優勝になっていない');
+  assert.equal(contestOutcome(v, order[0]).place, 1);
+  for (const seat of order.slice(1)) {
+    assert.equal(contestOutcome(v, seat).won, false, `${seat} が優勝になっている`);
+  }
+  // 記録は「何人抜いたか」。1番が いちばん大きい
+  assert.equal(contestOutcome(v, order[0]).score, 2);
+  assert.equal(contestOutcome(v, order.at(-1)).score, 0);
+  // 出ていない人は数えない
+  assert.equal(contestOutcome(v, 7).entered, false);
+});
+
+// 残り枚数から順位を作ろうとすると、上がった人(0枚)と抜けた人(0枚)が
+// 同率になる。順位は「札を出し切った順」なので、並びのほうが正しい。
+test('結果: 抜けた人がいても、上がった順のまま数える', () => {
+  const c = seated([0, 1, 2]);
+  let now = 1;
+  for (let i = 0; i < 3; i++) step(c, at(now++));
+  c.dropSeat(1);
+  for (let i = 0; i < 4000 && c.phase === 'running'; i++) step(c, at(now++));
+  const v = c.view(at(now));
+  assert.equal(v.rank.at(-1).seat, 1, '抜けた人が最下位になっていない');
+  assert.equal(contestOutcome(v, 1).won, false, '抜けた人が優勝になっている');
+  assert.equal(contestOutcome(v, v.rank[0].seat).won, true);
 });

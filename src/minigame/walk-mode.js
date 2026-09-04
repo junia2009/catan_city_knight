@@ -210,6 +210,16 @@ export class WalkMode {
       this.clearedObjs = cleared.map((o) => ({ o: o.obj, vis: o.obj?.visible }))
         .filter((e) => e.o);
       for (const e of this.clearedObjs) e.o.visible = false;
+      // 盗賊(ドラゴンの島では竜)と商人は、盤を上から見たときの目印として
+      // 大きく作ってある。collectObstacles の「タイルより小さい物」に
+      // 引っかからないので、広場を片付けても残ってしまう ── 広場のまん中に
+      // 立たれると、円卓も向かいに座った人もまるごと隠れる。ここだけ別に隠す。
+      for (const big of [board3d.robber, board3d.merchantMesh]) {
+        if (!big) continue;
+        if (Math.hypot(big.position.x - home.x, big.position.z - home.y) > clearR) continue;
+        this.clearedObjs.push({ o: big, vis: big.visible });
+        big.visible = false;
+      }
       const groundY = this.ground(home.x, home.y).y;
       this.desk = this.roundTable
         ? makeTable(board3d.scene, home.x, home.y, groundY, this.meet, WALK_SEATS)

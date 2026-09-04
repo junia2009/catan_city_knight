@@ -635,7 +635,17 @@ function combos(arr, k) {
 export function legalPlays(st, pid) {
   if (!st || st.result || st.awaiting) return [];
   if (st.players[st.turn] !== pid) return [];
-  const hand = st.hands[pid] ?? [];
+  return playsFor(st, st.hands[pid] ?? []);
+}
+
+// 手札と「場の様子」から、出せる手を数え上げる。
+//
+// **場の様子は viewFor が配るものでそのまま足りる。** 判定が読むのは
+// rules / field / revolution / jback / shibari だけで、どれも席ごとの
+// 中身に入っている ── 自分の手札しか知らないクライアントでも、
+// サーバーと同じ答えが出せる(これが出せる札を光らせる仕組み)。
+export function playsFor(view, hand = []) {
+  const st = view;
   const jokers = hand.filter(isJoker);
   const out = [];
   const tryAdd = (cards) => {
@@ -685,6 +695,12 @@ export function legalPlays(st, pid) {
 
 // その席から見た卓。**他人の手札は枚数だけ**にする。
 // 通信に乗るのはこれだけなので、ここが伏せ処理の全て。
+//
+// **戻り値は、そのまま判定の st として渡せる。** beatsField / fitsShibari /
+// forbiddenFinish / playsFor が読むもの(rules・field・revolution・jback・
+// shibari)を全部入れてあるので、クライアントは自分の手札だけで
+// 「出せるか」をサーバーと同じ答えで出せる。項目を減らすときは、
+// この約束が崩れていないか確かめること。
 export function viewFor(st, pid) {
   if (!st) return null;
   const counts = {};
