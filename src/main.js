@@ -36,6 +36,7 @@ import { drawBoard, hexCenterOf, toPixel, PLAYER_COLORS } from './render/board-r
 import { avatarSvg } from './render/avatars.js';
 import { renderHUD, RES_ICON, COM_ICON, setHumanSeat, setPlayerTitle } from './render/hud-render.js';
 import { rulesHtml } from './render/rules-content.js';
+import { meetGuideHtml } from './render/meet-guide.js';
 import { setHTML } from './render/dom.js';
 import { Bgm } from './audio/bgm.js';
 import { Sfx, sfxForAction, sfxForEnd, suspendAudio } from './audio/sfx.js';
@@ -316,6 +317,7 @@ function renderWalkLobby(panel, lb, err) {
     <div class="net-note meet-note">${meetFor(lb.settings.mode)
       ? `🎪 この島では <b>${meetFor(lb.settings.mode).name}</b> が開けます(中心の受付から)`
       : 'この島に受付はありません。ただ歩いて、港で釣りができます。'}</div>
+    <div class="row center"><button data-act="goto-rules:meets">❓ 集まりのあそびかた</button></div>
     <div class="net-status ${online.status}"><span class="dot"></span>${STATUS_JP[online.status] ?? ''}</div>
     ${err}
     <div class="net-note">${host
@@ -1163,10 +1165,32 @@ function setWalkBook(on) {
     document.getElementById('walk-book-body').innerHTML = fishbookHtml(progress, { walk: true });
   }
   el?.classList.toggle('on', walkBookOpen);
-  if (walkBookOpen) { setWalkEmotes(false); setWalkLooks(false); }
+  if (walkBookOpen) { setWalkEmotes(false); setWalkLooks(false); setWalkGuide(false); }
   walk.setPaused(walkBookOpen);
   // 移動スティックが出たままにならないように
   if (walkBookOpen) walkStickHide();
+}
+
+// あそびかた。図鑑と同じ扱い(開いている間は時間を止める)。
+//
+// **この島の集まりのぶんだけを出す。** 歩いている最中に読むものなので、
+// 4つ全部を並べると目当てのところまでスクロールすることになる
+// (全部並べたものは、タイトルの説明書の「🎪集まり」タブにある)。
+// 大富豪だけは、いま入っているルールに印をつけて出す ── ゲームマスターが
+// 何を入れたのかは、卓に着く前に読めないと意味がない。
+let walkGuideOpen = false;
+function setWalkGuide(on) {
+  if (!walk) return;
+  walkGuideOpen = !!on;
+  const el = document.getElementById('walk-guide');
+  if (walkGuideOpen) {
+    setHTML(document.getElementById('walk-guide-body'),
+      meetGuideHtml(walk.meet?.id, { rules: contest?.rules ?? null }));
+  }
+  el?.classList.toggle('on', walkGuideOpen);
+  if (walkGuideOpen) { setWalkEmotes(false); setWalkLooks(false); setWalkBook(false); }
+  walk.setPaused(walkGuideOpen);
+  if (walkGuideOpen) walkStickHide();
 }
 
 // ---- 釣り大会 ----
@@ -1320,6 +1344,11 @@ function renderMeetBar() {
   setHTML(el, clock + (me ? mine : ' 観戦中'));
 }
 
+// 受付の「あそびかた」。**受付にも置く** ── 上の帯の ❓ は島に着いてすぐ
+// 目に入るが、受付まで来て初めて「何をする集まりなのか」を知りたくなる。
+const GUIDE_BTN = '<button data-act="walk-guide">❓ あそびかた</button>';
+const GUIDE_ROW = `<div class="row">${GUIDE_BTN}</div>`;
+
 // 受付のそばで開くパネル
 function renderContestPanel() {
   const el = document.getElementById('walk-contest');
@@ -1359,7 +1388,8 @@ function renderContestPanel() {
   }
   if (c.phase === 'running') {
     setHTML(el, `<h4>${meet.title}(開催中)</h4>
-      <div class="note">${meet.hint}<br>残り ${mmss(c.remain)}</div>`);
+      <div class="note">${meet.hint}<br>残り ${mmss(c.remain)}</div>
+      ${GUIDE_ROW}`);
     return;
   }
 
@@ -1378,8 +1408,9 @@ function renderContestPanel() {
   const head = isDfg
     ? `<div class="note">${meet.hint}</div>
        <div class="note">${dfgRuleNames(c.rules)}</div>
-       ${host ? '<div class="row"><button data-act="dfg-rules">🃏 ルールを決める</button></div>' : ''}`
-    : `<div class="note">${Math.round(c.total / 1000)}秒。${meet.hint}</div>`;
+       <div class="row">${GUIDE_BTN}
+         ${host ? '<button data-act="dfg-rules">🃏 ルールを決める</button>' : ''}</div>`
+    : `<div class="note">${Math.round(c.total / 1000)}秒。${meet.hint}</div>${GUIDE_ROW}`;
   setHTML(el, `<h4>${meet.title} 受付</h4>
     <div class="who">${who}</div>
     ${head}
@@ -3015,8 +3046,9 @@ document.addEventListener('click', (e) => {
       setWalkEmotes(false);
       return;
     case 'walk-exit':
-      // 図鑑を開いていたら、まずそれを閉じる
+      // 図鑑やあそびかたを開いていたら、まずそれを閉じる
       if (walkBookOpen) { setWalkBook(false); return; }
+      if (walkGuideOpen) { setWalkGuide(false); return; }
       // エモートやすがた選びを開いていたら、まずそれを閉じる
       if (walkEmoteOpen) { setWalkEmotes(false); return; }
       if (walkLookOpen) { setWalkLooks(false); return; }
@@ -3029,6 +3061,8 @@ document.addEventListener('click', (e) => {
       return;
     case 'walk-book': setWalkBook(true); return;
     case 'walk-book-close': setWalkBook(false); return;
+    case 'walk-guide': setWalkGuide(true); return;
+    case 'walk-guide-close': setWalkGuide(false); return;
     case 'goto-records':
       ui.dialog = null; // 勝敗ダイアログから来ることがある
       // 実績を解除した直後なら、その実績を開いた状態で見せる

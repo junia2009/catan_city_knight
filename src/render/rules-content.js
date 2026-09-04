@@ -2,6 +2,7 @@
 // 進歩カードの一覧は PROGRESS_CARDS から自動生成するので実装と常に一致する。
 
 import { PROGRESS_CARDS } from '../rules/cak/progress-cards.js';
+import { meetsGuideHtml } from './meet-guide.js';
 
 export const RULES_TABS = [
   ['basic', '基本'],
@@ -10,6 +11,7 @@ export const RULES_TABS = [
   ['dragon', '🐉ドラゴン'],
   ['fish', '🐟漁師たち'],
   ['sea', '⛵航海者たち'],
+  ['meets', '🎪集まり'],
   ['setup', '⚙️設定'],
 ];
 
@@ -299,6 +301,7 @@ export function rulesHtml(tab = 'basic', { demo = true } = {}) {
     : tab === 'dragon' ? dragonHtml()
     : tab === 'fish' ? fishHtml()
     : tab === 'sea' ? seaHtml()
+    : tab === 'meets' ? meetsGuideHtml()
     : tab === 'setup' ? setupHtml()
     : basicHtml(demo);
   return `${tabs}<div class="rules-body">${body}</div>`;
