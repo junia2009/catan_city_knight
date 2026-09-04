@@ -684,14 +684,16 @@
   /* エモート。上のバーのボタンから、その下に並べて出す。
      右下(ジャンプ・つる)には置かない ── あそこは2つ縦に並んでいて、
      港のそばだと3つめの置き場が無い。 */
-  #walk-emotes {
+  /* すがた選び(#walk-looks)も同じ見た目・同じ場所に出す。
+     どちらか一方しか開かない(main.js)ので、位置は取り合わない。 */
+  #walk-emotes, #walk-looks {
     position: absolute; z-index: 2; pointer-events: none;
     top: calc(50px + env(safe-area-inset-top));
     right: calc(12px + env(safe-area-inset-right));
     display: none; flex-direction: column; gap: 6px;
   }
-  #walk-emotes.on { display: flex; }
-  #walk-emotes button {
+  #walk-emotes.on, #walk-looks.on { display: flex; }
+  #walk-emotes button, #walk-looks button {
     pointer-events: auto;
     display: flex; align-items: center; gap: 8px;
     min-width: 132px; padding: 8px 12px;
@@ -702,10 +704,14 @@
     -webkit-tap-highlight-color: transparent;
     transition: transform 90ms ease, background 90ms ease;
   }
-  #walk-emotes button b { font-size: 19px; font-weight: 400; line-height: 1; }
-  #walk-emotes button:active { transform: scale(0.95); background: rgba(255, 217, 125, 0.34); }
+  #walk-emotes button b, #walk-looks button b { font-size: 19px; font-weight: 400; line-height: 1; }
+  #walk-emotes button:active, #walk-looks button:active {
+    transform: scale(0.95); background: rgba(255, 217, 125, 0.34);
+  }
+  /* いま選んでいるすがたは、押していなくても光らせておく */
+  #walk-looks button.sel { background: rgba(255, 217, 125, 0.34); border-color: rgba(255, 217, 125, 0.6); }
   /* 出している間はボタンを光らせる(もう一度押すと出し直せると分かるように) */
-  [data-act="walk-emote"].on { background: rgba(255, 217, 125, 0.34); }
+  [data-act="walk-emote"].on, [data-act="walk-look"].on { background: rgba(255, 217, 125, 0.34); }
 
   /* ---------- 釣り大会 ---------- */
   /* 大会中ずっと出る細いバー。上のバーの下に置く(ボタンと取り合わない) */
@@ -1469,11 +1475,13 @@
   <div id="walk-hud">
     <div class="walk-top">
       <span id="walk-where"></span>
+      <button data-act="walk-look" aria-label="すがた">🧍</button>
       <button data-act="walk-emote" aria-label="エモート">😀</button>
       <button data-act="walk-book" aria-label="釣り図鑑">📖</button>
       <button data-act="walk-exit">✕ もどる</button>
     </div>
     <div id="walk-emotes"></div>
+    <div id="walk-looks"></div>
     <!-- 釣り大会。受付のそばで開く小さなパネルと、大会中の細いバー -->
     <div id="walk-contest"></div>
     <div id="walk-meet"></div>

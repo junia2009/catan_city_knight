@@ -484,6 +484,13 @@ export class WalkMode {
 
   // ---- 操作 ----
 
+  // すがたを選び直す(歩いている最中でも)。散策部屋では、みんなに知らせるのは
+  // main.js の仕事 ── ここは自分の見た目だけを替える。
+  setLook(id) {
+    this.species = speciesById(id);
+    this.walker.setSpecies(this.species);
+  }
+
   setStick(x, y) {
     this.input.x = x;
     this.input.y = y;

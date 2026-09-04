@@ -50,11 +50,31 @@ export class Walker {
   // blockAt: 盤の上の物にめり込ませないための関数(obstacles.js)
   // species: species.js の1つ(省略すると「ひと」)
   constructor(scene, groundAt, color, blockAt = null, species = null) {
+    this.scene = scene;
+    this.color = color;
     this.parts = makeWalker(color, species);
     this.species = species;
     scene.add(this.parts.group);
     this.motion = new WalkerMotion(groundAt, blockAt);
     this.phase = 0;       // 歩行サイクル
+  }
+
+  // すがたを取り替える。**島を歩いている最中でも選び直せる**ようにするため。
+  // 居場所も動きも motion が持っているので、作り直すのはメッシュだけ ──
+  // 次のフレームの _apply が今の姿勢をそのまま流し込むので、
+  // 歩いている途中で替えても足が揃わなくなることはない。
+  setSpecies(species) {
+    if (species === this.species) return;
+    const rod = this.parts.rod.group.visible;  // 竿を出したまま替えても消えない
+    this.dispose();
+    this.species = species;
+    this.parts = makeWalker(this.color, species);
+    this.parts.rod.group.visible = rod;
+    this.scene.add(this.parts.group);
+    // 位置を書くのは毎フレームの _apply だけ。書いておかないと、
+    // 次の1フレームだけ原点(島の中心)に現れる
+    const { x, z } = this.pos;
+    this.parts.group.position.set(x, this.motion.groundAt(x, z).y, z);
   }
 
   // 位置・速度・向きは motion が持つ(walk-mode.js のカメラ追従が読む)
