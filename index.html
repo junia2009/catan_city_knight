@@ -1001,12 +1001,19 @@
   #dfg-act { display: flex; gap: 8px; justify-content: center; }
   #dfg-act button { min-width: 96px; }
 
-  /* ルールを決める画面(ゲームマスターだけ) */
+  /* ルールを決める画面(ゲームマスターだけ)。
+     **pointer-events: auto を忘れない** ── #walk-hud は none なので、
+     付けないと「見えるのに押せない・スクロールもできない」板になる。
+     上のバー(もどる・すがた…)より下から始める。重ねると、後ろの
+     ボタンが透けて見えるのに押せず、壊れているように見える。 */
   #dfg-rules {
     position: absolute; inset: 0; z-index: 6; display: none;
-    background: rgba(4,12,22,0.9);
-    padding: calc(12px + env(safe-area-inset-top)) 12px 12px;
+    pointer-events: auto;
+    background: rgba(4,12,22,0.94);
+    padding: calc(54px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
   #dfg-rules.on { display: block; }
   #dfg-rules h4 { margin: 0 0 8px; text-align: center; color: var(--accent2); }
@@ -1015,6 +1022,11 @@
     margin-bottom: 6px; padding: 8px 10px; border-radius: 10px;
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
     color: #fff; text-align: left;
+    /* 共通の button は nowrap(ラベルを折り返さない)。ここは説明文なので
+       折り返させる ── 継いだままだと右端で切れる(実際そうなっていた) */
+    white-space: normal;
+    /* 押したときに説明文が選択されて青くならないように */
+    user-select: none; -webkit-user-select: none;
   }
   .dfg-rule.on { background: rgba(120,200,255,0.16); border-color: var(--accent2); }
   .dfg-rule .box {
@@ -1028,6 +1040,12 @@
   .dfg-rule > span:last-child { min-width: 0; }
   .dfg-rule b { font-size: 13px; }
   .dfg-rule small { display: block; font-size: 11px; color: var(--dim); margin-top: 1px; }
+  /* 「とじる」は下に貼りつける。13行あるので、いちばん下まで送らないと
+     閉じられない、では戻れなくなる */
+  #dfg-rules .row {
+    position: sticky; bottom: 0; padding-top: 8px;
+    background: linear-gradient(to top, rgba(4,12,22,0.96) 70%, rgba(4,12,22,0));
+  }
 
   /* 波・撃退数・残り。上のバーの下に細く */
   #aim-bar {
