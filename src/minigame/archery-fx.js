@@ -8,9 +8,19 @@ import { makeTower, makeBarbarianShip } from '../render3d/board3d.js';
 
 const SHIP_SCALE = 0.42;     // 盤の駒より小ぶりに。等倍だと浜を覆う
 const FOE_H = 0.20;          // 蛮族の背丈(盤の寸法)
-const ARROW_LEN = 0.13;
-// 櫓を立ち位置から岸に沿ってどれだけずらすか(盤の寸法)
-const TOWER_SIDE = 0.34;
+// 矢。**盤の寸法にしては大きい。** 実物の比なら細い棒だが、
+// 携帯の画面で 5 タイル先を飛ぶ矢は、正しい太さだと1画素も残らない
+// ── 実際「飛んでいる矢が見えない」ところから太くした。
+const ARROW_LEN = 0.30;
+const ARROW_R = 0.011;
+// 尾を引かせる。1フレームに 0.25 タイル進むので、1本の矢だけだと
+// 点滅しているようにしか見えない
+const TRACER_LEN = 0.55;
+// 櫓を立ち位置から岸に沿ってどれだけずらすか(盤の寸法)。
+// **符号は構えたカメラと逆。** カメラは肩の横(+outZ, -outX 側)へ回り込む
+// ので、櫓を同じ側に建てると今度は櫓が画面の真ん中に来て海が見えない
+// ── 体をよけたら櫓が入った、を一度やっている。
+const TOWER_SIDE = -0.34;
 
 // 蛮族ひとり。棒人間ほど作り込まない ── 何人も出るし、遠くの浜で見るので、
 // 「暗い色の人影が浜を上がってくる」ことのほうが大事。
@@ -41,18 +51,40 @@ function makeFoe() {
 
 function makeArrow() {
   const g = new THREE.Group();
+  // 光らせる(emissive)。海と空を背にすると、明るい色でないと沈む
   const shaft = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.004, 0.004, ARROW_LEN, 4),
-    new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.7 }),
+    new THREE.CylinderGeometry(ARROW_R, ARROW_R, ARROW_LEN, 5),
+    new THREE.MeshStandardMaterial({
+      color: 0xf2e2b8, roughness: 0.6, emissive: 0x554521,
+    }),
   );
   shaft.rotation.x = Math.PI / 2;   // 長さの向きを +Z へ
   const head = new THREE.Mesh(
-    new THREE.ConeGeometry(0.008, 0.022, 4),
-    new THREE.MeshStandardMaterial({ color: 0x9aa4ad, roughness: 0.5, metalness: 0.3 }),
+    new THREE.ConeGeometry(ARROW_R * 2, 0.05, 5),
+    new THREE.MeshStandardMaterial({
+      color: 0xdfe6ec, roughness: 0.4, metalness: 0.35, emissive: 0x3a4550,
+    }),
   );
   head.rotation.x = Math.PI / 2;
   head.position.z = ARROW_LEN / 2;
-  g.add(shaft, head);
+  // 矢羽根。後ろ端に十字で入れると、遠くでも「矢」に見える
+  const featherMat = new THREE.MeshStandardMaterial({
+    color: 0xe2604a, roughness: 0.8, side: THREE.DoubleSide, emissive: 0x401510,
+  });
+  for (const a of [0, Math.PI / 2]) {
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.07), featherMat);
+    f.rotation.set(Math.PI / 2, 0, a);
+    f.position.z = -ARROW_LEN / 2 + 0.03;
+    g.add(f);
+  }
+  // 尾。飛んだ跡を細く引く
+  const tracer = new THREE.Mesh(
+    new THREE.CylinderGeometry(ARROW_R * 0.5, ARROW_R * 1.4, TRACER_LEN, 4),
+    new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.35 }),
+  );
+  tracer.rotation.x = Math.PI / 2;
+  tracer.position.z = -ARROW_LEN / 2 - TRACER_LEN / 2;
+  g.add(shaft, head, tracer);
   return g;
 }
 
