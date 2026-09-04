@@ -240,7 +240,9 @@ export class WalkMode {
         // ぶつかるのは櫓の実物の場所(archery-fx が岸に沿ってずらして建てる。
         // ずらす向きと幅は archery-fx.js の TOWER_SIDE と揃えること)
         this.obstacles.push({
-          x: p.x - p.outZ * 0.34, z: p.z + p.outX * 0.34, r: 0.11, h: 0.5,
+          x: p.x - p.outX * 1.05 - p.outZ * 0.45,
+          z: p.z - p.outZ * 1.05 + p.outX * 0.45,
+          r: 0.10, h: 0.5,
         });
       }
     }
