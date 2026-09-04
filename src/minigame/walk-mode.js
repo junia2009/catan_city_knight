@@ -85,6 +85,12 @@ const DRAW_FULL = 0.9;
 // 構えたときのカメラの見下ろし角。歩き(0.40)より水平に近づけて、
 // 沖の船が画面に入るようにする(orbit の下限と同じ)。
 const AIM_PITCH = 0.06;
+// 構えている間、カメラを**肩の横へずらす**幅。
+// 真後ろから撮ると本人が画面の中心に来て、照準と体が重なって的が見えない。
+// 人の寸法なので縮尺を掛ける(小さくなったら、ずらす幅も小さくてよい)。
+const AIM_SIDE = sc(0.40);
+// 構えている間だけカメラを寄せる割合。遠いと的が小さくて狙えない
+const AIM_CLOSER = 0.30;
 
 // 釣っている間のカメラ。竿は右手(モデルの +X 側)なので、そちらへ回り込むと
 // 竿と糸が本人に重ならない。
@@ -231,9 +237,10 @@ export class WalkMode {
         this.archeryFx = new ArcheryFx(board3d.scene, this.postAt);
         // 櫓にもぶつかる。collectObstacles はシーンを見て集めるので、
         // あとから建てたものは自分で入れる
-        // ぶつかるのは櫓の実物の場所(archery-fx が岸に沿ってずらして建てる)
+        // ぶつかるのは櫓の実物の場所(archery-fx が岸に沿ってずらして建てる。
+        // ずらす向きと幅は archery-fx.js の TOWER_SIDE と揃えること)
         this.obstacles.push({
-          x: p.x + p.outZ * 0.34, z: p.z - p.outX * 0.34, r: 0.11, h: 0.5,
+          x: p.x - p.outZ * 0.34, z: p.z + p.outX * 0.34, r: 0.11, h: 0.5,
         });
       }
     }
@@ -846,8 +853,8 @@ export class WalkMode {
     if (r.lives !== before) this.onRaidHurt?.(r.lives);
     // 構えた姿勢。引き絞りは弦と矢にも出る
     this.walker.aim(this.aimT, this.draw);
-    // カメラは狙う向きへ。歩きより低く、遠くを見る
-    this._placeCamera(dt, false);
+    // カメラは狙う向きへ。肩の横へずらして、体と照準を重ねない
+    this._placeCamera(dt, false, AIM_CLOSER, true);
   }
 
   // 釣っている間のフレーム。歩きの計算はしない(その場に立ったまま)。
@@ -901,7 +908,7 @@ export class WalkMode {
     );
   }
 
-  _placeCamera(dt, snap, closer = 0) {
+  _placeCamera(dt, snap, closer = 0, aim = false) {
     const cam = this.b.camera;
     // 追うのは「足元の位置」。描画上のモデル位置を追うと、
     // アニメーションの上下がそのまま画面の揺れになる。
@@ -928,14 +935,23 @@ export class WalkMode {
     const dive = Math.max(0, Math.min(1, -my / 0.6));  // 沈む深さは盤の寸法
     const eye = (sc(0.42) + h) * (1 - dive) + sc(0.16) * dive;
 
+    // 弓を構えている間は肩の横へずらす。**見る先も同じだけずらす**ので、
+    // 視線の向きは変わらず、本人だけが画面の端へどく ── ずらすのを
+    // カメラの位置だけにすると、体が中心に残ったまま斜めから見るだけになる。
+    const sx = aim ? Math.cos(this.camYaw) * AIM_SIDE : 0;
+    const sz = aim ? -Math.sin(this.camYaw) * AIM_SIDE : 0;
     const want = new THREE.Vector3(
-      w.x - Math.sin(this.camYaw) * flat,
+      w.x + sx - Math.sin(this.camYaw) * flat,
       groundY + lift + eye,
-      w.z - Math.cos(this.camYaw) * flat,
+      w.z + sz - Math.cos(this.camYaw) * flat,
     );
     if (snap) cam.position.copy(want);
     else cam.position.lerp(want, smooth(9, dt));
-    cam.lookAt(w.x, groundY + lift + sc(0.36) * (1 - dive) + sc(0.1) * dive, w.z);
+    cam.lookAt(
+      w.x + sx,
+      groundY + lift + sc(0.36) * (1 - dive) + sc(0.1) * dive,
+      w.z + sz,
+    );
   }
 
   // いま立っているヘックスの地形(HUD に出す)
