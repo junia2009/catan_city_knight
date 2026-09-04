@@ -6,6 +6,7 @@ import { RoomCore, IDLE_DISCONNECT_MS } from './room-core.js';
 import { WalkRelay, TICK_MS } from './walk-relay.js';
 import { FishingContest } from './fishing-contest.js';
 import { DragonHunt } from './dragon-hunt.js';
+import { RaidContest } from './raid-contest.js';
 import { hasMeet, meetFor } from '../src/minigame/meets.js';
 import { meetHome } from '../src/minigame/ground.js';
 import { createGame } from '../src/state.js';
@@ -13,7 +14,7 @@ import { createGame } from '../src/state.js';
 // 島ごとの進行。表(src/minigame/meets.js)の id で引く。
 // 表に足したのにここへ書き忘れると、受付は立つのに何も始まらない島ができる
 // ── test/meets.test.js がその食い違いを見張っている。
-const ENGINES = { fishing: FishingContest, dragonhunt: DragonHunt };
+const ENGINES = { fishing: FishingContest, dragonhunt: DragonHunt, raid: RaidContest };
 
 // CPU / 切断中の席をサーバーが打つときの間合い(ローカル戦の演出と揃える)
 const AUTO_DELAY_MS = 650;
@@ -76,11 +77,14 @@ export class RoomDO {
   // 島の形に依るものを進行に渡す。サーバーは盤を持たないので、
   // 必要になったぶんだけここで求める(いまは竜の飛び立つ場所だけ)。
   primeMeet() {
-    if (!this.contest?.setHome) return;
+    const r = this.room;
+    if (!r || !this.contest) return;
+    // 波の抽選に使う種。全員が同じ波を迎え撃つように、サーバーが配る
+    // (server/raid-contest.js)。部屋の種そのものは既に全員が持っている。
+    this.contest.setSeed?.(r.seed);
+    if (!this.contest.setHome) return;
     // 島はクライアントと同じ「種 + 島の種類」から作る(main.js の
     // makeWalkIsland と同じ引数でないと、竜が別の島の中心から飛び立つ)。
-    const r = this.room;
-    if (!r) return;
     const state = createGame({
       seed: r.seed, playerCount: 4, humanIndex: -1, mode: r.settings.mode,
     });
@@ -248,8 +252,14 @@ export class RoomDO {
       const res = this.contest.command(seat, msg.do, msg);
       if (res.error) return this.send(ws, { t: 'error', msg: res.error });
       room.touch();
-      this.broadcastContest();
       this.startWalkTick();   // 大会中は誰も動かなくても時間を進める
+      // 点の申告(quiet)は配り直しも保存もしない。矢が当たるたびに全員へ
+      // 表を配ると、受け取った側が秒に何度も順位を描き直すことになるし
+      // (実機の指が効かなくなる ── src/render/dom.js)、当たるたびに
+      // storage へ書くのは高い。1秒ごとの tick が同じ表を運び、結果へ
+      // 移るときに tick が保存するので、締めの点は残る。
+      if (res.quiet) return;
+      this.broadcastContest();
       return this.saveContest();
     }
 

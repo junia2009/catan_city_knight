@@ -67,6 +67,7 @@ function safe(fn, fallback) {
 const UNIT = {
   cities: 'つ', roadLen: '', knights: '体', ships: '隻',
   metropolis: 'つ', defender: '回', maxTrack: 'Lv', treasures: 'つ', islands: 'つ',
+  raidScore: '点', raidWave: '波', raidAcc: '%',
 };
 
 // そのモードで勝った実績(5モードぶん自動で作る)
@@ -258,6 +259,58 @@ export const ACHIEVEMENTS = [
     checkMeet: ({ meets }) => (meets.dragonhunt?.won ?? 0) > 0,
   },
 
+  {
+    id: 'raid-meet-win',
+    name: '射手の頂点',
+    desc: '散策部屋の「蛮族を射る」大会で優勝する',
+    title: '射手頭',
+    icon: '🏅', tier: 'silver', scope: '散策部屋',
+    checkMeet: ({ meets }) => (meets.raid?.won ?? 0) > 0,
+  },
+
+  // ---- 散策部屋(蛮族を射る・ひとりの記録)----
+  //
+  // 大会と違って、ひとりで櫓に立った回でも付く。判定材料は「その端末の
+  // 自己最高」なので、checkRaid を持たせて別の入口(unlockedByRaid)で見る。
+  // mark / goal は**戦績画面の進捗を出すためだけ**に書いてある ── 判定は
+  // checkRaid のほうで、対戦の締めでは passes() が外す(下のコメント参照)。
+  {
+    id: 'raid-wave-3',
+    name: '浜の守り手',
+    desc: '「蛮族を射る」で3波まで凌ぐ',
+    title: '浜の守り手',
+    icon: '🏹', tier: 'bronze', scope: '散策部屋',
+    mark: 'raidWave', goal: 3,
+    checkRaid: ({ raid }) => raid.wave >= 3,
+  },
+  {
+    id: 'raid-score-100',
+    name: '撃退百',
+    desc: '「蛮族を射る」で撃退 100 点を挙げる',
+    title: '弓の名手',
+    icon: '🌊', tier: 'silver', scope: '散策部屋',
+    mark: 'raidScore', goal: 100,
+    checkRaid: ({ raid }) => raid.best >= 100,
+  },
+  {
+    id: 'raid-accuracy',
+    name: '一矢入魂',
+    desc: '20射以上を放った回で、命中率7割を出す',
+    title: '狙撃手',
+    icon: '🎯', tier: 'silver', scope: '散策部屋',
+    mark: 'raidAcc', goal: 70,
+    checkRaid: ({ raid }) => raid.acc >= 70,
+  },
+  {
+    id: 'raid-wave-6',
+    name: '不落の櫓',
+    desc: '「蛮族を射る」で6波まで凌ぐ',
+    title: '櫓の主',
+    icon: '🗼', tier: 'gold', scope: '散策部屋',
+    mark: 'raidWave', goal: 6,
+    checkRaid: ({ raid }) => raid.wave >= 6,
+  },
+
   // ---- 散策部屋(島で見つけたもの)----
   //
   // 勝ち負けではなく「そこへ行った」で付く。大会の結果とも別の入口なので
@@ -272,8 +325,15 @@ export const ACHIEVEMENTS = [
   },
 ];
 
+// 対戦以外の入口(散策部屋)を持つ実績の目印。
+// **この印が付いているものは、対戦の締めでは絶対に付かない。** 進捗を出す
+// ために mark を持たせることがあるので、mark の有無では見分けられない
+// ── 対戦を1戦終えたら散策部屋の実績が付いた、を防ぐのはここ。
+const OTHER_GATES = ['checkMeet', 'checkSeen', 'checkRaid'];
+
 // 数値ものの判定は共通(check を書かなくてよい)
 function passes(a, ctx) {
+  if (OTHER_GATES.some((k) => a[k])) return false;
   if (a.check) return !!a.check(ctx);
   if (a.mark == null) return false;
   if (a.needsWin && !ctx.result.won) return false;
@@ -294,14 +354,13 @@ export function unlockedBy(ctx) {
   return out;
 }
 
-// 釣り大会のほうの判定。対戦の締めとは別の入口にしてある(上のコメント参照)。
-// ctx は { meet } ── 大会の累計( played / won / bestCm )。
-export function unlockedByMeet(ctx) {
+// 散策部屋の入口。gate に書いた判定を持つ実績だけを見る。
+function unlockedVia(gate, ctx) {
   const out = [];
   for (const a of ACHIEVEMENTS) {
-    if (!a.checkMeet) continue;
+    if (!a[gate]) continue;
     try {
-      if (a.checkMeet(ctx)) out.push(a.id);
+      if (a[gate](ctx)) out.push(a.id);
     } catch {
       // この実績だけ見送る
     }
@@ -309,18 +368,20 @@ export function unlockedByMeet(ctx) {
   return out;
 }
 
+// 大会のほうの判定。対戦の締めとは別の入口にしてある(上のコメント参照)。
+// ctx は { meets } ── 遊びごとの累計( played / won / best )。
+export function unlockedByMeet(ctx) {
+  return unlockedVia('checkMeet', ctx);
+}
+
 // 島で見つけたもののほう。ctx は { seen } ── 行った場所の一覧。
 export function unlockedBySeen(ctx) {
-  const out = [];
-  for (const a of ACHIEVEMENTS) {
-    if (!a.checkSeen) continue;
-    try {
-      if (a.checkSeen(ctx)) out.push(a.id);
-    } catch {
-      // この実績だけ見送る
-    }
-  }
-  return out;
+  return unlockedVia('checkSeen', ctx);
+}
+
+// 蛮族を射る(ひとりの記録)のほう。ctx は { raid } ── 自己最高の一式。
+export function unlockedByRaid(ctx) {
+  return unlockedVia('checkRaid', ctx);
 }
 
 // 実績の「どこで取るものか」。モードに紐づかないものは scope に書く。

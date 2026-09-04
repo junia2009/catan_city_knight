@@ -1066,8 +1066,12 @@ export class WalkMode {
       const p = this._posPacket(t);
       if (p) this.onPos(p);
     }
+    // 弓を構えている間は相手を描かない。**同じ櫓に全員が立つ**ので、
+    // そのままだと相手の体と名札が射線の真ん中を塞ぐ。船はひとりずつ
+    // 別に湧いていて(同じ波を各自が迎え撃つ)、相手の居場所は狙いに
+    // 関係しないので、消しても失うものがない。
     // 誰も居なければ sample は空を返すので、そのまま呼んでよい
-    this.remoteView.update(dt, this.remote.sample());
+    this.remoteView.update(dt, this.raid ? [] : this.remote.sample());
   }
 
   // ---- 散策部屋 ----
